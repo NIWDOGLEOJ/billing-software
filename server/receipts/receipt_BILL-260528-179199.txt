@@ -1,0 +1,28 @@
+[CASH DRAWER OPEN POP]RETAIL SUPERMARKET
+123 Main Street, City, State 12345
+Tel: (555) 123-4567
+========================================
+Bill #: BILL-260528-179199
+Date  : 28/5/2026, 10:26:19 am
+Cashier: Test Employee
+----------------------------------------
+Item Name          Qty x Price     Total
+----------------------------------------
+Orange Juice 1L
+  1 x 75.00                       ₹75.00
+----------------------------------------
+Subtotal                          ₹75.00
+CGST (9%)                          ₹4.50
+SGST (9%)                          ₹4.50
+Total GST                          ₹9.00
+========================================
+GRAND TOTAL                       ₹84.00
+========================================
+Payment Mode                        CASH
+
+THANK YOU FOR SHOPPING WITH US!
+--- Please visit again ---
+
+
+
+[PAPER CUT]

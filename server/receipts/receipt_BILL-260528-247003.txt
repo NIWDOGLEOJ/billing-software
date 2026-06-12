@@ -1,0 +1,41 @@
+RETAIL SUPERMARKET
+123 Main Street, City, State 12345
+Tel: (555) 123-4567
+========================================
+Bill #: BILL-260528-247003
+Date  : 28/5/2026, 10:27:27 am
+Cashier: Test Employee
+Cust #: 9444310812
+----------------------------------------
+Item Name          Qty x Price     Total
+----------------------------------------
+Tomatoes 1kg
+  1 x 50.00                       ₹50.00
+Milk 1L
+  1 x 65.00                       ₹65.00
+Orange Juice 1L
+  1 x 75.00                       ₹75.00
+Eggs (12 pack)
+  1 x 80.00                       ₹80.00
+----------------------------------------
+Subtotal                         ₹270.00
+CGST (9%)                         ₹17.82
+SGST (9%)                         ₹17.82
+Total GST                         ₹35.65
+========================================
+GRAND TOTAL                      ₹305.65
+========================================
+Payment Mode                      LEDGER
+Received                         ₹306.00
+Change Due                         ₹0.35
+
+⭐ Total Loyalty Points: 3
+   Points Earned: +3
+💳 Outstanding Ledger: ₹305.65
+
+THANK YOU FOR SHOPPING WITH US!
+--- Please visit again ---
+
+
+
+[PAPER CUT]

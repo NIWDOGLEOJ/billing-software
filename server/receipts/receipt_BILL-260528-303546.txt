@@ -1,0 +1,29 @@
+RETAIL SUPERMARKET
+123 Main Street, City, State 12345
+Tel: (555) 123-4567
+========================================
+Bill #: BILL-260528-303546
+Date  : 28/5/2026, 3:45:03 pm
+Cashier: John Cashier
+----------------------------------------
+Item Name          Qty x Price     Total
+----------------------------------------
+Eggs (12 pack)
+  1 x 80.00                       ₹80.00
+----------------------------------------
+Subtotal                          ₹80.00
+CGST (9%)                          ₹7.20
+SGST (9%)                          ₹7.20
+Total GST                         ₹14.40
+Rounding                          ₹-0.40
+========================================
+GRAND TOTAL                       ₹94.00
+========================================
+Payment Mode                        CASH
+
+THANK YOU FOR SHOPPING WITH US!
+--- Please visit again ---
+
+
+
+[PAPER CUT]

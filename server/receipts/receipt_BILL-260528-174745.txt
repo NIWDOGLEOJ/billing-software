@@ -1,0 +1,29 @@
+RETAIL SUPERMARKET
+123 Main Street, City, State 12345
+Tel: (555) 123-4567
+========================================
+Bill #: BILL-260528-174745
+Date  : 28/5/2026, 2:02:54 pm
+Cashier: Store Owner
+----------------------------------------
+Item Name          Qty x Price     Total
+----------------------------------------
+Chicken Breast 1kg
+  1 x 180.00                     ₹180.00
+----------------------------------------
+Subtotal                         ₹180.00
+CGST (9%)                         ₹16.20
+SGST (9%)                         ₹16.20
+Total GST                         ₹32.40
+Rounding                          ₹-0.40
+========================================
+GRAND TOTAL                      ₹212.00
+========================================
+Payment Mode                        CASH
+
+THANK YOU FOR SHOPPING WITH US!
+--- Please visit again ---
+
+
+
+[PAPER CUT]

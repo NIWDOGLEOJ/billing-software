@@ -1,0 +1,28 @@
+[CASH DRAWER OPEN POP]RESTAURANT & KITCHEN
+88 Food Street, Culinary Lane, City 110001
+Tel: (555) 222-3333
+========================================
+Bill #: BILL-260602-234334
+Date  : 2/6/2026, 1:50:34 am
+Cashier: Developer Account
+----------------------------------------
+Item Name          Qty x Price     Total
+----------------------------------------
+Gulab Jamun (2 pcs)
+  1 x 80.00                       ₹80.00
+----------------------------------------
+Subtotal                          ₹80.00
+CGST (2.5%)                        ₹2.00
+SGST (2.5%)                        ₹2.00
+Total GST                          ₹4.00
+========================================
+GRAND TOTAL                       ₹84.00
+========================================
+Payment Mode                        CASH
+
+THANK YOU FOR SHOPPING WITH US!
+--- Please visit again ---
+
+
+
+[PAPER CUT]

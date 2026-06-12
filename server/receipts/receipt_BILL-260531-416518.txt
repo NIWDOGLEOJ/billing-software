@@ -1,0 +1,39 @@
+RETAIL SUPERMARKET
+123 Main Street, City, State 12345
+Tel: (555) 123-4567
+========================================
+Bill #: BILL-260531-416518
+Date  : 31/5/2026, 4:50:16 pm
+Cashier: John Cashier
+Cust #: 6385410202
+----------------------------------------
+Item Name          Qty x Price     Total
+----------------------------------------
+Milk 1L
+  1 x 65.00                       ₹65.00
+Chicken Breast 1kg
+  1 x 180.00                     ₹180.00
+Bread Loaf
+  1 x 40.00                       ₹40.00
+----------------------------------------
+Subtotal                         ₹285.00
+CGST (9%)                         ₹18.82
+SGST (9%)                         ₹18.82
+Total GST                         ₹37.65
+Rounding                          +₹0.35
+========================================
+GRAND TOTAL                      ₹323.00
+========================================
+Payment Mode                        CASH
+Received                         ₹500.00
+Change Due                       ₹177.00
+
+⭐ Total Loyalty Points: 3
+   Points Earned: +3
+
+THANK YOU FOR SHOPPING WITH US!
+--- Please visit again ---
+
+
+
+[PAPER CUT]

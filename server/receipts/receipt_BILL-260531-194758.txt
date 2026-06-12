@@ -1,0 +1,29 @@
+RETAIL SUPERMARKET
+123 Main Street, City, State 12345
+Tel: (555) 123-4567
+========================================
+Bill #: BILL-260531-194758
+Date  : 31/5/2026, 5:36:34 pm
+Cashier: Developer Account
+----------------------------------------
+Item Name          Qty x Price     Total
+----------------------------------------
+milkmist prime strawberry icecream
+  1 x 250.00                     ₹250.00
+----------------------------------------
+Subtotal                         ₹250.00
+CGST (9%)                          ₹6.25
+SGST (9%)                          ₹6.25
+Total GST                         ₹12.50
+Rounding                          +₹0.50
+========================================
+GRAND TOTAL                      ₹263.00
+========================================
+Payment Mode                        CASH
+
+THANK YOU FOR SHOPPING WITH US!
+--- Please visit again ---
+
+
+
+[PAPER CUT]

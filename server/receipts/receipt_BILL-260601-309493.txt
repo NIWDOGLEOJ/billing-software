@@ -1,0 +1,29 @@
+RETAIL SUPERMARKET
+123 Main Street, City, State 12345
+Tel: (555) 123-4567
+========================================
+Bill #: BILL-260601-309493
+Date  : 1/6/2026, 4:41:49 pm
+Cashier: joel godwin
+----------------------------------------
+Item Name          Qty x Price     Total
+----------------------------------------
+Milk 1L
+  1 x 65.00                       ₹65.00
+----------------------------------------
+Subtotal                          ₹65.00
+CGST (9%)                          ₹1.63
+SGST (9%)                          ₹1.63
+Total GST                          ₹3.25
+Rounding                          ₹-0.25
+========================================
+GRAND TOTAL                       ₹68.00
+========================================
+Payment Mode                        CASH
+
+THANK YOU FOR SHOPPING WITH US!
+--- Please visit again ---
+
+
+
+[PAPER CUT]

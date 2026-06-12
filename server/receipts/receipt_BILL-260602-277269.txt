@@ -1,0 +1,34 @@
+[CASH DRAWER OPEN POP]RESTAURANT & KITCHEN
+88 Food Street, Culinary Lane, City 110001
+Tel: (555) 222-3333
+========================================
+Bill #: BILL-260602-277269
+Date  : 2/6/2026, 6:47:57 pm
+Cashier: Developer Account
+----------------------------------------
+Item Name          Qty x Price     Total
+----------------------------------------
+Non-Veg Thali (Combo)
+  1 x 320.00                     ₹320.00
+Masala Chai
+  1 x 30.00                       ₹30.00
+Chicken Biryani
+  1 x 320.00                     ₹320.00
+Garlic Naan
+  1 x 50.00                       ₹50.00
+----------------------------------------
+Subtotal                         ₹720.00
+CGST (2.5%)                       ₹18.00
+SGST (2.5%)                       ₹18.00
+Total GST                         ₹36.00
+========================================
+GRAND TOTAL                      ₹756.00
+========================================
+Payment Mode                        CASH
+
+THANK YOU FOR SHOPPING WITH US!
+--- Please visit again ---
+
+
+
+[PAPER CUT]
