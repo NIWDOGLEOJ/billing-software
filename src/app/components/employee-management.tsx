@@ -3,6 +3,20 @@ import { useAuth, User, Permission } from '../contexts/auth-context';
 import { useTheme } from '../contexts/theme-context';
 import { api } from '../utils/api';
 import { Plus, Edit2, Trash2, UserCheck, UserX, Save, X, Eye, EyeOff, FileSpreadsheet } from 'lucide-react';
+import { toast } from 'sonner';
+import { updatePointerGlare, SpecularGlareOverlay } from '../utils/glare';
+import { Skeleton } from './ui/skeleton';
+import { PageShell, PageHeader } from './page-shell';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from './ui/alert-dialog';
 
 const ALL_PERMISSIONS: { value: Permission; label: string; description: string }[] = [
   { value: 'access_billing', label: 'Access Billing System', description: 'Can access the billing interface' },
@@ -35,10 +49,16 @@ export function EmployeeManagement() {
 
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Distinguishes "still fetching" from "genuinely no employees" — the list used
+  // to render the empty state during the initial load, which read as data loss.
+  const [isLoading, setIsLoading] = useState(true);
+  const [employeeToDelete, setEmployeeToDelete] = useState<User | null>(null);
 
   useEffect(() => {
     if (isOwner()) {
       loadEmployees();
+    } else {
+      setIsLoading(false);
     }
   }, [isOwner]);
 
@@ -56,14 +76,17 @@ export function EmployeeManagement() {
         createdAt: u.created_at || '',
         isActive: u.is_active
       })));
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to load employees:', e);
+      toast.error(`Couldn't load employees: ${e?.message || 'Server unreachable'}`);
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const downloadEmployeesCsv = () => {
     if (employees.length === 0) {
-      alert('No employee records to export.');
+      toast.error('No employee records to export.');
       return;
     }
 
@@ -169,24 +192,29 @@ export function EmployeeManagement() {
   };
 
   const handleToggleActive = async (employee: User) => {
+    const nextActive = !employee.isActive;
     try {
       await api.put(`/users/${employee.id}`, {
-        is_active: !employee.isActive
+        is_active: nextActive
       });
       await loadEmployees();
-    } catch (e) {
+      toast.success(`${employee.name} ${nextActive ? 'activated' : 'deactivated'}`);
+    } catch (e: any) {
       console.error('Failed to toggle active status:', e);
+      toast.error(`Couldn't update ${employee.name}: ${e?.message || 'Server error'}`);
     }
   };
 
   const handleDeleteEmployee = async (employee: User) => {
-    if (confirm(`Are you sure you want to permanently delete ${employee.name}?`)) {
-      try {
-        await api.delete(`/users/${employee.id}`);
-        await loadEmployees();
-      } catch (e) {
-        console.error('Failed to delete employee:', e);
-      }
+    try {
+      await api.delete(`/users/${employee.id}`);
+      await loadEmployees();
+      toast.success(`${employee.name} deleted`);
+    } catch (e: any) {
+      console.error('Failed to delete employee:', e);
+      toast.error(`Couldn't delete ${employee.name}: ${e?.message || 'Server error'}`);
+    } finally {
+      setEmployeeToDelete(null);
     }
   };
 
@@ -201,72 +229,66 @@ export function EmployeeManagement() {
 
   if (!isOwner()) {
     return (
-      <div className={`p-8 ${darkMode ? 'bg-gray-900' : 'bg-gray-50'} h-full`}>
-        <div className={`${darkMode ? 'bg-red-900/20 border-red-800' : 'bg-red-50 border-red-200'} border rounded-lg p-6 text-center`}>
-          <p className={`${darkMode ? 'text-red-400' : 'text-red-700'}`}>
+      <PageShell>
+        <div className="bg-[var(--danger)]/10 border border-[var(--danger)]/30 rounded-xl p-6 text-center text-[var(--danger)] font-bold">
+          <p>
             Access Denied. Only owners can manage employees.
           </p>
         </div>
-      </div>
+      </PageShell>
     );
   }
 
   return (
-    <div className={`p-8 ${darkMode ? 'bg-gray-900' : 'bg-gray-50'} h-full flex flex-col overflow-hidden`}>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8 flex-shrink-0">
-        <div>
-          <h1 className={`text-4xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'} mb-2`}>
-            Employee Management
-          </h1>
-          <p className={`${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-            Manage employee accounts and permissions
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={downloadEmployeesCsv}
-            className={`flex items-center gap-2 px-5 py-3 ${
-              darkMode ? 'bg-slate-800 hover:bg-slate-700 text-gray-200 border border-slate-700' : 'bg-white hover:bg-gray-55 text-gray-700 border border-gray-350'
-            } font-medium rounded-lg transition-colors shadow-sm`}
-          >
-            <FileSpreadsheet size={20} />
-            Export CSV
-          </button>
-          <button
-            onClick={() => setIsAddingEmployee(true)}
-            className="flex items-center gap-2 px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg transition-colors shadow-sm"
-          >
-            <Plus size={20} />
-            Add Employee
-          </button>
-        </div>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Employee Management"
+        description="Manage employee accounts and permissions"
+        actions={
+          <>
+            <button
+              onClick={downloadEmployeesCsv}
+              className="flex items-center gap-2 px-4 py-2.5 border border-[var(--border-glass)] bg-[var(--input-bg)] text-[var(--text-primary)] hover:bg-[var(--surface-hover)] font-medium text-sm rounded-lg transition-all active:scale-[0.97] cursor-pointer"
+            >
+              <FileSpreadsheet size={18} />
+              Export CSV
+            </button>
+            <button
+              onClick={() => setIsAddingEmployee(true)}
+              className="liquid-glass-button flex items-center gap-2 px-4 py-2.5 text-white font-medium text-sm rounded-lg transition-all shadow-sm active:scale-[0.97] cursor-pointer"
+            >
+              <Plus size={18} />
+              Add Employee
+            </button>
+          </>
+        }
+      />
 
       {/* Scrollable Content Container */}
       <div className="flex-1 overflow-y-auto space-y-6 pr-2 min-h-0">
         {/* Add/Edit Employee Form */}
         {isAddingEmployee && (
-          <div className={`${darkMode ? 'bg-gray-800' : 'bg-white'} rounded-xl shadow-sm p-6 mb-2`}>
-            <div className="flex items-center justify-between mb-6">
-              <h2 className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'}`}>
-                {editingEmployee ? 'Edit Employee' : 'Add New Employee'}
-              </h2>
-              <button
-                onClick={resetForm}
-                className={`p-2 ${darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-100'} rounded-lg transition-colors`}
-              >
-                <X size={20} className={darkMode ? 'text-gray-400' : 'text-gray-600'} />
-              </button>
-            </div>
+          <div 
+            onPointerMove={updatePointerGlare}
+            className="group relative glass-panel backdrop-blur-xl backdrop-saturate-200 border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6),var(--shadow-glass)] p-6 mb-2 overflow-hidden"
+          >
+            <SpecularGlareOverlay />
+            <div className="relative z-10">
+              <div className="flex items-center justify-between mb-6 pb-3 border-b border-[var(--border-glass)] shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6)]">
+                <h2 className="text-2xl font-bold text-[var(--text-primary)]">
+                  {editingEmployee ? 'Edit Employee' : 'Add New Employee'}
+                </h2>
+                <button
+                  onClick={resetForm}
+                  className="p-2 hover:bg-[var(--input-bg)] text-muted-foreground hover:text-[var(--text-primary)] rounded-lg transition-all active:scale-[0.97] cursor-pointer"
+                >
+                  <X size={20} />
+                </button>
+              </div>
 
             {/* Inline Error Banner */}
             {errorMessage && (
-              <div className={`mb-4 flex items-start gap-3 px-4 py-3 rounded-lg border ${
-                darkMode
-                  ? 'bg-red-900/20 border-red-700 text-red-400'
-                  : 'bg-red-50 border-red-300 text-red-700'
-              }`}>
+              <div className="mb-4 flex items-start gap-3 px-4 py-3 rounded-lg border bg-rose-500/10 border-rose-500/30 text-rose-500">
                 <span className="text-lg leading-none mt-0.5">⚠️</span>
                 <div>
                   <p className="text-sm font-semibold">Could not save employee</p>
@@ -281,59 +303,59 @@ export function EmployeeManagement() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
               <div>
-                <label className={`block text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'} mb-2`}>
+                <label className="block text-sm font-medium text-[var(--text-primary)] mb-2">
                   Full Name *
                 </label>
                 <input
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className={`w-full px-4 py-2 border ${darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                  className="w-full px-4 py-2 border border-[var(--border-glass)] bg-[var(--input-bg)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--primary-accent)]"
                   placeholder="John Doe"
                 />
               </div>
 
               <div>
-                <label className={`block text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'} mb-2`}>
+                <label className="block text-sm font-medium text-[var(--text-primary)] mb-2">
                   Username *
                 </label>
                 <input
                   type="text"
                   value={formData.username}
                   onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                  className={`w-full px-4 py-2 border ${darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                  className="w-full px-4 py-2 border border-[var(--border-glass)] bg-[var(--input-bg)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--primary-accent)]"
                   placeholder="johndoe"
                 />
               </div>
 
               <div>
-                <label className={`block text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'} mb-2`}>
+                <label className="block text-sm font-medium text-[var(--text-primary)] mb-2">
                   Email *
                 </label>
                 <input
                   type="email"
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className={`w-full px-4 py-2 border ${darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                  className="w-full px-4 py-2 border border-[var(--border-glass)] bg-[var(--input-bg)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--primary-accent)]"
                   placeholder="john@example.com"
                 />
               </div>
 
               <div>
-                <label className={`block text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'} mb-2`}>
+                <label className="block text-sm font-medium text-[var(--text-primary)] mb-2">
                   Phone Number
                 </label>
                 <input
                   type="tel"
                   value={formData.phone}
                   onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  className={`w-full px-4 py-2 border ${darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                  className="w-full px-4 py-2 border border-[var(--border-glass)] bg-[var(--input-bg)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--primary-accent)]"
                   placeholder="+1 234 567 8900"
                 />
               </div>
 
               <div className="md:col-span-2">
-                <label className={`block text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'} mb-2`}>
+                <label className="block text-sm font-medium text-[var(--text-primary)] mb-2">
                   Password {editingEmployee && '(leave blank to keep current)'}
                 </label>
                 <div className="relative">
@@ -341,7 +363,7 @@ export function EmployeeManagement() {
                     type={showPassword ? 'text' : 'password'}
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    className={`w-full px-4 py-2 pr-12 border ${darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                    className="w-full px-4 py-2 pr-12 border border-[var(--border-glass)] bg-[var(--input-bg)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--primary-accent)]"
                     placeholder={editingEmployee ? 'Enter new password' : 'Enter password'}
                   />
                   <button
@@ -350,9 +372,9 @@ export function EmployeeManagement() {
                     className="absolute inset-y-0 right-0 pr-3 flex items-center"
                   >
                     {showPassword ? (
-                      <EyeOff size={20} className={darkMode ? 'text-gray-500' : 'text-gray-400'} />
+                      <EyeOff size={20} className="text-muted-foreground" />
                     ) : (
-                      <Eye size={20} className={darkMode ? 'text-gray-500' : 'text-gray-400'} />
+                      <Eye size={20} className="text-muted-foreground" />
                     )}
                   </button>
                 </div>
@@ -361,34 +383,30 @@ export function EmployeeManagement() {
 
             {/* Permissions */}
             <div className="mb-6">
-              <h3 className={`text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-800'} mb-4`}>
+              <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-4">
                 Permissions
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {ALL_PERMISSIONS.map((perm) => (
                   <label
                     key={perm.value}
-                    className={`flex items-start p-4 border ${
+                    className={`flex items-start p-4 border rounded-lg cursor-pointer transition-colors ${
                       formData.permissions.includes(perm.value)
-                        ? darkMode
-                          ? 'bg-blue-900/20 border-blue-500'
-                          : 'bg-blue-50 border-blue-500'
-                        : darkMode
-                        ? 'bg-gray-700 border-gray-600'
-                        : 'bg-gray-50 border-gray-300'
-                    } rounded-lg cursor-pointer hover:border-blue-500 transition-colors`}
+                        ? 'bg-[var(--primary-accent)]/15 border-[var(--primary-accent)] text-[var(--text-primary)] shadow-sm'
+                        : 'bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] hover:border-slate-400/50'
+                    }`}
                   >
                     <input
                       type="checkbox"
                       checked={formData.permissions.includes(perm.value)}
                       onChange={() => togglePermission(perm.value)}
-                      className="mt-1 mr-3 w-4 h-4 text-blue-500 border-gray-300 rounded focus:ring-blue-500"
+                      className="mt-1 mr-3 w-4 h-4 text-[var(--primary-accent)] border-[var(--border-glass)] rounded focus:ring-[var(--primary-accent)]"
                     />
                     <div className="flex-1">
-                      <p className={`font-medium ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+                      <p className="font-medium text-[var(--text-primary)]">
                         {perm.label}
                       </p>
-                      <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'} mt-1`}>
+                      <p className="text-sm text-muted-foreground mt-1">
                         {perm.description}
                       </p>
                     </div>
@@ -402,26 +420,53 @@ export function EmployeeManagement() {
               <button
                 onClick={handleSaveEmployee}
                 disabled={!formData.name || !formData.username || !formData.email || (!editingEmployee && !formData.password)}
-                className="flex items-center gap-2 px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="liquid-glass-button text-white flex items-center gap-2 px-6 py-3 font-medium rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-md active:scale-[0.97] cursor-pointer"
               >
                 <Save size={20} />
                 {editingEmployee ? 'Update Employee' : 'Add Employee'}
               </button>
               <button
                 onClick={resetForm}
-                className={`px-6 py-3 ${darkMode ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-800'} font-medium rounded-lg transition-colors`}
+                className="px-6 py-3 border border-[var(--border-glass)] bg-[var(--input-bg)] text-[var(--text-primary)] hover:bg-[var(--bg-glass)] font-medium rounded-lg transition-all active:scale-[0.97] cursor-pointer shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6)]"
               >
                 Cancel
               </button>
             </div>
           </div>
+        </div>
         )}
 
         {/* Employee List */}
         <div className="grid grid-cols-1 gap-4 pr-1">
-          {employees.length === 0 ? (
-            <div className={`${darkMode ? 'bg-gray-800' : 'bg-white'} rounded-xl shadow-sm p-12 text-center`}>
-              <p className={`${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+          {isLoading ? (
+            // Placeholder cards matched to the real row height, so the list
+            // doesn't jump when the data lands.
+            Array.from({ length: 3 }).map((_, i) => (
+              <div
+                key={i}
+                className="glass-panel border-[var(--border-glass)] rounded-xl shadow-sm p-6"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 space-y-3">
+                    <Skeleton className="h-6 w-48" />
+                    <Skeleton className="h-4 w-64" />
+                    <div className="flex gap-2 pt-1">
+                      <Skeleton className="h-5 w-24 rounded-full" />
+                      <Skeleton className="h-5 w-28 rounded-full" />
+                      <Skeleton className="h-5 w-20 rounded-full" />
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Skeleton className="h-9 w-9 rounded-lg" />
+                    <Skeleton className="h-9 w-9 rounded-lg" />
+                    <Skeleton className="h-9 w-9 rounded-lg" />
+                  </div>
+                </div>
+              </div>
+            ))
+          ) : employees.length === 0 ? (
+            <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-sm p-12 text-center">
+              <p className="text-muted-foreground">
                 No employees yet. Click "Add Employee" to get started.
               </p>
             </div>
@@ -429,46 +474,48 @@ export function EmployeeManagement() {
             employees.map((employee) => (
               <div
                 key={employee.id}
-                className={`${darkMode ? 'bg-gray-800' : 'bg-white'} rounded-xl shadow-sm p-6`}
+                onPointerMove={updatePointerGlare}
+                className="group relative glass-panel backdrop-blur-xl backdrop-saturate-200 border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6),var(--shadow-glass)] p-6 overflow-hidden transition-all hover:-translate-y-1 hover:border-[var(--primary-accent)]/40"
               >
-                <div className="flex items-start justify-between">
+                <SpecularGlareOverlay />
+                <div className="relative z-10 flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-2">
-                      <h3 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+                      <h3 className="text-xl font-bold text-[var(--text-primary)]">
                         {employee.name}
                       </h3>
                       <span
                         className={`px-3 py-1 rounded-full text-xs font-medium ${
                           employee.isActive
-                            ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
-                            : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
+                            ? 'bg-emerald-500/20 text-emerald-500'
+                            : 'bg-rose-500/20 text-rose-500'
                         }`}
                       >
                         {employee.isActive ? 'Active' : 'Inactive'}
                       </span>
                     </div>
                     <div className="space-y-1 mb-4">
-                      <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                        <span className="font-medium">Username:</span> {employee.username}
+                      <p className="text-sm text-muted-foreground">
+                        <span className="font-medium text-[var(--text-primary)]">Username:</span> {employee.username}
                       </p>
-                      <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                        <span className="font-medium">Email:</span> {employee.email}
+                      <p className="text-sm text-muted-foreground">
+                        <span className="font-medium text-[var(--text-primary)]">Email:</span> {employee.email}
                       </p>
                       {employee.phone && (
-                        <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                          <span className="font-medium">Phone:</span> {employee.phone}
+                        <p className="text-sm text-muted-foreground">
+                          <span className="font-medium text-[var(--text-primary)]">Phone:</span> {employee.phone}
                         </p>
                       )}
                     </div>
 
                     {/* Permissions */}
                     <div>
-                      <p className={`text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'} mb-2`}>
+                      <p className="text-sm font-medium text-[var(--text-primary)] mb-2">
                         Permissions:
                       </p>
                       <div className="flex flex-wrap gap-2">
                         {employee.permissions.length === 0 ? (
-                          <span className={`text-sm ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
+                          <span className="text-sm text-muted-foreground">
                             No permissions assigned
                           </span>
                         ) : (
@@ -477,7 +524,7 @@ export function EmployeeManagement() {
                             return (
                               <span
                                 key={perm}
-                                className={`px-3 py-1 ${darkMode ? 'bg-blue-900/20 text-blue-400' : 'bg-blue-100 text-blue-700'} rounded-full text-xs font-medium`}
+                                className="px-3 py-1 bg-[var(--primary-accent)]/15 border border-[var(--primary-accent)]/30 text-[var(--primary-accent)] rounded-full text-xs font-medium"
                               >
                                 {permData?.label || perm}
                               </span>
@@ -492,36 +539,32 @@ export function EmployeeManagement() {
                   <div className="flex gap-2 ml-4">
                     <button
                       onClick={() => handleEditEmployee(employee)}
-                      className={`p-2 ${darkMode ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-100 hover:bg-gray-200'} rounded-lg transition-colors`}
+                      className="p-2 border border-[var(--border-glass)] bg-[var(--input-bg)] hover:bg-[var(--bg-glass)] text-[var(--text-primary)] rounded-lg transition-all active:scale-[0.97] cursor-pointer shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6)]"
                       title="Edit"
                     >
-                      <Edit2 size={18} className={darkMode ? 'text-gray-300' : 'text-gray-600'} />
+                      <Edit2 size={18} />
                     </button>
                     <button
                       onClick={() => handleToggleActive(employee)}
-                      className={`p-2 ${
+                      className={`p-2 rounded-lg transition-all active:scale-[0.97] cursor-pointer border ${
                         employee.isActive
-                          ? darkMode
-                            ? 'bg-orange-900/20 hover:bg-orange-900/30'
-                            : 'bg-orange-100 hover:bg-orange-200'
-                          : darkMode
-                          ? 'bg-green-900/20 hover:bg-green-900/30'
-                          : 'bg-green-100 hover:bg-green-200'
-                      } rounded-lg transition-colors`}
+                          ? 'bg-amber-500/10 border-amber-500/30 text-amber-500 hover:bg-amber-500/20'
+                          : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/20'
+                      }`}
                       title={employee.isActive ? 'Deactivate' : 'Activate'}
                     >
                       {employee.isActive ? (
-                        <UserX size={18} className={darkMode ? 'text-orange-400' : 'text-orange-600'} />
+                        <UserX size={18} />
                       ) : (
-                        <UserCheck size={18} className={darkMode ? 'text-green-400' : 'text-green-600'} />
+                        <UserCheck size={18} />
                       )}
                     </button>
                     <button
-                      onClick={() => handleDeleteEmployee(employee)}
-                      className={`p-2 ${darkMode ? 'bg-red-900/20 hover:bg-red-900/30' : 'bg-red-100 hover:bg-red-200'} rounded-lg transition-colors`}
+                      onClick={() => setEmployeeToDelete(employee)}
+                      className="p-2 bg-rose-500/10 border border-rose-500/30 text-rose-500 hover:bg-rose-500/20 rounded-lg transition-all active:scale-[0.97] cursor-pointer"
                       title="Delete"
                     >
-                      <Trash2 size={18} className={darkMode ? 'text-red-400' : 'text-red-600'} />
+                      <Trash2 size={18} />
                     </button>
                   </div>
                 </div>
@@ -530,6 +573,31 @@ export function EmployeeManagement() {
           )}
         </div>
       </div>
-    </div>
+
+      <AlertDialog
+        open={employeeToDelete !== null}
+        onOpenChange={(open) => { if (!open) setEmployeeToDelete(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {employeeToDelete?.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the account and revokes their access. Bills
+              they already rang up are kept. This can't be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { if (employeeToDelete) handleDeleteEmployee(employeeToDelete); }}
+              className="bg-rose-600 text-white hover:bg-rose-700"
+            >
+              Delete employee
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </PageShell>
   );
 }
+

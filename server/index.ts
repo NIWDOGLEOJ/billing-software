@@ -4,6 +4,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { initDb, db, cleanupStaleSessions, getActiveSector } from './db';
 
 // Import routes
@@ -38,6 +39,20 @@ const wss = new WebSocketServer({ noServer: true });
 app.use(cors());
 app.use(express.json());
 
+/**
+ * Per-request context, so broadcast() can tell which client caused a change
+ * without every route having to thread `req` through to it.
+ *
+ * AsyncLocalStorage (rather than a module-level variable) is what makes this
+ * correct when a handler awaits: each request keeps its own store.
+ */
+const requestContext = new AsyncLocalStorage<{ clientId?: string }>();
+
+app.use((req, _res, next) => {
+  const clientId = req.get('x-client-id') || undefined;
+  requestContext.run({ clientId }, () => next());
+});
+
 // Set up WebSocket broadcast helper on app instance
 const clients = new Set<WebSocket>();
 
@@ -52,7 +67,13 @@ interface ClientIdentity {
 const activeClients = new Map<WebSocket, ClientIdentity>();
 
 function broadcast(data: any) {
-  const payload = JSON.stringify(data);
+  // Tag the message with the client whose request triggered it. Receivers use
+  // this to skip their own echo — the tab that just rang up a sale already has
+  // the result and shouldn't re-fetch the whole catalog because of it.
+  const originClientId = requestContext.getStore()?.clientId;
+  const payload = JSON.stringify(
+    originClientId ? { ...data, originClientId } : data
+  );
   for (const client of clients) {
     if (client.readyState === WebSocket.OPEN) {
       client.send(payload);

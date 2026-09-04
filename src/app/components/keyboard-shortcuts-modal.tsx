@@ -17,9 +17,14 @@ export function KeyboardShortcutsModal({ onClose }: KeyboardShortcutsModalProps)
     { key: 'F1', description: 'Select Cash Payment' },
     { key: 'F2', description: 'Select UPI Payment' },
     { key: 'F3', description: 'Select Card Payment' },
+    // F6 books the sale as unpaid credit. It was wired up but undocumented, so
+    // an accidental press silently changed how the sale was recorded.
+    { key: 'F6', description: 'Select Ledger / Khata (records sale as unpaid credit)' },
     { key: 'F4', description: 'Generate Bill / Print Receipt' },
     { key: 'F5', description: 'Start New Bill' },
-    { key: 'ESC', description: 'Clear cart and start new bill (after printing)' },
+    { key: 'F7', description: 'Previous step' },
+    { key: 'F8', description: 'Go to Customer & Payment' },
+    { key: 'ESC', description: 'Close the receipt preview' },
     { key: 'Enter', description: 'Add highlighted search result' },
     { key: '↑ / ↓', description: 'Navigate search results' },
     { key: 'Tab', description: 'Move to next field' },

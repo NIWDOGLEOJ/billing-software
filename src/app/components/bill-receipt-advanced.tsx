@@ -1,8 +1,8 @@
 import { X, Printer, Download, ShoppingCart, Sparkles, Package, TrendingUp, CheckCircle2, ShieldCheck, FileText, Check, Settings, Eye } from 'lucide-react';
 import { useEffect, useRef, useState, useMemo } from 'react';
-import { useTheme } from '../contexts/theme-context';
 import { api } from '../utils/api';
 import { toast } from 'sonner';
+import { updatePointerGlare, SpecularGlareOverlay } from '../utils/glare';
 
 interface BillItem {
   code: string;
@@ -48,9 +48,11 @@ interface BillReceiptProps {
   roundedTotal?: number;
   roundingAdjustment?: number;
   onClose: () => void;
+  onFinalizeBill?: () => Promise<void>;
   customerGstin?: string;
   igst?: number;
   pricingTier?: string;
+  billLocked?: boolean;
 }
 
 export function BillReceipt({
@@ -73,12 +75,12 @@ export function BillReceipt({
   roundedTotal,
   roundingAdjustment,
   onClose,
+  onFinalizeBill,
   customerGstin,
   igst,
   pricingTier,
+  billLocked,
 }: BillReceiptProps) {
-  const { darkMode } = useTheme();
-
   const isInterState = useMemo(() => {
     if (!customerGstin) return false;
     const storeState = '27'; // Maharashtra State Code
@@ -88,6 +90,9 @@ export function BillReceipt({
 
   // Template customizer state variables
   const [selectedTemplate, setSelectedTemplate] = useState<'invoice' | 'thermal'>('invoice');
+  // True while the sale is being recorded on the server, so the print button can
+  // show progress and refuse a second click.
+  const [isFinalizing, setIsFinalizing] = useState(false);
   const [storeLogo, setStoreLogo] = useState<'standard' | 'grocery' | 'tech' | 'apparel'>('standard');
   const [signatoryName, setSignatoryName] = useState(cashierName || 'Store Manager');
   const [customFooter, setCustomFooter] = useState('Thank you for shopping with us! Visit again.');
@@ -263,7 +268,23 @@ export function BillReceipt({
   }, [items, gstEnabled, isInterState]);
 
   // Print function injecting customized overrides for A4 or thermal widths
-  const handlePrint = (template: 'invoice' | 'thermal') => {
+  const handlePrint = async (template: 'invoice' | 'thermal') => {
+    if (isFinalizing) return;
+
+    if (onFinalizeBill && !billLocked) {
+      setIsFinalizing(true);
+      try {
+        await onFinalizeBill();
+      } catch (err) {
+        // The sale was rejected by the server. Abort the print — printing here
+        // would hand the customer a receipt for a sale that does not exist.
+        console.error('Failed to finalize bill before printing:', err);
+        return;
+      } finally {
+        setIsFinalizing(false);
+      }
+    }
+
     const styleElement = document.createElement('style');
     styleElement.id = 'print-style-override';
     
@@ -349,18 +370,16 @@ export function BillReceipt({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/75 backdrop-blur-md flex items-center justify-center z-50 p-4 transition-all duration-300">
-      <div className={`w-full max-w-6xl h-[92vh] flex flex-col md:flex-row rounded-3xl border overflow-hidden shadow-2xl transition-all ${
-        darkMode 
-          ? 'bg-slate-900/98 border-slate-800 text-white shadow-indigo-950/20' 
-          : 'bg-white text-gray-900 border-gray-250 shadow-2xl'
-      }`}>
+    <div className="fixed inset-0 bg-black/75 backdrop-blur-xl backdrop-saturate-200 flex items-center justify-center z-50 p-4 transition-all duration-300">
+      <div 
+        onPointerMove={updatePointerGlare}
+        className="group relative w-full max-w-6xl h-[92vh] flex flex-col md:flex-row rounded-3xl border overflow-hidden shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6),var(--shadow-glass)] transition-all glass-panel border-[var(--border-glass)] text-[var(--text-primary)]"
+      >
+        <SpecularGlareOverlay />
         
         {/* LEFT COLUMN: INTERACTIVE CUSTOMIZATION SIDEBAR */}
-        <div className={`w-full md:w-80 lg:w-[350px] flex-shrink-0 flex flex-col border-b md:border-b-0 md:border-r p-5 overflow-y-auto ${
-          darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-gray-50 border-gray-200'
-        }`}>
-          <div className="flex items-center gap-2 mb-5">
+        <div className="w-full md:w-80 lg:w-[350px] flex-shrink-0 flex flex-col border-b md:border-b-0 md:border-r p-5 overflow-y-auto glass-panel border-[var(--border-glass)] text-[var(--text-primary)] relative z-10">
+          <div className="flex items-center gap-2 mb-5 pb-3 border-b border-[var(--border-glass)] shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6)]">
             <Settings className="w-5 h-5 text-blue-500" />
             <div>
               <h3 className="font-extrabold text-sm uppercase tracking-wider">Reconciliation & Layout</h3>
@@ -376,12 +395,10 @@ export function BillReceipt({
                 <button
                   type="button"
                   onClick={() => { setSelectedTemplate('invoice'); updateSetting('receiptTemplate', 'invoice'); }}
-                  className={`flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border font-bold text-xs transition-all ${
+                  className={`flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border font-bold text-xs transition-all active:scale-[0.97] ${
                     selectedTemplate === 'invoice'
-                      ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-500/10'
-                      : darkMode
-                      ? 'bg-slate-900 border-slate-800 hover:bg-slate-850 text-slate-300'
-                      : 'bg-white border-gray-200 hover:bg-gray-100 text-gray-700'
+                      ? 'glass-btn glass-btn-selected'
+                      : 'glass-btn text-[var(--text-primary)]'
                   }`}
                 >
                   <FileText size={16} />
@@ -390,12 +407,10 @@ export function BillReceipt({
                 <button
                   type="button"
                   onClick={() => { setSelectedTemplate('thermal'); updateSetting('receiptTemplate', 'thermal'); }}
-                  className={`flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border font-bold text-xs transition-all ${
+                  className={`flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border font-bold text-xs transition-all active:scale-[0.97] ${
                     selectedTemplate === 'thermal'
-                      ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-500/10'
-                      : darkMode
-                      ? 'bg-slate-900 border-slate-800 hover:bg-slate-850 text-slate-300'
-                      : 'bg-white border-gray-200 hover:bg-gray-100 text-gray-700'
+                      ? 'glass-btn glass-btn-selected'
+                      : 'glass-btn text-[var(--text-primary)]'
                   }`}
                 >
                   <Printer size={16} />
@@ -413,12 +428,10 @@ export function BillReceipt({
                     key={logo}
                     type="button"
                     onClick={() => { setStoreLogo(logo); updateSetting('receiptLogo', logo); }}
-                    className={`p-2 rounded-lg border flex items-center justify-center transition-all ${
+                    className={`p-2 rounded-lg border flex items-center justify-center transition-all active:scale-[0.97] ${
                       storeLogo === logo
                         ? 'bg-blue-600/10 border-blue-500 text-blue-500'
-                        : darkMode
-                        ? 'bg-slate-900 border-slate-800 hover:bg-slate-850 text-slate-400 hover:text-slate-200'
-                        : 'bg-white border-gray-200 hover:bg-gray-100 text-gray-500 hover:text-gray-800'
+                        : 'bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                     }`}
                   >
                     {logo === 'grocery' && <ShoppingCart size={15} />}
@@ -438,9 +451,7 @@ export function BillReceipt({
                   type="text"
                   value={signatoryName}
                   onChange={(e) => { setSignatoryName(e.target.value); updateSetting('receiptSignatory', e.target.value); }}
-                  className={`w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                    darkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-gray-300 text-gray-900'
-                  }`}
+                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                 />
               </div>
 
@@ -451,9 +462,7 @@ export function BillReceipt({
                     rows={3}
                     value={customInvoiceNote}
                     onChange={(e) => { setCustomInvoiceNote(e.target.value); updateSetting('customInvoiceNote', e.target.value); }}
-                    className={`w-full px-3 py-2 text-[11px] border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                      darkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-gray-300 text-gray-900'
-                    }`}
+                    className="w-full px-3 py-2 text-[11px] border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                   />
                 </div>
               ) : (
@@ -463,16 +472,14 @@ export function BillReceipt({
                     rows={2}
                     value={customFooter}
                     onChange={(e) => { setCustomFooter(e.target.value); updateSetting('receiptFooter', e.target.value); }}
-                    className={`w-full px-3 py-2 text-[11px] border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                      darkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-gray-300 text-gray-900'
-                    }`}
+                    className="w-full px-3 py-2 text-[11px] border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                   />
                 </div>
               )}
             </div>
 
             {/* Feature Toggles */}
-            <div className="space-y-2.5 pt-2 border-t border-dashed dark:border-slate-800 border-gray-250">
+            <div className="space-y-2.5 pt-2 border-t border-dashed border-[var(--border-glass)]">
               <label className="text-[10px] font-black uppercase opacity-65 tracking-wider block mb-1">Toggle Invoice Sections</label>
               
               <label className="flex items-center justify-between text-xs font-semibold select-none cursor-pointer">
@@ -507,12 +514,10 @@ export function BillReceipt({
             </div>
           </div>
 
-          <div className="pt-4 border-t dark:border-slate-800 border-gray-250 mt-5">
+          <div className="pt-4 border-t border-[var(--border-glass)] mt-5">
             <button
               onClick={onClose}
-              className={`w-full py-2.5 rounded-xl font-extrabold text-xs transition-all uppercase tracking-wider ${
-                darkMode ? 'bg-slate-850 hover:bg-slate-800 text-slate-300' : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
-              }`}
+              className="glass-btn w-full py-2.5 rounded-xl font-extrabold text-xs uppercase tracking-wider"
             >
               Close Previewer
             </button>
@@ -520,13 +525,9 @@ export function BillReceipt({
         </div>
 
         {/* RIGHT COLUMN: LIVE INTERACTIVE PREVIEW & ACTIONS */}
-        <div className={`flex-1 flex flex-col min-w-0 ${
-          darkMode ? 'bg-slate-950/20' : 'bg-gray-100'
-        }`}>
+        <div className="flex-1 flex flex-col min-w-0 bg-[var(--bg-glass)] relative z-10">
           {/* Action Header */}
-          <div className={`flex justify-between items-center px-6 py-4 border-b print:hidden transition-colors ${
-            darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200'
-          }`}>
+          <div className="flex justify-between items-center px-6 py-4 border-b print:hidden transition-colors bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6)]">
             <div className="flex items-center gap-2">
               <Eye className="w-5 h-5 text-blue-500" />
               <span className="font-bold text-sm">Interactive Live preview ({selectedTemplate === 'invoice' ? 'Tax Invoice A4' : 'Compact POS Receipt 80mm'})</span>
@@ -535,19 +536,20 @@ export function BillReceipt({
               <button
                 type="button"
                 onClick={() => handlePrint(selectedTemplate)}
-                className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-extrabold text-xs shadow-lg shadow-blue-500/10 transition-all select-none cursor-pointer transform active:scale-95"
+                disabled={isFinalizing}
+                className="glass-btn glass-btn-accent flex items-center gap-2 px-5 py-2.5 rounded-xl font-extrabold text-xs select-none cursor-pointer disabled:cursor-not-allowed"
               >
-                <Printer size={15} />
-                Print / Save PDF
+                <Printer size={15} className={isFinalizing ? 'animate-pulse' : undefined} />
+                {isFinalizing
+                  ? 'Recording sale…'
+                  : !billLocked
+                    ? 'Finalize & Print Invoice'
+                    : 'Print / Save PDF'}
               </button>
               <button
                 type="button"
                 onClick={onClose}
-                className={`p-2 rounded-xl transition-colors cursor-pointer border ${
-                  darkMode 
-                    ? 'hover:bg-slate-800 border-slate-800 text-slate-400 hover:text-white' 
-                    : 'hover:bg-gray-50 border-gray-250 text-gray-500 hover:text-gray-800 bg-white'
-                }`}
+                className="p-2 rounded-xl transition-colors cursor-pointer border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)] active:scale-[0.97]"
               >
                 <X size={20} />
               </button>
@@ -568,7 +570,7 @@ export function BillReceipt({
                 {/* Invoice Header */}
                 <div className="flex justify-between items-start border-b-2 border-gray-200 pb-5 mb-5">
                   <div className="flex items-start gap-4">
-                    <div className="p-3 bg-gray-50 border border-gray-150 rounded-xl mt-1 print:p-0 print:border-none">
+                    <div className="p-3 bg-gray-50 border border-[var(--border-glass)] rounded-xl mt-1 print:p-0 print:border-none">
                       {renderStoreLogo()}
                     </div>
                     <div>
@@ -590,7 +592,7 @@ export function BillReceipt({
                 <div className="grid grid-cols-2 gap-6 bg-slate-50 border border-gray-200 rounded-xl p-4 mb-5 text-xs">
                   <div>
                     <h4 className="font-black text-[10px] uppercase tracking-wider text-gray-400 mb-2">Billed To (Customer Details)</h4>
-                    <p className="font-black text-sm text-slate-850">{customerName || 'Cash Customer'}</p>
+                    <p className="font-black text-sm text-[var(--text-primary)]">{customerName || 'Cash Customer'}</p>
                     <p className="text-gray-500 font-medium mt-1">Phone: {customerPhone || 'N/A'}</p>
                     {customerGstin && (
                       <p className="text-emerald-600 font-extrabold mt-1 text-[10px] uppercase tracking-wide font-mono select-all">
@@ -621,7 +623,7 @@ export function BillReceipt({
                        <th className="px-1.5 py-2.5 text-center">Unit</th>
                        <th className="px-1.5 py-2.5 text-center">Qty</th>
                        <th className="px-2 py-2.5 text-right">Rate</th>
-                       <th className="px-2 py-2.5 text-right text-purple-650">Disc</th>
+                       <th className="px-2 py-2.5 text-right text-purple-600">Disc</th>
                        <th className="px-2 py-2.5 text-right">Taxable Val</th>
                        <th className="px-1.5 py-2.5 text-center">GST%</th>
                        {isInterState ? (
@@ -660,7 +662,7 @@ export function BillReceipt({
                                </p>
                              )}
                              {item.dosage && (
-                               <p className="text-[8.5px] text-teal-650 font-black tracking-wide uppercase mt-0.5 font-mono">
+                               <p className="text-[8.5px] text-teal-600 font-black tracking-wide uppercase mt-0.5 font-mono">
                                  💊 Dosage: {item.dosage}
                                </p>
                              )}
@@ -670,7 +672,7 @@ export function BillReceipt({
                            <td className="px-1.5 py-2.5 text-center text-[10px] font-medium text-slate-600">{item.uom || 'PCS'}</td>
                            <td className="px-1.5 py-2.5 text-center font-bold text-slate-800">{qty}</td>
                            <td className="px-2 py-2.5 text-right font-mono text-[10px]">₹{origPrice.toFixed(2)}</td>
-                           <td className="px-2 py-2.5 text-right font-mono text-purple-650 text-[10px]">
+                           <td className="px-2 py-2.5 text-right font-mono text-purple-600 text-[10px]">
                              {discAmountPerUnit > 0 ? (
                                <span>-₹{totalDiscVal.toFixed(2)}</span>
                              ) : (
@@ -700,7 +702,7 @@ export function BillReceipt({
                   {/* Left Column: Terms & E2EE Verification Stamp */}
                   <div className="space-y-4">
                     {/* Invoice Note */}
-                    <div className="p-3 bg-slate-50 border border-gray-150 rounded-xl text-[10px] leading-relaxed text-gray-500">
+                    <div className="p-3 bg-slate-50 border border-[var(--border-glass)] rounded-xl text-[10px] leading-relaxed text-gray-500">
                       <span className="font-bold uppercase tracking-wider text-slate-700 block mb-1">Invoice Remarks:</span>
                       {customInvoiceNote}
                     </div>
@@ -787,7 +789,7 @@ export function BillReceipt({
                 {showGstBreakup && gstEnabled && hsnSlabList.length > 0 && (
                   <div className="mt-6 border-t border-gray-200 pt-4">
                     <p className="text-[10px] font-black uppercase tracking-wider text-slate-600 mb-2">GST Outward Supplies HSN Breakup</p>
-                    <table className="w-full text-left text-[10px] border-collapse border border-gray-150 rounded-lg overflow-hidden">
+                    <table className="w-full text-left text-[10px] border-collapse border border-[var(--border-glass)] rounded-lg overflow-hidden">
                       <thead>
                         <tr className="bg-slate-50 border-b border-gray-200 text-slate-600 font-bold uppercase text-[8px] tracking-wider">
                           <th className="px-3 py-2">HSN Code</th>
@@ -804,7 +806,7 @@ export function BillReceipt({
                           <th className="px-3 py-2 text-right">Total Tax Amount</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-150 text-slate-700">
+                      <tbody className="divide-y divide-gray-100 text-slate-700">
                         {hsnSlabList.map((slab) => (
                           <tr key={`${slab.hsnCode}_${slab.gstRate}`}>
                             <td className="px-3 py-2 font-mono font-bold text-blue-500">{slab.hsnCode}</td>
@@ -873,7 +875,7 @@ export function BillReceipt({
                   <div className="inline-block p-2 bg-gray-50 border rounded-full mb-2">
                     {renderStoreLogo()}
                   </div>
-                  <h1 className="text-lg font-black uppercase tracking-tight text-slate-850">{shopDetails.name}</h1>
+                  <h1 className="text-lg font-black uppercase tracking-tight text-[var(--text-primary)]">{shopDetails.name}</h1>
                   <p className="text-[10px] text-gray-500 leading-tight mt-0.5">{shopDetails.address}</p>
                   <p className="text-[10px] text-gray-500 mt-0.5">Phone: {shopDetails.phone}</p>
                 </div>
@@ -919,16 +921,16 @@ export function BillReceipt({
 
                       return (
                         <div key={idx} className="space-y-0.5">
-                          <div className="flex justify-between font-bold text-slate-850">
+                          <div className="flex justify-between font-bold text-[var(--text-primary)]">
                             <span>
                               {item.name}
                               {item.selectedBatch && (
-                                <span className="text-[8.5px] text-cyan-650 font-black block tracking-wider mt-0.5">
+                                <span className="text-[8.5px] text-cyan-600 font-black block tracking-wider mt-0.5">
                                   🧪 [BATCH: {item.selectedBatch}]
                                 </span>
                               )}
                               {item.dosage && (
-                                <span className="text-[8.5px] text-teal-650 font-black block tracking-wider mt-0.5">
+                                <span className="text-[8.5px] text-teal-600 font-black block tracking-wider mt-0.5">
                                   💊 [DOSAGE: {item.dosage}]
                                 </span>
                               )}
@@ -981,7 +983,7 @@ export function BillReceipt({
                     </div>
                   )}
 
-                  <div className="flex justify-between font-black text-base text-slate-850 pt-1">
+                  <div className="flex justify-between font-black text-base text-[var(--text-primary)] pt-1">
                     <span>GRAND TOTAL:</span>
                     <span className="font-mono text-blue-600 text-lg">₹{total.toFixed(2)}</span>
                   </div>
@@ -1015,7 +1017,7 @@ export function BillReceipt({
                   <p className="text-[10px] font-bold text-slate-800 italic">"{customFooter}"</p>
                   
                   {showVerificationStamp && (
-                    <div className="border border-emerald-500 border-dashed rounded-lg p-1.5 bg-emerald-500/[0.01] text-emerald-600 inline-block mx-auto text-center">
+                    <div className="border border-emerald-500 border-dashed rounded-lg p-1.5 bg-emerald-500/[0.05] text-emerald-600 inline-block mx-auto text-center">
                       <div className="flex items-center justify-center gap-1 font-bold text-[7px] uppercase">
                         <ShieldCheck size={9} />
                         <span>Cryptosignature verified</span>
@@ -1034,13 +1036,11 @@ export function BillReceipt({
           </div>
 
           {/* Bottom Actions Panel */}
-          <div className={`flex gap-3 p-4 border-t print:hidden sticky bottom-0 z-10 transition-colors ${
-            darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200'
-          }`}>
+          <div className="flex gap-3 p-4 border-t border-[var(--border-glass)] print:hidden sticky bottom-0 z-10 glass-panel rounded-none">
             <button
               type="button"
               onClick={() => handlePrint(selectedTemplate)}
-              className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold py-3.5 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer text-xs uppercase tracking-wider shadow-lg shadow-emerald-500/10"
+              className="glass-btn glass-btn-accent flex-1 font-extrabold py-3.5 rounded-xl flex items-center justify-center gap-2 cursor-pointer text-xs uppercase tracking-wider"
             >
               <Download size={16} />
               Print / Save PDF
@@ -1048,7 +1048,7 @@ export function BillReceipt({
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-extrabold py-3.5 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer text-xs uppercase tracking-wider shadow-lg shadow-blue-500/10"
+              className="glass-btn flex-1 font-extrabold py-3.5 rounded-xl flex items-center justify-center gap-2 cursor-pointer text-xs uppercase tracking-wider"
             >
               New Bill (ESC)
             </button>

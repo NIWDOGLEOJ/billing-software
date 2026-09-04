@@ -1,0 +1,28 @@
+[CASH DRAWER OPEN POP]RETAIL SUPERMARKET
+123 Main Street, City, State 12345
+Tel: (555) 123-4567
+========================================
+Bill #: BILL-260731-384345
+Date  : 31/7/2026, 12:19:44 am
+Cashier: Developer Account
+----------------------------------------
+Item Name          Qty x Price     Total
+----------------------------------------
+Fortune Sunlite Oil 1L
+  4 x 155.00                     ₹620.00
+----------------------------------------
+Subtotal                         ₹620.00
+CGST (9%)                         ₹15.50
+SGST (9%)                         ₹15.50
+Total GST                         ₹31.00
+========================================
+GRAND TOTAL                      ₹651.00
+========================================
+Payment Mode                        CASH
+
+THANK YOU FOR SHOPPING WITH US!
+--- Please visit again ---
+
+
+
+[PAPER CUT]

@@ -429,7 +429,7 @@ export function E2EEChatbox() {
         >
           {/* Header */}
           <div className={`p-3.5 border-b flex justify-between items-center flex-shrink-0 ${
-            darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-gray-50 border-gray-150'
+            darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-gray-50 border-[var(--border-glass)]'
           }`}>
             <div>
               <div className="flex items-center gap-1.5">
@@ -472,7 +472,7 @@ export function E2EEChatbox() {
           {/* Developer Navigation Tabs */}
           {user?.username === 'developer' && (
             <div className={`flex border-b text-[10px] uppercase font-black tracking-wider flex-shrink-0 ${
-              darkMode ? 'border-slate-800 bg-slate-950/20' : 'border-gray-150 bg-gray-50/50'
+              darkMode ? 'border-slate-800 bg-slate-950/20' : 'border-[var(--border-glass)] bg-gray-50/50'
             }`}>
               <button
                 onClick={() => setDevViewMode('chat')}
@@ -500,7 +500,7 @@ export function E2EEChatbox() {
           {/* Encryption Key Settings Panel */}
           {showSettings && (
             <div className={`p-3.5 border-b space-y-2.5 flex-shrink-0 animate-slideDown ${
-              darkMode ? 'bg-slate-950/20 border-slate-800' : 'bg-gray-50/50 border-gray-150'
+              darkMode ? 'bg-slate-950/20 border-slate-800' : 'bg-gray-50/50 border-[var(--border-glass)]'
             }`}>
               <div>
                 <label className={`block text-[10px] font-black uppercase tracking-wider mb-1 ${darkMode ? 'text-slate-400' : 'text-gray-500'}`}>
@@ -526,7 +526,7 @@ export function E2EEChatbox() {
             <>
               {/* Archive Explorer Filter Panel */}
               <div className={`p-3.5 border-b space-y-2.5 flex-shrink-0 animate-slideDown ${
-                darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-gray-50/50 border-gray-150'
+                darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-gray-50/50 border-[var(--border-glass)]'
               }`}>
                 <div className="grid grid-cols-2 gap-2.5">
                   <div>
@@ -538,7 +538,7 @@ export function E2EEChatbox() {
                       value={archiveDate}
                       onChange={(e) => setArchiveDate(e.target.value)}
                       className={`w-full px-2.5 py-1.5 border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-purple-500/25 ${
-                        darkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-gray-350 text-gray-700'
+                        darkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-gray-300 text-gray-700'
                       }`}
                     />
                   </div>
@@ -550,7 +550,7 @@ export function E2EEChatbox() {
                       value={archiveSender}
                       onChange={(e) => setArchiveSender(e.target.value)}
                       className={`w-full px-2 py-1.5 border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-purple-500/25 ${
-                        darkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-gray-350 text-gray-700'
+                        darkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-gray-300 text-gray-700'
                       }`}
                     >
                       <option value="All">All Senders</option>
@@ -617,7 +617,7 @@ export function E2EEChatbox() {
             <>
               {/* Dynamic Conversation Tabs */}
               <div className={`px-3 py-2 border-b flex items-center gap-1.5 overflow-x-auto no-scrollbar flex-shrink-0 ${
-                darkMode ? 'bg-slate-900/60 border-slate-800/80' : 'bg-gray-50/70 border-gray-150'
+                darkMode ? 'bg-slate-900/60 border-slate-800/80' : 'bg-gray-50/70 border-[var(--border-glass)]'
               }`}>
                 {/* Broadcast Option */}
                 <button
@@ -626,7 +626,7 @@ export function E2EEChatbox() {
                   className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer flex items-center gap-1 hover:scale-105 active:scale-95 ${
                     recipientName === 'All'
                       ? 'bg-purple-600 text-white shadow-sm'
-                      : (darkMode ? 'bg-slate-950 text-slate-400 hover:text-white hover:bg-slate-800' : 'bg-white text-gray-600 hover:text-gray-900 border border-gray-250 hover:bg-gray-50')
+                      : (darkMode ? 'bg-slate-950 text-slate-400 hover:text-white hover:bg-slate-800' : 'bg-white text-gray-600 hover:text-gray-900 border border-[var(--border-glass)] hover:bg-gray-50')
                   }`}
                 >
                   <span>📣 Broadcast</span>
@@ -687,10 +687,10 @@ export function E2EEChatbox() {
                         className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wider transition-all whitespace-nowrap flex items-center gap-1.5 hover:scale-105 active:scale-95 cursor-pointer ${
                           recipientName === name
                             ? 'bg-purple-600 text-white shadow-sm'
-                            : (darkMode ? 'bg-slate-950 text-slate-400 hover:text-white hover:bg-slate-800' : 'bg-white text-gray-600 hover:text-gray-900 border border-gray-250 hover:bg-gray-50')
+                            : (darkMode ? 'bg-slate-950 text-slate-400 hover:text-white hover:bg-slate-800' : 'bg-white text-gray-600 hover:text-gray-900 border border-[var(--border-glass)] hover:bg-gray-50')
                         }`}
                       >
-                        <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-450'}`}></span>
+                        <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`}></span>
                         <span>{name}</span>
                         {privateMsgCount > 0 && (
                           <span className={`px-1 py-0.5 rounded-full text-[7px] font-black ${
@@ -774,7 +774,7 @@ export function E2EEChatbox() {
 
               {/* Recipient Indicator */}
               <div className={`px-3 py-1.5 border-t flex items-center justify-between gap-2 text-[10px] flex-shrink-0 ${
-                darkMode ? 'bg-slate-950/20 border-slate-800/80 text-slate-300' : 'bg-gray-50/50 border-gray-150 text-gray-600'
+                darkMode ? 'bg-slate-950/20 border-slate-800/80 text-slate-300' : 'bg-gray-50/50 border-[var(--border-glass)] text-gray-600'
               }`}>
                 <span className="font-black flex items-center gap-1 uppercase tracking-wider text-[8px] opacity-75">
                   <Users size={11} className="text-purple-400" />
@@ -793,7 +793,7 @@ export function E2EEChatbox() {
               <form 
                 onSubmit={handleSendMessage}
                 className={`p-3 border-t flex gap-2 flex-shrink-0 ${
-                  darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-150'
+                  darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-[var(--border-glass)]'
                 }`}
               >
                 <button
@@ -802,7 +802,7 @@ export function E2EEChatbox() {
                   title="Transfer active bill via secure E2EE chat"
                   className={`p-2 rounded-xl border flex items-center justify-center transition-all cursor-pointer hover:scale-105 active:scale-95 ${
                     darkMode
-                      ? 'border-slate-800 bg-slate-950/60 text-purple-400 hover:bg-slate-850 hover:text-purple-300'
+                      ? 'border-slate-800 bg-slate-950/60 text-purple-400 hover:bg-[var(--surface-hover)] hover:text-purple-300'
                       : 'border-gray-300 bg-gray-50 text-purple-600 hover:bg-gray-100 hover:text-purple-700'
                   }`}
                 >

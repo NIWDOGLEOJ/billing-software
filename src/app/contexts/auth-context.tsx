@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { api, setToken, clearToken } from '../utils/api';
 
 export type Permission =
@@ -337,32 +337,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(interval);
   }, [currentSession]);
 
-  // Synchronous Unload / Tab Close Session termination (using keepalive fetch)
-  useEffect(() => {
-    if (!currentSession) return;
-
-    const handleUnload = () => {
-      const token = localStorage.getItem('authToken');
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
-      fetch('/api/auth/logout', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ sessionId: currentSession.id }),
-        keepalive: true
-      }).catch(e => console.error('Keepalive unload logout failed:', e));
-    };
-
-    window.addEventListener('beforeunload', handleUnload);
-    window.addEventListener('pagehide', handleUnload);
-    return () => {
-      window.removeEventListener('beforeunload', handleUnload);
-      window.removeEventListener('pagehide', handleUnload);
-    };
-  }, [currentSession]);
+  // NOTE: there used to be a `beforeunload`/`pagehide` handler here that POSTed
+  // to /auth/logout with a keepalive fetch, to close the attendance session when
+  // the till app was closed.
+  //
+  // Both of those events also fire on an ordinary page refresh, so pressing F5 —
+  // or the browser restoring the tab — terminated the session server-side. The
+  // next API call then 401'd, which wiped localStorage and bounced the cashier
+  // to the login screen, mid-bill.
+  //
+  // The session still closes on a real tab close: the 30s heartbeat above stops,
+  // and cleanupStaleSessions() on the server closes anything idle for more than
+  // two minutes. That path is also *more* accurate for attendance, because it
+  // records logout_time as the last heartbeat rather than the unload moment.
 
   const login = async (
     username: string,
@@ -511,15 +498,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const hasPermission = (permission: Permission): boolean => {
+  // These two are read helpers that consumers put straight into useEffect and
+  // useCallback dependency arrays. As plain functions they got a fresh identity
+  // on every provider render, so analytics re-fetched /bills and /shifts — and
+  // employee-management re-fetched the whole staff list — every time any auth
+  // state changed anywhere. Keeping their identity stable stops that.
+  const hasPermission = useCallback((permission: Permission): boolean => {
     if (!user) return false;
     if (user.role === 'owner' || user.role === 'co-owner') return true;
     return user.permissions.includes(permission);
-  };
+  }, [user]);
 
-  const isOwner = (): boolean => {
+  const isOwner = useCallback((): boolean => {
     return user?.role === 'owner' || user?.role === 'co-owner';
-  };
+  }, [user?.role]);
 
   const startBreak = async () => {
     if (!user || isOnBreak) return;

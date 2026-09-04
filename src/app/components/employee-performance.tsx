@@ -4,6 +4,7 @@ import { useTheme } from '../contexts/theme-context';
 import { SavedBill } from './cashier-billing-advanced';
 import { api } from '../utils/api';
 import { useWebSocket } from '../hooks/useWebSocket';
+import { updatePointerGlare, SpecularGlareOverlay } from '../utils/glare';
 import {
   Trophy,
   TrendingUp,
@@ -235,13 +236,10 @@ export function EmployeePerformance() {
     });
   }, [employees, bills, sessions, breaks]);
 
-  // Summary metrics
   const summaryMetrics = useMemo(() => {
-    const activeEmployees = employeeMetrics.filter(m => m.isActive).length;
-    const totalBills = employeeMetrics.reduce((sum, m) => sum + m.billsToday, 0);
-    const topPerformer = employeeMetrics.reduce((top, current) => 
-      current.totalSales > (top?.totalSales || 0) ? current : top
-    , employeeMetrics[0]);
+    const activeEmployees = employeeMetrics.filter((m) => m.isActive).length;
+    const totalBills = employeeMetrics.reduce((acc, m) => acc + m.billsToday, 0);
+    const topPerformer = [...employeeMetrics].sort((a, b) => b.totalSales - a.totalSales)[0];
 
     return {
       activeEmployees,
@@ -250,25 +248,20 @@ export function EmployeePerformance() {
     };
   }, [employeeMetrics]);
 
-  const formatDuration = (ms: number) => {
-    const hours = Math.floor(ms / (1000 * 60 * 60));
-    const minutes = Math.floor((ms % (1000 * 60 * 60)) / (1000 * 60));
-    return `${hours}h ${minutes}m`;
-  };
-
-  const formatTime = (isoString: string) => {
-    if (!isoString) return 'N/A';
-    return new Date(isoString).toLocaleTimeString('en-US', { 
-      hour: '2-digit', 
-      minute: '2-digit' 
-    });
+  const formatDuration = (seconds: number) => {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    if (hours > 0) {
+      return `${hours}h ${minutes}m`;
+    }
+    return `${minutes}m`;
   };
 
   if (!isOwner()) {
     return (
-      <div className={`p-8 ${darkMode ? 'bg-gray-900' : 'bg-gray-50'} h-full`}>
-        <div className={`${darkMode ? 'bg-red-900/20 border-red-800' : 'bg-red-50 border-red-200'} border rounded-lg p-6 text-center`}>
-          <p className={`${darkMode ? 'text-red-400' : 'text-red-700'}`}>
+      <div className="p-8 bg-[var(--bg-glass)] text-[var(--text-primary)] h-full">
+        <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-6 text-center text-rose-500 font-bold">
+          <p>
             Access Denied. Only owners can view employee performance.
           </p>
         </div>
@@ -278,10 +271,10 @@ export function EmployeePerformance() {
 
   if (loading) {
     return (
-      <div className={`p-8 ${darkMode ? 'bg-gray-900 text-white' : 'bg-gray-50 text-gray-800'} h-full flex items-center justify-center`}>
+      <div className="p-8 bg-[var(--bg-glass)] text-[var(--text-primary)] h-full flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className={`${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Loading employee performance metrics...</p>
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[var(--primary-accent)] mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Loading employee performance metrics...</p>
         </div>
       </div>
     );
@@ -291,7 +284,6 @@ export function EmployeePerformance() {
     const metrics = employeeMetrics.find(m => m.employee.id === selectedEmployee.id);
     if (!metrics) return null;
 
-    // Prepare chart data for employee sales
     const salesByHour = Array.from({ length: 24 }, (_, i) => ({
       hour: `${String(i).padStart(2, '0')}:00`,
       sales: 0,
@@ -305,118 +297,107 @@ export function EmployeePerformance() {
       });
 
     return (
-      <div className={`p-8 ${darkMode ? 'bg-gray-900' : 'bg-gray-50'} h-full flex flex-col overflow-hidden`}>
-        {/* Header */}
+      <div className="p-8 bg-[var(--bg-glass)] text-[var(--text-primary)] h-full flex flex-col overflow-hidden">
         <div className="mb-8 flex-shrink-0">
           <button
             onClick={() => setSelectedEmployee(null)}
-            className={`mb-4 px-4 py-2 ${darkMode ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-800'} rounded-lg transition-colors`}
+            className="mb-4 px-4 py-2 border border-[var(--border-glass)] bg-[var(--input-bg)] text-[var(--text-primary)] hover:bg-[var(--bg-glass)] rounded-lg transition-all font-medium active:scale-[0.97] cursor-pointer shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6)]"
           >
             ← Back to Overview
           </button>
-          <h1 className={`text-4xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'} mb-2`}>
+          <h1 className="text-4xl font-bold text-[var(--text-primary)] mb-2">
             {metrics.employee.name}
           </h1>
-          <p className={`${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+          <p className="text-muted-foreground">
             Employee Performance Details
           </p>
         </div>
 
-        {/* Scrollable Content Container */}
         <div className="flex-1 overflow-y-auto space-y-6 pr-2 min-h-0">
-          {/* Metrics Cards */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
             <MetricCard
               title="Bills Generated"
               value={metrics.billsToday.toString()}
               icon={<Receipt size={24} />}
               color="from-blue-500 to-blue-600"
-              darkMode={darkMode}
             />
             <MetricCard
               title="Total Sales"
               value={`₹${metrics.totalSales.toFixed(2)}`}
               icon={<DollarSign size={24} />}
-              color="from-green-500 to-green-600"
-              darkMode={darkMode}
+              color="from-emerald-500 to-teal-600"
             />
             <MetricCard
               title="Working Time"
               value={formatDuration(metrics.workingDuration)}
               icon={<Clock size={24} />}
               color="from-purple-500 to-purple-600"
-              darkMode={darkMode}
             />
             <MetricCard
               title="Break Time"
               value={formatDuration(metrics.breakDuration)}
               icon={<Coffee size={24} />}
-              color="from-orange-500 to-orange-600"
-              darkMode={darkMode}
+              color="from-amber-500 to-amber-600"
             />
           </div>
 
-          {/* Sales Chart */}
-          <div className={`${darkMode ? 'bg-gray-800' : 'bg-white'} rounded-xl shadow-sm p-6 mb-8`}>
-            <h3 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'} mb-4`}>
+          <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-sm p-6 mb-8">
+            <h3 className="text-xl font-bold text-[var(--text-primary)] mb-4">
               Sales by Hour
             </h3>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={salesByHour.filter(d => d.sales > 0)}>
-                <CartesianGrid strokeDasharray="3 3" stroke={darkMode ? '#374151' : '#e5e7eb'} />
-                <XAxis dataKey="hour" stroke={darkMode ? '#9ca3af' : '#6b7280'} />
-                <YAxis stroke={darkMode ? '#9ca3af' : '#6b7280'} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-glass)" />
+                <XAxis dataKey="hour" stroke="var(--text-muted)" />
+                <YAxis stroke="var(--text-muted)" />
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: darkMode ? '#1f2937' : '#fff',
-                    border: `1px solid ${darkMode ? '#374151' : '#e5e7eb'}`,
+                    backgroundColor: 'var(--input-bg)',
+                    border: '1px solid var(--border-glass)',
                     borderRadius: '8px',
+                    color: 'var(--text-primary)',
                   }}
                 />
-                <Bar dataKey="sales" fill="#3b82f6" radius={[8, 8, 0, 0]} />
+                <Bar dataKey="sales" fill={accentColor || "var(--primary-accent)"} radius={[8, 8, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
 
-          {/* Today's Login Sessions */}
-          <div className={`${darkMode ? 'bg-gray-800' : 'bg-white'} rounded-xl shadow-sm p-6 mb-8`}>
-            <h3 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'} mb-4`}>
+          <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-sm p-6 mb-8">
+            <h3 className="text-xl font-bold text-[var(--text-primary)] mb-4">
               Today's Login Sessions
             </h3>
             <div className="space-y-3">
               {metrics.todaySessions.length === 0 ? (
-                <p className={`${darkMode ? 'text-gray-500' : 'text-gray-500'} text-center py-4`}>
+                <p className="text-muted-foreground text-center py-4">
                   No login sessions today
                 </p>
               ) : (
                 metrics.todaySessions.map((session, index) => (
                   <div
                     key={index}
-                    className={`flex items-center justify-between p-4 ${darkMode ? 'bg-gray-700' : 'bg-gray-50'} rounded-lg`}
+                    className="flex items-center justify-between p-4 bg-[var(--input-bg)] border border-[var(--border-glass)] rounded-lg"
                   >
                     <div className="flex items-center gap-4">
-                      <LogIn className="text-green-500" size={20} />
+                      <LogIn className="text-emerald-500" size={20} />
                       <div>
-                        <p className={`font-medium ${darkMode ? 'text-white' : 'text-gray-800'}`}>
-                          Login: {formatTime(session.loginTime)}
+                        <p className="font-medium text-[var(--text-primary)]">
+                          Login: {new Date(session.loginTime).toLocaleTimeString()}
                         </p>
-                        {session.logoutTime && (
-                          <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                            Logout: {formatTime(session.logoutTime)}
-                          </p>
-                        )}
+                        <p className="text-sm text-muted-foreground">
+                          {session.logoutTime
+                            ? `Logout: ${new Date(session.logoutTime).toLocaleTimeString()}`
+                            : 'Currently Active'}
+                        </p>
                       </div>
                     </div>
                     <div className="text-right">
-                      {session.duration ? (
-                        <p className={`font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                          {formatDuration(session.duration)}
-                        </p>
-                      ) : (
-                        <span className="px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-full text-xs font-medium">
-                          Active Now
-                        </span>
-                      )}
+                      <p className="font-medium text-[var(--text-primary)]">
+                        Duration: {session.duration ? formatDuration(session.duration) : 'Active'}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {session.breaks ? `${session.breaks.length} breaks` : 'No breaks'}
+                      </p>
                     </div>
                   </div>
                 ))
@@ -424,48 +405,48 @@ export function EmployeePerformance() {
             </div>
           </div>
 
-          {/* Today's Breaks */}
-          <div className={`${darkMode ? 'bg-gray-800' : 'bg-white'} rounded-xl shadow-sm p-6`}>
-            <h3 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'} mb-4`}>
-              Today's Breaks
+          <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-sm p-6">
+            <h3 className="text-xl font-bold text-[var(--text-primary)] mb-4">
+              Break Details
             </h3>
             <div className="space-y-3">
-              {metrics.todayBreaks.length === 0 ? (
-                <p className={`${darkMode ? 'text-gray-500' : 'text-gray-500'} text-center py-4`}>
+              {metrics.todaySessions.flatMap((s) => s.breaks || []).length === 0 ? (
+                <p className="text-muted-foreground text-center py-4">
                   No breaks taken today
                 </p>
               ) : (
-                metrics.todayBreaks.map((breakRecord, index) => (
-                  <div
-                    key={index}
-                    className={`flex items-center justify-between p-4 ${darkMode ? 'bg-gray-700' : 'bg-gray-50'} rounded-lg`}
-                  >
-                    <div className="flex items-center gap-4">
-                      <Coffee className="text-orange-500" size={20} />
-                      <div>
-                        <p className={`font-medium ${darkMode ? 'text-white' : 'text-gray-800'}`}>
-                          Start: {formatTime(breakRecord.startTime)}
+                metrics.todaySessions
+                  .flatMap((s) => s.breaks || [])
+                  .map((breakItem, index) => (
+                    <div
+                      key={index}
+                      className="flex items-center justify-between p-4 bg-[var(--input-bg)] border border-[var(--border-glass)] rounded-lg"
+                    >
+                      <div className="flex items-center gap-4">
+                        <Coffee className="text-amber-500" size={20} />
+                        <div>
+                          <p className="font-medium text-[var(--text-primary)]">
+                            Start: {new Date(breakItem.startTime).toLocaleTimeString()}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            {breakItem.endTime
+                              ? `End: ${new Date(breakItem.endTime).toLocaleTimeString()}`
+                              : 'Ongoing Break'}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-medium text-[var(--text-primary)]">
+                          Duration: {breakItem.duration ? formatDuration(breakItem.duration) : 'Ongoing'}
                         </p>
-                        {breakRecord.endTime && (
-                          <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                            End: {formatTime(breakRecord.endTime)}
+                        {breakItem.reason && (
+                          <p className="text-sm text-muted-foreground">
+                            Reason: {breakItem.reason}
                           </p>
                         )}
                       </div>
                     </div>
-                    <div className="text-right">
-                      {breakRecord.duration ? (
-                        <p className={`font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                          {formatDuration(breakRecord.duration)}
-                        </p>
-                      ) : (
-                        <span className="px-3 py-1 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 rounded-full text-xs font-medium">
-                          On Break
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))
+                  ))
               )}
             </div>
           </div>
@@ -475,63 +456,72 @@ export function EmployeePerformance() {
   }
 
   return (
-    <div className={`p-8 ${darkMode ? 'bg-gray-900' : 'bg-gray-50'} h-full flex flex-col overflow-hidden`}>
-      {/* Header */}
+    <div className="p-8 bg-[var(--bg-glass)] text-[var(--text-primary)] h-full flex flex-col overflow-hidden">
       <div className="mb-8 flex-shrink-0">
-        <h1 className={`text-4xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'} mb-2`}>
+        <h1 className="text-4xl font-bold text-[var(--text-primary)] mb-2">
           Employee Performance
         </h1>
-        <p className={`${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+        <p className="text-muted-foreground">
           Monitor employee productivity and activity
         </p>
       </div>
 
-      {/* Scrollable Content Container */}
       <div className="flex-1 overflow-y-auto space-y-6 pr-2 min-h-0">
-        {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <div className={`${darkMode ? 'bg-gray-800' : 'bg-white'} rounded-xl shadow-sm p-6`}>
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-gradient-to-br from-green-500 to-green-600 rounded-lg">
+          <div 
+            onPointerMove={updatePointerGlare}
+            className="group relative glass-panel backdrop-blur-xl backdrop-saturate-200 border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6),var(--shadow-glass)] p-6 overflow-hidden transition-all hover:-translate-y-1"
+          >
+            <SpecularGlareOverlay />
+            <div className="relative z-10 flex items-center gap-4">
+              <div className="p-3 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-lg">
                 <Activity size={24} className="text-white" />
               </div>
               <div>
-                <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                <p className="text-sm text-muted-foreground">
                   Active Employees
                 </p>
-                <p className={`text-3xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+                <p className="text-3xl font-bold text-[var(--text-primary)]">
                   {summaryMetrics.activeEmployees}
                 </p>
               </div>
             </div>
           </div>
 
-          <div className={`${darkMode ? 'bg-gray-800' : 'bg-white'} rounded-xl shadow-sm p-6`}>
-            <div className="flex items-center gap-4">
+          <div 
+            onPointerMove={updatePointerGlare}
+            className="group relative glass-panel backdrop-blur-xl backdrop-saturate-200 border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6),var(--shadow-glass)] p-6 overflow-hidden transition-all hover:-translate-y-1"
+          >
+            <SpecularGlareOverlay />
+            <div className="relative z-10 flex items-center gap-4">
               <div className="p-3 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg">
                 <Receipt size={24} className="text-white" />
               </div>
               <div>
-                <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                <p className="text-sm text-muted-foreground">
                   Total Bills Today
                 </p>
-                <p className={`text-3xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+                <p className="text-3xl font-bold text-[var(--text-primary)]">
                   {summaryMetrics.totalBills}
                 </p>
               </div>
             </div>
           </div>
 
-          <div className={`${darkMode ? 'bg-gray-800' : 'bg-white'} rounded-xl shadow-sm p-6`}>
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-gradient-to-br from-yellow-500 to-yellow-600 rounded-lg">
+          <div 
+            onPointerMove={updatePointerGlare}
+            className="group relative glass-panel backdrop-blur-xl backdrop-saturate-200 border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6),var(--shadow-glass)] p-6 overflow-hidden transition-all hover:-translate-y-1"
+          >
+            <SpecularGlareOverlay />
+            <div className="relative z-10 flex items-center gap-4">
+              <div className="p-3 bg-gradient-to-br from-amber-500 to-amber-600 rounded-lg">
                 <Trophy size={24} className="text-white" />
               </div>
               <div>
-                <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                <p className="text-sm text-muted-foreground">
                   Top Performer
                 </p>
-                <p className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+                <p className="text-xl font-bold text-[var(--text-primary)]">
                   {summaryMetrics.topPerformer?.employee.name || 'N/A'}
                 </p>
               </div>
@@ -539,54 +529,53 @@ export function EmployeePerformance() {
           </div>
         </div>
 
-        {/* Employee Table */}
-        <div className={`${darkMode ? 'bg-gray-800' : 'bg-white'} rounded-xl shadow-sm overflow-hidden mb-2`}>
+        <div className="glass-panel backdrop-blur-xl backdrop-saturate-200 border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6),var(--shadow-glass)] overflow-hidden mb-2">
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className={darkMode ? 'bg-gray-700' : 'bg-gray-50'}>
+              <thead className="bg-[var(--input-bg)] border-b border-[var(--border-glass)] text-[var(--text-primary)] shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6)]">
                 <tr>
-                  <th className={`px-6 py-4 text-left text-sm font-semibold ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                  <th className="px-6 py-4 text-left text-sm font-semibold">
                     Employee
                   </th>
-                  <th className={`px-6 py-4 text-left text-sm font-semibold ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                  <th className="px-6 py-4 text-left text-sm font-semibold">
                     Status
                   </th>
-                  <th className={`px-6 py-4 text-left text-sm font-semibold ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                  <th className="px-6 py-4 text-left text-sm font-semibold">
                     Bills Today
                   </th>
-                  <th className={`px-6 py-4 text-left text-sm font-semibold ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                  <th className="px-6 py-4 text-left text-sm font-semibold">
                     Total Sales
                   </th>
-                  <th className={`px-6 py-4 text-left text-sm font-semibold ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                  <th className="px-6 py-4 text-left text-sm font-semibold">
                     Avg Bill
                   </th>
-                  <th className={`px-6 py-4 text-left text-sm font-semibold ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                  <th className="px-6 py-4 text-left text-sm font-semibold">
                     Working Time
                   </th>
-                  <th className={`px-6 py-4 text-left text-sm font-semibold ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                  <th className="px-6 py-4 text-left text-sm font-semibold">
                     Break Time
                   </th>
-                  <th className={`px-6 py-4 text-left text-sm font-semibold ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                  <th className="px-6 py-4 text-left text-sm font-semibold">
                     Actions
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              <tbody className="divide-y divide-[var(--border-glass)]">
                 {employeeMetrics.map((metrics) => (
                   <tr
                     key={metrics.employee.id}
-                    className={`${darkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-50'} transition-colors`}
+                    className="hover:bg-[var(--input-bg)]/50 transition-colors"
                   >
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
                         {summaryMetrics.topPerformer?.employee.id === metrics.employee.id && (
-                          <Trophy className="text-yellow-500" size={18} />
+                          <Trophy className="text-amber-500" size={18} />
                         )}
                         <div>
-                          <p className={`font-medium ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+                          <p className="font-medium text-[var(--text-primary)]">
                             {metrics.employee.name}
                           </p>
-                          <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                          <p className="text-sm text-muted-foreground">
                             {metrics.employee.username}
                           </p>
                         </div>
@@ -596,34 +585,34 @@ export function EmployeePerformance() {
                       <span
                         className={`px-3 py-1 rounded-full text-xs font-medium ${
                           metrics.isOnBreak
-                            ? 'bg-amber-105 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 animate-pulse'
+                            ? 'bg-amber-500/20 text-amber-500 animate-pulse'
                             : metrics.isActive
-                              ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
-                              : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-400'
+                              ? 'bg-emerald-500/20 text-emerald-500'
+                              : 'bg-[var(--input-bg)] text-muted-foreground'
                         }`}
                       >
                         {metrics.isOnBreak ? 'On Break' : metrics.isActive ? 'Active' : 'Offline'}
                       </span>
                     </td>
-                    <td className={`px-6 py-4 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                    <td className="px-6 py-4 text-[var(--text-primary)]">
                       {metrics.billsToday}
                     </td>
-                    <td className={`px-6 py-4 font-medium ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+                    <td className="px-6 py-4 font-medium text-[var(--text-primary)]">
                       ₹{metrics.totalSales.toFixed(2)}
                     </td>
-                    <td className={`px-6 py-4 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                    <td className="px-6 py-4 text-[var(--text-primary)]">
                       ₹{metrics.avgBillValue.toFixed(2)}
                     </td>
-                    <td className={`px-6 py-4 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                    <td className="px-6 py-4 text-[var(--text-primary)]">
                       {formatDuration(metrics.workingDuration)}
                     </td>
-                    <td className={`px-6 py-4 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                    <td className="px-6 py-4 text-[var(--text-primary)]">
                       {formatDuration(metrics.breakDuration)}
                     </td>
                     <td className="px-6 py-4">
                       <button
                         onClick={() => setSelectedEmployee(metrics.employee)}
-                        className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium rounded-lg transition-colors"
+                        className="liquid-glass-button text-white text-sm font-medium px-4 py-2 rounded-lg transition-all shadow-sm active:scale-[0.97] cursor-pointer"
                       >
                         View Details
                       </button>
@@ -635,7 +624,7 @@ export function EmployeePerformance() {
 
             {employeeMetrics.length === 0 && (
               <div className="text-center py-12">
-                <p className={`${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
+                <p className="text-muted-foreground">
                   No active employees found
                 </p>
               </div>
@@ -652,19 +641,22 @@ interface MetricCardProps {
   value: string;
   icon: React.ReactNode;
   color: string;
-  darkMode: boolean;
 }
 
-function MetricCard({ title, value, icon, color, darkMode }: MetricCardProps) {
+function MetricCard({ title, value, icon, color }: MetricCardProps) {
   return (
-    <div className={`${darkMode ? 'bg-gray-800' : 'bg-white'} rounded-xl shadow-sm p-6`}>
-      <div className="flex items-center gap-4">
-        <div className={`p-3 bg-gradient-to-br ${color} rounded-lg`}>
+    <div 
+      onPointerMove={updatePointerGlare}
+      className="group relative glass-panel backdrop-blur-xl backdrop-saturate-200 border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6),var(--shadow-glass)] p-6 overflow-hidden transition-all hover:-translate-y-1"
+    >
+      <SpecularGlareOverlay />
+      <div className="relative z-10 flex items-center gap-4">
+        <div className={`p-3 bg-gradient-to-br ${color} rounded-lg text-white shadow-md`}>
           {icon}
         </div>
         <div>
-          <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>{title}</p>
-          <p className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'}`}>{value}</p>
+          <p className="text-sm text-muted-foreground">{title}</p>
+          <p className="text-2xl font-bold text-[var(--text-primary)]">{value}</p>
         </div>
       </div>
     </div>

@@ -11,14 +11,15 @@ export function getActiveSector(): string {
   try {
     const sectorFile = path.join(__dirname, '..', 'active_sector.txt');
     if (fs.existsSync(sectorFile)) {
-      return fs.readFileSync(sectorFile, 'utf-8').trim();
+      const savedSector = fs.readFileSync(sectorFile, 'utf-8').trim();
+      return savedSector === 'retail' ? savedSector : 'retail';
     }
   } catch (e) {}
   return 'retail';
 }
 
 export function getDbPath(sector: string): string {
-  const sec = sector || 'retail';
+  const sec = sector === 'retail' ? sector : 'retail';
   return path.join(__dirname, '..', `${sec}.db`);
 }
 

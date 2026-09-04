@@ -1,6 +1,6 @@
 import { Outlet, Link, useLocation, Navigate, useNavigate } from 'react-router';
 import { Suspense, lazy, useEffect, useState, useMemo } from 'react';
-import { Receipt, BarChart3, Moon, Sun, Users, TrendingUp, Settings, LogOut, User, Coffee, Clock, ChevronLeft, ChevronRight, History, Keyboard, Calendar, Plus, Trash2, CalendarCheck, MessageSquare, Store, Database, X, Search, ShieldAlert, CheckCircle2, AlertCircle, Filter, Sparkles, DollarSign, MapPin, CreditCard, PlusCircle } from 'lucide-react';
+import { Receipt, BarChart3, Moon, Sun, Users, TrendingUp, Settings, LogOut, User, Coffee, Clock, ChevronLeft, ChevronRight, History, Keyboard, Calendar, Plus, Trash2, CalendarCheck, MessageSquare, Store, Database, X, Menu, Search, ShieldAlert, CheckCircle2, AlertCircle, Filter, Sparkles, DollarSign, MapPin, CreditCard, PlusCircle } from 'lucide-react';
 import { useAuth } from '../contexts/auth-context';
 import { useTheme } from '../contexts/theme-context';
 import { InteractiveMeshBackground } from './ui/interactive-mesh-background';
@@ -14,191 +14,16 @@ import { KioskLockOverlay } from './ui/kiosk-lock-overlay';
 // Lazy load settings to optimize initial page loading
 const POSSettings = lazy(() => import('./pos-settings').then(m => ({ default: m.POSSettings })));
 
-function PageLoader({ darkMode }: { darkMode: boolean }) {
+function PageLoader() {
   return (
-    <div className={`flex flex-col items-center justify-center flex-1 min-h-[60vh] gap-4 ${
-      darkMode ? 'bg-gray-900' : 'bg-gray-100'
-    }`}>
+    <div className="flex flex-col items-center justify-center flex-1 min-h-[60vh] gap-4 bg-[var(--surface)]">
       <div className="relative w-12 h-12">
-        <div className="absolute inset-0 rounded-full border-4 border-blue-500/20" />
-        <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-blue-500 animate-spin" />
+        <div className="absolute inset-0 rounded-full border-4 border-[var(--primary-accent)]/20" />
+        <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-[var(--primary-accent)] animate-spin" />
       </div>
-      <p className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+      <p className="text-sm font-medium text-[var(--text-muted)]">
         Loading...
       </p>
-    </div>
-  );
-}
-
-interface OnboardingWizardProps {
-  darkMode: boolean;
-  onComplete: (sector: 'retail' | 'wholesale' | 'restaurant' | 'pharmacy', allowMultiSector: boolean) => void;
-}
-
-function OnboardingWizard({ darkMode, onComplete }: OnboardingWizardProps) {
-  const industries = [
-    {
-      id: 'retail',
-      title: 'Grocery & Supermarket',
-      desc: 'Fast checkout, shelf inventory, and general POS billing.',
-      icon: <Store className="w-8 h-8 text-blue-500" />,
-      sector: 'retail' as const,
-      tag: 'Recommended for Grocers'
-    },
-    {
-      id: 'pharmacy',
-      title: 'Pharmacy & Healthcare',
-      desc: 'Medicine batches, expiry dates, drug licenses, and Rx locks.',
-      icon: <Database className="w-8 h-8 text-purple-500" />,
-      sector: 'pharmacy' as const,
-      tag: 'Regulated Medical POS'
-    },
-    {
-      id: 'wholesale',
-      title: 'Wholesale & B2B Distribution',
-      desc: 'Credit controls, bulk discounts, and regional GST routing.',
-      icon: <TrendingUp className="w-8 h-8 text-emerald-500" />,
-      sector: 'wholesale' as const,
-      tag: 'Invoice & Ledger compliance'
-    },
-    {
-      id: 'restaurant',
-      title: 'Restaurant & Dine-In',
-      desc: 'Custom dining floorplans, table registers, and KOT checkouts.',
-      icon: <Coffee className="w-8 h-8 text-amber-500" />,
-      sector: 'restaurant' as const,
-      tag: 'F&B Order Tracking'
-    },
-    {
-      id: 'retail_boutique',
-      title: 'Retail Boutique & Boutique POS',
-      desc: 'Standard catalog, loyalty tracking, and sales analytics.',
-      icon: <Receipt className="w-8 h-8 text-pink-500" />,
-      sector: 'retail' as const,
-      tag: 'Clean Apparel POS'
-    }
-  ];
-
-  const [selectedId, setSelectedId] = useState('retail');
-  const [allowMultiSector, setAllowMultiSector] = useState(false);
-
-  const handleCompleteOnboarding = () => {
-    const chosen = industries.find(ind => ind.id === selectedId);
-    const chosenSector = chosen ? chosen.sector : 'retail';
-
-    onComplete(chosenSector, allowMultiSector);
-  };
-
-  return (
-    <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8 overflow-y-auto ${
-      darkMode ? 'bg-slate-955 text-white' : 'bg-slate-50 text-slate-900'
-    }`}>
-      <InteractiveMeshBackground />
-      
-      <div className={`w-full max-w-4xl p-6 md:p-10 rounded-3xl border shadow-2xl relative z-10 backdrop-blur-xl transition-all ${
-        darkMode ? 'bg-slate-900/85 border-slate-800 shadow-indigo-950/20' : 'bg-white/85 border-slate-200'
-      }`}>
-        {/* Header */}
-        <div className="text-center max-w-2xl mx-auto mb-8">
-          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-2xl text-white bg-gradient-to-br from-blue-500 to-indigo-600 shadow-xl mx-auto mb-4`}>
-            N
-          </div>
-          <h1 className="text-3xl font-black tracking-tight">Configure Your NexusFlow Workspace</h1>
-          <p className={`text-sm mt-2 font-medium ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-            NexusFlow is a unified operating system built for multiple business sectors. Tell us about your business profile so we can configure the ideal bespoke workspace for you.
-          </p>
-        </div>
-
-        {/* Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
-          {industries.map((ind) => {
-            const isSelected = selectedId === ind.id;
-            return (
-              <div
-                key={ind.id}
-                onClick={() => setSelectedId(ind.id)}
-                className={`p-5 rounded-2xl border-2 cursor-pointer transition-all flex flex-col justify-between hover:scale-[1.02] active:scale-[0.98] ${
-                  isSelected
-                    ? 'bg-blue-500/10 border-blue-500 shadow-lg shadow-blue-500/5'
-                    : darkMode
-                    ? 'bg-slate-955/45'
-                    : 'bg-white border-slate-100 hover:border-slate-250 text-slate-700'
-                } ${
-                  !isSelected && darkMode
-                    ? 'bg-slate-955/45 border-slate-800 hover:border-slate-700 text-slate-300'
-                    : ''
-                }`}
-              >
-                <div>
-                  <div className="flex justify-between items-start mb-4">
-                    <div className={`p-2.5 rounded-xl border ${darkMode ? 'bg-slate-900/60 border-slate-850' : 'bg-slate-50 border-slate-150'}`}>
-                      {ind.icon}
-                    </div>
-                    <span className={`text-[8.5px] px-2 py-0.5 rounded font-black tracking-wider uppercase ${
-                      isSelected
-                        ? 'bg-blue-500/10 text-blue-500 border border-blue-500/20'
-                        : darkMode
-                        ? 'bg-slate-800/40 text-slate-400 border border-slate-850'
-                        : 'bg-slate-100 text-slate-500 border border-slate-200'
-                    }`}>
-                      {ind.tag}
-                    </span>
-                  </div>
-                  <h3 className={`font-extrabold text-sm mb-1.5 ${darkMode ? 'text-white' : 'text-slate-850'}`}>{ind.title}</h3>
-                  <p className={`text-[11px] font-semibold leading-relaxed opacity-70`}>{ind.desc}</p>
-                </div>
-                <div className="pt-4 flex items-center gap-1.5">
-                  <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${
-                    isSelected ? 'border-blue-500 bg-blue-500 text-white' : 'border-gray-400'
-                  }`}>
-                    {isSelected && <span className="text-[10px]">✓</span>}
-                  </div>
-                  <span className="text-[10px] font-bold text-gray-450">Select this profile</span>
-                </div>
-              </div>
-            );
-          })}
-
-          {/* Enterprise card placeholder for multi-sector */}
-          <div
-            className={`p-5 rounded-2xl border-2 border-dashed flex flex-col justify-center items-center text-center transition-all relative ${
-              darkMode ? 'bg-slate-955/20 border-slate-800/80 hover:border-slate-700' : 'bg-gray-50/50 border-gray-250 hover:border-gray-300'
-            }`}
-          >
-            <div className="p-3 bg-gradient-to-br from-indigo-500/10 to-purple-500/10 text-indigo-400 rounded-xl mb-3 border border-indigo-500/10">
-              🏢
-            </div>
-            <h3 className={`font-extrabold text-xs mb-1 ${darkMode ? 'text-white' : 'text-slate-850'}`}>Multi-Sector Enterprise</h3>
-            <p className="text-[10.5px] font-semibold text-gray-400 max-w-[200px] leading-relaxed">Operate multi-department B2B wholesalers, pharmacies, and groceries in a single unified store.</p>
-            <div className="mt-4 flex items-center justify-center gap-2">
-              <input 
-                type="checkbox"
-                id="multi-sector-setup-check"
-                checked={allowMultiSector}
-                onChange={(e) => setAllowMultiSector(e.target.checked)}
-                className="rounded text-blue-600 focus:ring-blue-500 w-3.5 h-3.5 cursor-pointer"
-              />
-              <label htmlFor="multi-sector-setup-check" className="text-[10px] font-bold text-gray-400 select-none cursor-pointer uppercase tracking-wide">
-                Enable Multi-Sector
-              </label>
-            </div>
-          </div>
-        </div>
-
-        {/* Footer Complete Button */}
-        <div className="flex flex-col sm:flex-row items-center justify-between border-t dark:border-slate-800 pt-6 gap-4">
-          <div className="text-left text-xs text-gray-400 max-w-sm">
-            <span className="font-bold text-slate-500 block uppercase text-[9px] tracking-wide mb-0.5">Local-First Persistence</span>
-            Changes will configure this client terminal immediately. You can re-configure or switch modes at any time in settings under <span className="font-semibold text-blue-500">Workspace Profile</span>.
-          </div>
-          <button
-            onClick={handleCompleteOnboarding}
-            className="w-full sm:w-auto px-8 py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-extrabold rounded-xl shadow-lg shadow-blue-500/10 active:scale-95 transition-all text-xs uppercase tracking-wider select-none cursor-pointer"
-          >
-            Complete Setup & Launch NexusFlow
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -206,10 +31,9 @@ function OnboardingWizard({ darkMode, onComplete }: OnboardingWizardProps) {
 interface SectorPanelModalProps {
   panel: 'kot' | 'tables' | 'batches' | 'prescriptions' | 'gstin' | 'crm';
   onClose: () => void;
-  darkMode: boolean;
 }
 
-function SectorPanelModal({ panel, onClose, darkMode }: SectorPanelModalProps) {
+function SectorPanelModal({ panel, onClose }: SectorPanelModalProps) {
   const [batches, setBatches] = useState<any[]>([]);
   const [batchSearch, setBatchSearch] = useState('');
   const [batchesLoading, setBatchesLoading] = useState(false);
@@ -233,7 +57,9 @@ function SectorPanelModal({ panel, onClose, darkMode }: SectorPanelModalProps) {
     try {
       const saved = localStorage.getItem('nexusflowTablesList');
       if (saved) return JSON.parse(saved);
-    } catch {}
+    } catch {
+      // Corrupt or unreadable stored layout — fall through to the defaults below.
+    }
     return [
       { id: 't-1', name: 'Table 1', seats: 2, status: 'available', total: 0, items: [] },
       { id: 't-2', name: 'Table 2', seats: 2, status: 'occupied', total: 420.00, items: [
@@ -262,7 +88,10 @@ function SectorPanelModal({ panel, onClose, darkMode }: SectorPanelModalProps) {
   useEffect(() => {
     try {
       localStorage.setItem('nexusflowTablesList', JSON.stringify(tablesList));
-    } catch (e) {}
+    } catch {
+      // Storage full or blocked (private browsing). The layout still works for
+      // this session, it just won't survive a reload — not worth interrupting.
+    }
   }, [tablesList]);
 
   const [selectedTable, setSelectedTable] = useState<any>(null);
@@ -349,7 +178,10 @@ function SectorPanelModal({ panel, onClose, darkMode }: SectorPanelModalProps) {
             osc.start();
             osc.stop(context.currentTime + 0.15);
           }
-        } catch (e) {}
+        } catch {
+          // WebAudio unavailable or blocked until a user gesture. The beep is
+          // decorative; silence is an acceptable outcome.
+        }
 
         return { ...t, status: nextStatus };
       }
@@ -452,9 +284,7 @@ function SectorPanelModal({ panel, onClose, darkMode }: SectorPanelModalProps) {
 
   return (
     <div className="fixed inset-0 z-45 flex items-center justify-center p-4 overflow-y-auto bg-slate-950/70 backdrop-blur-md transition-all">
-      <div className={`w-full max-w-5xl rounded-3xl border shadow-2xl relative z-10 transition-all ${
-        darkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'
-      } flex flex-col max-h-[85vh]`}>
+      <div className={`w-full max-w-5xl rounded-3xl border shadow-2xl relative z-10 transition-all bg-[var(--surface-elevated)] border-[var(--border-glass)] text-[var(--text-primary)] flex flex-col max-h-[85vh]`}>
         
         <div className="flex justify-between items-center p-6 border-b border-gray-200 dark:border-slate-800">
           <div>
@@ -473,7 +303,7 @@ function SectorPanelModal({ panel, onClose, darkMode }: SectorPanelModalProps) {
           </div>
           <button 
             onClick={onClose} 
-            className="p-2 rounded-full border hover:scale-105 active:scale-95 transition-transform dark:border-slate-800 dark:bg-slate-950 hover:bg-red-500 hover:text-white cursor-pointer select-none"
+            className="p-2 rounded-full border hover:scale-105 active:scale-[0.97] transition-transform dark:border-slate-800 dark:bg-slate-950 hover:bg-red-500 hover:text-white cursor-pointer select-none"
           >
             <X size={18} />
           </button>
@@ -542,7 +372,7 @@ function SectorPanelModal({ panel, onClose, darkMode }: SectorPanelModalProps) {
                               onClick={() => {
                                 toast.success(`📦 Stock recall triggered for Batch ${b.batch_number}. Notification sent to warehouse.`);
                               }}
-                              className="px-2.5 py-1.5 bg-red-500/15 border border-red-500/20 text-red-500 hover:bg-red-500 hover:text-white rounded-lg font-bold text-[10px] uppercase select-none transition-all active:scale-95 cursor-pointer"
+                              className="px-2.5 py-1.5 bg-red-500/15 border border-red-500/20 text-red-500 hover:bg-red-500 hover:text-white rounded-lg font-bold text-[10px] uppercase select-none transition-all active:scale-[0.97] cursor-pointer"
                             >
                               Recall Batch
                             </button>
@@ -598,14 +428,14 @@ function SectorPanelModal({ panel, onClose, darkMode }: SectorPanelModalProps) {
                             <div className="flex gap-1.5 justify-end">
                               <button 
                                 onClick={() => handleVerifyRx(rx.id, 'verified')}
-                                className="p-1.5 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-500 hover:text-white rounded border border-emerald-500/10 cursor-pointer transition-all active:scale-95"
+                                className="p-1.5 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-500 hover:text-white rounded border border-emerald-500/10 cursor-pointer transition-all active:scale-[0.97]"
                                 title="Approve Verification"
                               >
                                 ✓
                               </button>
                               <button 
                                 onClick={() => handleVerifyRx(rx.id, 'blocked')}
-                                className="p-1.5 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded border border-red-500/10 cursor-pointer transition-all active:scale-95"
+                                className="p-1.5 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded border border-red-500/10 cursor-pointer transition-all active:scale-[0.97]"
                                 title="Block Purchase"
                               >
                                 ✕
@@ -648,13 +478,13 @@ function SectorPanelModal({ panel, onClose, darkMode }: SectorPanelModalProps) {
                     <div className="flex gap-2 border-t dark:border-slate-800 pt-4 mt-4">
                       <button
                         onClick={() => handleVerifyRx(selectedRx.id, 'verified')}
-                        className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs uppercase cursor-pointer select-none active:scale-95 transition-all"
+                        className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs uppercase cursor-pointer select-none active:scale-[0.97] transition-all"
                       >
                         Approve Rx Lock
                       </button>
                       <button
                         onClick={() => handleVerifyRx(selectedRx.id, 'blocked')}
-                        className="flex-1 py-2 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-xs uppercase cursor-pointer select-none active:scale-95 transition-all"
+                        className="flex-1 py-2 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-xs uppercase cursor-pointer select-none active:scale-[0.97] transition-all"
                       >
                         Reject & Lock
                       </button>
@@ -713,7 +543,7 @@ function SectorPanelModal({ panel, onClose, darkMode }: SectorPanelModalProps) {
                       </div>
 
                       <div className="border-t dark:border-slate-800 pt-3 flex flex-col gap-2">
-                        <div className="flex justify-between text-[10px] font-bold text-gray-450">
+                        <div className="flex justify-between text-[10px] font-bold text-gray-400">
                           <span>Cashier: {ticket.cashierName}</span>
                           <span className={isPreparing && ticket.elapsed > 10 ? 'text-red-500 animate-pulse font-extrabold' : ''}>
                             ⏱️ {ticket.elapsed} min ago
@@ -723,7 +553,7 @@ function SectorPanelModal({ panel, onClose, darkMode }: SectorPanelModalProps) {
                         {!isServed && (
                           <button
                             onClick={() => handleKotAdvance(ticket.id)}
-                            className={`w-full py-2 rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer active:scale-95 transition-all select-none ${
+                            className={`w-full py-2 rounded-xl text-[10px] font-black uppercase tracking-wider cursor-pointer active:scale-[0.97] transition-all select-none ${
                               isPreparing
                                 ? 'bg-amber-500 hover:bg-amber-400 text-slate-900 shadow-md shadow-amber-500/10'
                                 : 'bg-emerald-500 hover:bg-emerald-400 text-white shadow-md shadow-emerald-500/10'
@@ -743,7 +573,7 @@ function SectorPanelModal({ panel, onClose, darkMode }: SectorPanelModalProps) {
           {panel === 'tables' && (
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
               <div className="lg:col-span-3 space-y-4">
-                <div className="text-xs font-bold text-gray-550 uppercase mb-2">Dining Room Floor Plan Register</div>
+                <div className="text-xs font-bold text-gray-500 uppercase mb-2">Dining Room Floor Plan Register</div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   {tablesList.map(table => {
                     const isAvail = table.status === 'available';
@@ -765,7 +595,7 @@ function SectorPanelModal({ panel, onClose, darkMode }: SectorPanelModalProps) {
                         <div className="flex justify-between items-start">
                           <div>
                             <h3 className="font-extrabold text-sm text-white">{table.name}</h3>
-                            <span className="text-[10px] text-gray-550">{table.seats} seats capacity</span>
+                            <span className="text-[10px] text-gray-500">{table.seats} seats capacity</span>
                           </div>
                           <span className={`w-2.5 h-2.5 rounded-full ${
                             isAvail ? 'bg-emerald-500' : isOcc ? 'bg-amber-500' : 'bg-gray-500'
@@ -791,7 +621,7 @@ function SectorPanelModal({ panel, onClose, darkMode }: SectorPanelModalProps) {
                       <div className="flex justify-between items-start">
                         <div>
                           <h3 className="font-extrabold text-base text-white">{selectedTable.name} Registers</h3>
-                          <span className="text-[10px] text-gray-550">{selectedTable.seats} Seats Dine-In layout</span>
+                          <span className="text-[10px] text-gray-500">{selectedTable.seats} Seats Dine-In layout</span>
                         </div>
                         <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
                           selectedTable.status === 'available' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
@@ -804,14 +634,14 @@ function SectorPanelModal({ panel, onClose, darkMode }: SectorPanelModalProps) {
 
                       {selectedTable.status === 'occupied' && (
                         <div className="mt-4 space-y-3">
-                          <span className="text-[9px] font-black text-gray-550 uppercase tracking-widest block mb-1">Ordered Dishes</span>
+                          <span className="text-[9px] font-black text-gray-500 uppercase tracking-widest block mb-1">Ordered Dishes</span>
                           <div className="space-y-1.5 max-h-32 overflow-y-auto">
                             {selectedTable.items && selectedTable.items.map((item: any, idx: number) => {
                               const isObj = typeof item === 'object' && item !== null;
                               const name = isObj ? item.name : item.split(' x')[0];
                               const qty = isObj ? item.quantity : item.split(' x')[1];
                               return (
-                                <div key={idx} className="flex justify-between text-xs font-semibold bg-slate-900/60 p-2 rounded-lg border dark:border-slate-850">
+                                <div key={idx} className="flex justify-between text-xs font-semibold bg-slate-900/60 p-2 rounded-lg border dark:border-[var(--border-glass)]">
                                   <span className="text-gray-300">{name}</span>
                                   <span className="font-black text-blue-400">x{qty}</span>
                                 </div>
@@ -839,13 +669,13 @@ function SectorPanelModal({ panel, onClose, darkMode }: SectorPanelModalProps) {
                             console.error(e);
                           }
                         }}
-                        className="w-full py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-extrabold rounded-xl text-xs uppercase cursor-pointer select-none active:scale-95 transition-all flex items-center justify-center gap-1.5"
+                        className="w-full py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-extrabold rounded-xl text-xs uppercase cursor-pointer select-none active:scale-[0.97] transition-all flex items-center justify-center gap-1.5"
                       >
                         {selectedTable.status === 'occupied' ? <>✏️ Edit Order / Add Food</> : <>🍽️ Take Order & Add Food</>}
                       </button>
                       <button
                         onClick={() => handleTableToggle(selectedTable.id)}
-                        className="w-full py-2 border dark:border-slate-800 dark:bg-slate-900/40 text-gray-450 font-bold rounded-xl text-xs uppercase cursor-pointer select-none active:scale-95 transition-all"
+                        className="w-full py-2 border dark:border-slate-800 dark:bg-slate-900/40 text-gray-400 font-bold rounded-xl text-xs uppercase cursor-pointer select-none active:scale-[0.97] transition-all"
                       >
                         Toggle Status Manually
                       </button>
@@ -854,7 +684,7 @@ function SectorPanelModal({ panel, onClose, darkMode }: SectorPanelModalProps) {
                           toast.success(`💳 Printing receipt and billing register for ${selectedTable.name}`);
                         }}
                         disabled={selectedTable.status !== 'occupied'}
-                        className={`w-full py-2 border dark:border-slate-800 dark:bg-slate-950 font-bold rounded-xl text-xs uppercase cursor-pointer select-none active:scale-95 transition-all ${
+                        className={`w-full py-2 border dark:border-slate-800 dark:bg-slate-950 font-bold rounded-xl text-xs uppercase cursor-pointer select-none active:scale-[0.97] transition-all ${
                           selectedTable.status !== 'occupied' ? 'opacity-40 cursor-not-allowed text-gray-600' : 'text-gray-300'
                         }`}
                       >
@@ -876,19 +706,19 @@ function SectorPanelModal({ panel, onClose, darkMode }: SectorPanelModalProps) {
           {panel === 'gstin' && (
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="p-4 border dark:border-slate-850 dark:bg-slate-900/40 rounded-2xl">
+                <div className="p-4 border dark:border-[var(--border-glass)] dark:bg-slate-900/40 rounded-2xl">
                   <span className="text-[9px] font-black uppercase text-slate-500 tracking-wider">Total Taxable Turnover</span>
                   <div className="text-xl font-extrabold text-white mt-1">$159,500.00</div>
                 </div>
-                <div className="p-4 border dark:border-slate-850 dark:bg-slate-900/40 rounded-2xl">
+                <div className="p-4 border dark:border-[var(--border-glass)] dark:bg-slate-900/40 rounded-2xl">
                   <span className="text-[9px] font-black uppercase text-slate-500 tracking-wider">CGST collected (9%)</span>
                   <div className="text-xl font-extrabold text-blue-500 mt-1">$6,210.00</div>
                 </div>
-                <div className="p-4 border dark:border-slate-850 dark:bg-slate-900/40 rounded-2xl">
+                <div className="p-4 border dark:border-[var(--border-glass)] dark:bg-slate-900/40 rounded-2xl">
                   <span className="text-[9px] font-black uppercase text-slate-500 tracking-wider">SGST collected (9%)</span>
                   <div className="text-xl font-extrabold text-emerald-500 mt-1">$6,210.00</div>
                 </div>
-                <div className="p-4 border dark:border-slate-850 dark:bg-slate-900/40 rounded-2xl">
+                <div className="p-4 border dark:border-[var(--border-glass)] dark:bg-slate-900/40 rounded-2xl">
                   <span className="text-[9px] font-black uppercase text-slate-500 tracking-wider">IGST collected (18%)</span>
                   <div className="text-xl font-extrabold text-purple-500 mt-1">$15,540.00</div>
                 </div>
@@ -907,7 +737,7 @@ function SectorPanelModal({ panel, onClose, darkMode }: SectorPanelModalProps) {
                 </div>
                 <button
                   onClick={handleExportGstr}
-                  className="px-5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-extrabold rounded-xl text-xs uppercase cursor-pointer select-none active:scale-95 transition-all shadow-md shadow-blue-500/10"
+                  className="px-5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-extrabold rounded-xl text-xs uppercase cursor-pointer select-none active:scale-[0.97] transition-all shadow-md shadow-blue-500/10"
                 >
                   Export GSTR-1 Ledger
                 </button>
@@ -999,7 +829,7 @@ function SectorPanelModal({ panel, onClose, darkMode }: SectorPanelModalProps) {
                           </div>
 
                           <div className="space-y-1 mt-3">
-                            <div className="flex justify-between text-[10px] font-bold text-gray-450">
+                            <div className="flex justify-between text-[10px] font-bold text-gray-400">
                               <span>Credit Ledger Usage:</span>
                               <span>{usagePercent.toFixed(0)}%</span>
                             </div>
@@ -1014,7 +844,7 @@ function SectorPanelModal({ panel, onClose, darkMode }: SectorPanelModalProps) {
                           </div>
                         </div>
 
-                        <div className="pt-3 border-t dark:border-slate-850 flex justify-between text-xs">
+                        <div className="pt-3 border-t dark:border-[var(--border-glass)] flex justify-between text-xs">
                           <div>
                             <span className="text-[9px] text-slate-500 uppercase font-black block">Balance Owed</span>
                             <span className="font-extrabold text-white">${c.outstanding.toLocaleString()}</span>
@@ -1036,10 +866,10 @@ function SectorPanelModal({ panel, onClose, darkMode }: SectorPanelModalProps) {
                     <div className="space-y-4">
                       <div>
                         <h3 className="font-extrabold text-base text-white">{selectedCrmCust.name}</h3>
-                        <span className="text-[10px] text-gray-550">Ledger terms: {selectedCrmCust.terms}</span>
+                        <span className="text-[10px] text-gray-500">Ledger terms: {selectedCrmCust.terms}</span>
                       </div>
 
-                      <div className="space-y-2 p-3 bg-slate-900/60 rounded-2xl border dark:border-slate-850">
+                      <div className="space-y-2 p-3 bg-slate-900/60 rounded-2xl border dark:border-[var(--border-glass)]">
                         <span className="text-[9px] font-black text-gray-500 uppercase tracking-wider block">Record Outstanding Bill Payment</span>
                         <div className="relative">
                           <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center text-slate-500 text-xs font-bold">$</span>
@@ -1053,14 +883,14 @@ function SectorPanelModal({ panel, onClose, darkMode }: SectorPanelModalProps) {
                         </div>
                         <button
                           onClick={handlePayOutstanding}
-                          className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-[10px] uppercase select-none cursor-pointer active:scale-95 transition-all"
+                          className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-[10px] uppercase select-none cursor-pointer active:scale-[0.97] transition-all"
                         >
                           Submit Ledger Payoff
                         </button>
                       </div>
 
-                      <div className="space-y-2 p-3 bg-slate-900/60 rounded-2xl border dark:border-slate-850">
-                        <span className="text-[9px] font-black text-gray-550 uppercase tracking-wider block">Adjust Wholesale Credit Limit</span>
+                      <div className="space-y-2 p-3 bg-slate-900/60 rounded-2xl border dark:border-[var(--border-glass)]">
+                        <span className="text-[9px] font-black text-gray-500 uppercase tracking-wider block">Adjust Wholesale Credit Limit</span>
                         <div className="relative">
                           <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center text-slate-500 text-xs font-bold">$</span>
                           <input
@@ -1073,7 +903,7 @@ function SectorPanelModal({ panel, onClose, darkMode }: SectorPanelModalProps) {
                         </div>
                         <button
                           onClick={handleUpdateCreditLimit}
-                          className="w-full py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg text-[10px] uppercase select-none cursor-pointer active:scale-95 transition-all"
+                          className="w-full py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg text-[10px] uppercase select-none cursor-pointer active:scale-[0.97] transition-all"
                         >
                           Configure credit limit
                         </button>
@@ -1117,7 +947,10 @@ const getMigratedKey = (key: string, defaultVal: string): string => {
       localStorage.setItem(nexusKey, oldVal);
       return oldVal;
     }
-  } catch {}
+  } catch {
+    // Storage unreadable — callers get the default, which is the same outcome
+    // as a first run on this machine.
+  }
   return defaultVal;
 };
 
@@ -1189,19 +1022,15 @@ export function Layout() {
   };
   const { darkMode, toggleDarkMode, showSettings, setShowSettings } = useTheme();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Under `md` the sidebar is an overlay drawer rather than a column: at 256px
+  // fixed width it left almost nothing for content on a phone, and there was no
+  // way to dismiss it.
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
 
   // Sector Personality State
-  const [activeSector, setActiveSector] = useState<'retail' | 'wholesale' | 'restaurant' | 'pharmacy'>(() => {
-    return (getMigratedKey('Sector', 'retail') as any);
-  });
-
-  const [showOnboarding, setShowOnboarding] = useState<boolean>(() => {
-    return getMigratedKey('Onboarded', 'false') !== 'true';
-  });
-
-  const [multiSectorEnabled, setMultiSectorEnabled] = useState<boolean>(() => {
-    return getMigratedKey('MultiSectorEnabled', 'false') === 'true';
+  const [activeSector, setActiveSector] = useState<'retail'>(() => {
+    return 'retail';
   });
 
   const [chatEnabled, setChatEnabled] = useState<boolean>(() => {
@@ -1214,18 +1043,12 @@ export function Layout() {
   useEffect(() => {
     const handleProfileSync = () => {
       try {
-        const onboarded = localStorage.getItem('nexusflowOnboarded') === 'true';
-        const multiEnabled = localStorage.getItem('nexusflowMultiSectorEnabled') === 'true';
-        const sector = localStorage.getItem('nexusflowSector') as any;
-        
-        setShowOnboarding(!onboarded);
-        setMultiSectorEnabled(multiEnabled);
-        if (sector) {
-          setActiveSector(sector);
-        }
+        setActiveSector('retail');
         const chatSetting = localStorage.getItem('nexusflowChatEnabled');
         setChatEnabled(chatSetting !== 'false');
-      } catch (e) {}
+      } catch {
+        // Profile sync is best-effort; existing state stays as-is.
+      }
     };
 
     window.addEventListener('nexusflow-profile-updated', handleProfileSync);
@@ -1240,58 +1063,21 @@ export function Layout() {
         if (saved) {
           setTablesList(JSON.parse(saved));
         }
-      } catch (e) {}
+      } catch {
+        // Malformed payload from the settings editor; keep the current tables.
+      }
     };
     window.addEventListener('nexusflow-tables-updated', handleTablesSync);
     return () => window.removeEventListener('nexusflow-tables-updated', handleTablesSync);
   }, []);
 
-  const handleSectorChange = (sector: 'retail' | 'wholesale' | 'restaurant' | 'pharmacy') => {
-    setActiveSector(sector);
-    localStorage.setItem('nexusflowSector', sector);
-    toast.success(`✨ NexusFlow profile switched to ${sector.toUpperCase()}!`, {
-      description: 'Interface dynamically configured for ' + (
-        sector === 'retail' ? 'Supermarket & POS' :
-        sector === 'wholesale' ? 'Wholesale B2B & GST' :
-        sector === 'restaurant' ? 'Dine-In, Tables & KOT' : 'Batch, Expiry & Pharmacy'
-      )
-    });
-    window.dispatchEvent(new CustomEvent('sector-changed', { detail: { sector } }));
-  };
-
-
-
   const getSectorColorProfile = () => {
-    switch (activeSector) {
-      case 'wholesale':
-        return {
-          gradient: 'from-emerald-500 to-teal-600',
-          text: 'text-emerald-500',
-          badgeBg: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-          label: 'Wholesale B2B'
-        };
-      case 'restaurant':
-        return {
-          gradient: 'from-amber-500 to-red-600',
-          text: 'text-amber-500',
-          badgeBg: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-          label: 'Restaurant Dining'
-        };
-      case 'pharmacy':
-        return {
-          gradient: 'from-purple-500 to-indigo-600',
-          text: 'text-purple-500',
-          badgeBg: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
-          label: 'Pharmacy Medicine'
-        };
-      default:
-        return {
-          gradient: 'from-blue-500 to-indigo-600',
-          text: 'text-blue-500',
-          badgeBg: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-          label: 'Retail POS'
-        };
-    }
+    return {
+      gradient: 'from-blue-500 to-indigo-600',
+      text: 'text-blue-500',
+      badgeBg: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+      label: 'Retail & Grocery POS'
+    };
   };
 
   const sectorProfile = getSectorColorProfile();
@@ -1299,40 +1085,14 @@ export function Layout() {
   const sidebarLinks = useMemo(() => {
     const base = [];
     
-    const getPOSLabel = () => {
-      switch (activeSector) {
-        case 'restaurant': return 'Dining Table POS';
-        case 'pharmacy': return 'Pharmacy Dispense';
-        case 'wholesale': return 'Wholesale B2B Billing';
-        default: return 'Retail POS Billing';
-      }
-    };
-    
     if (isOwner() || hasPermission('access_billing')) {
       base.push({
         id: 'billing',
-        label: getPOSLabel(),
+        label: 'Retail & Grocery Billing',
         icon: <Receipt size={20} className="flex-shrink-0" />,
         path: '/',
         title: 'Billing'
       });
-    }
-
-    if (activeSector === 'restaurant') {
-      base.push(
-        { id: 'kot', label: 'Kitchen Orders (KOT)', icon: <Coffee size={20} className="flex-shrink-0" />, path: '#', title: 'KOT Console' },
-        { id: 'tables', label: 'Table Layout Grid', icon: <Store size={20} className="flex-shrink-0" />, path: '#', title: 'Table Management' }
-      );
-    } else if (activeSector === 'pharmacy') {
-      base.push(
-        { id: 'batches', label: 'Batch Expiry Logs', icon: <Database size={20} className="flex-shrink-0" />, path: '#', title: 'Batch Logs' },
-        { id: 'prescriptions', label: 'Prescription Records', icon: <Clock size={20} className="flex-shrink-0" />, path: '#', title: 'Prescriptions' }
-      );
-    } else if (activeSector === 'wholesale') {
-      base.push(
-        { id: 'gstin', label: 'B2B GST Compliance', icon: <CalendarCheck size={20} className="flex-shrink-0" />, path: '#', title: 'GST Records' },
-        { id: 'crm', label: 'CRM & Credit limits', icon: <Users size={20} className="flex-shrink-0" />, path: '#', title: 'CRM & Limits' }
-      );
     }
 
     if (chatEnabled) {
@@ -1388,6 +1148,7 @@ export function Layout() {
       return;
     }
     setShowSettings(false);
+    setMobileNavOpen(false);
     navigate(link.path);
   };
 
@@ -1449,7 +1210,9 @@ export function Layout() {
       try {
         const saved = localStorage.getItem('shopDetails');
         if (saved) setShopName(JSON.parse(saved).name || 'NexusFlow');
-      } catch {}
+      } catch {
+        // Keep whatever shop name is already displayed.
+      }
     };
     window.addEventListener('storage', sync);
     // Also poll on focus in case settings were changed in same tab
@@ -1616,83 +1379,75 @@ export function Layout() {
     return <Navigate to="/login" replace />;
   }
 
-  if (showOnboarding) {
-    return (
-      <OnboardingWizard
-        darkMode={darkMode}
-        onComplete={(chosenSector, allowMultiSector) => {
-          try {
-            localStorage.setItem('nexusflowSector', chosenSector);
-            localStorage.setItem('nexusflowOnboarded', 'true');
-            localStorage.setItem('nexusflowMultiSectorEnabled', allowMultiSector ? 'true' : 'false');
-          } catch (e) {
-            console.error('Failed to save onboarding settings:', e);
-          }
-
-          // Trigger backend installation API to allocate separate database and remove unused databases
-          api.post('/settings/install', { sector: chosenSector, multiEnabled: allowMultiSector })
-            .then(() => {
-              toast.success(`🎉 Installation completed!`, {
-                description: `Bespoke sector database (${chosenSector}.db) prepared. Unwanted billing databases deleted.`
-              });
-            })
-            .catch(err => {
-              console.error('[INSTALL] Backend database swap failed:', err);
-            })
-            .finally(() => {
-              setActiveSector(chosenSector);
-              setMultiSectorEnabled(allowMultiSector);
-              setShowOnboarding(false);
-              window.dispatchEvent(new CustomEvent('sector-changed', { detail: { sector: chosenSector } }));
-            });
-        }}
-      />
-    );
-  }
+  // The "Configure Your NexusFlow Workspace" step used to sit here. It offered
+  // exactly one choice — the app hard-forces the retail sector in
+  // getActiveSector() and getDbPath() — and auth-context clears the
+  // `nexusflowOnboarded` flag on every login, so it reappeared on every single
+  // sign-in rather than only on first run.
+  //
+  // Its only side effect was POST /settings/install, which is redundant: the
+  // server runs initDb() on boot, which creates and seeds retail.db, and no
+  // other sector database can exist for it to clean up.
 
   return (
-    <div className={`relative flex h-screen overflow-hidden ${darkMode ? 'bg-gray-955 text-white' : 'bg-gray-55 text-gray-900'} px-0`}>
+    <div className={`relative flex h-screen overflow-hidden bg-[var(--background)] text-[var(--text-primary)] px-0`}>
+      {/* The colour field the glass panels are blurring. Without this the page
+          is a flat near-black and backdrop-filter has nothing to reveal. */}
+      <div className="app-backdrop" aria-hidden="true" />
       {/* 🔮 Interactive High-Performance Mesh Background Constellation & Parallax Blobs */}
       <InteractiveMeshBackground />
 
 
       {/* Collapsible Sidebar */}
+      {/* Drawer backdrop — below md only */}
+      {mobileNavOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40 md:hidden"
+          onClick={() => setMobileNavOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
       <aside
-        className={`${
-          sidebarCollapsed ? 'w-16' : 'w-64'
-        } transition-all duration-300 ease-in-out flex-shrink-0 ${
-          darkMode 
-            ? 'bg-gray-900/60 border-gray-800/80 text-white' 
-            : 'bg-white/60 border-gray-200/50 text-gray-800'
-        } border-r backdrop-blur-md flex flex-col relative z-20`}
+        className={`w-64 ${sidebarCollapsed ? 'md:w-16' : 'md:w-64'} ${
+          mobileNavOpen ? 'translate-x-0' : '-translate-x-full'
+        } md:translate-x-0 fixed md:static inset-y-0 left-0 z-50 md:z-20
+        transition-transform md:transition-all duration-300 ease-in-out flex-shrink-0
+        bg-[var(--sidebar)] border-[var(--sidebar-border)] text-[var(--sidebar-foreground)] border-r backdrop-blur-[var(--glass-frost)] backdrop-saturate-150 flex flex-col md:relative`}
       >
         {/* Toggle Button */}
         <button
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
           title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          className={`absolute -right-3.5 top-6 z-30 w-7 h-7 rounded-full border-2 flex items-center justify-center shadow-md transition-all hover:scale-110 ${
-            darkMode
-              ? 'bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600'
-              : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'
-          }`}
+          aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className={`hidden md:flex absolute -right-3.5 top-6 z-30 w-7 h-7 rounded-full border-2 items-center justify-center shadow-md transition-all hover:scale-110 bg-[var(--surface)] border-[var(--border-glass)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]`}
         >
           {sidebarCollapsed
             ? <ChevronRight size={14} />
             : <ChevronLeft size={14} />}
         </button>
 
+        {/* Drawer dismiss — below md only */}
+        <button
+          onClick={() => setMobileNavOpen(false)}
+          aria-label="Close navigation"
+          className="md:hidden absolute right-3 top-3 z-30 w-9 h-9 rounded-lg flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] transition-colors"
+        >
+          <X size={18} />
+        </button>
+
         {/* Logo/Brand */}
-        <div className={`px-4 py-4 border-b ${darkMode ? 'border-gray-700' : 'border-gray-200'} flex flex-col gap-3.5 overflow-hidden`}>
+        <div className={`px-4 py-4 border-b border-[var(--border-glass)] flex flex-col gap-3.5 overflow-hidden`}>
           <div className="flex items-center gap-3">
             <div className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center font-black text-lg text-white bg-gradient-to-br ${sectorProfile.gradient} shadow-lg shadow-blue-500/10 transition-all duration-500 transform hover:rotate-12`}>
               N
             </div>
             {!sidebarCollapsed && (
               <div className="overflow-hidden">
-                <h1 className={`text-sm font-black tracking-tight leading-tight truncate ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+                <h1 className={`text-sm font-black tracking-tight leading-tight truncate text-[var(--text-primary)]`}>
                   NexusFlow
                 </h1>
-                <p className={`text-[10px] font-black uppercase tracking-wider ${darkMode ? 'text-gray-400' : 'text-gray-505'}`}>
+                <p className={`text-[10px] font-black uppercase tracking-wider text-[var(--text-muted)]`}>
                   Unified OS
                 </p>
               </div>
@@ -1700,39 +1455,14 @@ export function Layout() {
           </div>
           
           {/* Dynamic Sector Selector Dropdown */}
-          {!sidebarCollapsed && multiSectorEnabled && (
-            <div className="flex flex-col gap-1 mt-1 transition-all duration-300 animate-fade-in">
-              <span className={`text-[8px] font-black uppercase tracking-widest opacity-50 ${darkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                Sector personality
-              </span>
-              <select
-                value={activeSector}
-                onChange={(e) => handleSectorChange(e.target.value as any)}
-                className={`w-full px-2.5 py-1.5 border rounded-xl text-[11px] font-extrabold focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all cursor-pointer ${
-                  darkMode 
-                    ? 'bg-slate-900 border-slate-800 text-slate-200' 
-                    : 'bg-slate-50 border-slate-200 text-slate-800 shadow-sm'
-                }`}
-              >
-                <option value="retail">🛒 Retail POS</option>
-                <option value="wholesale">🏢 Wholesale B2B</option>
-                <option value="restaurant">🍽️ Restaurant Dining</option>
-                <option value="pharmacy">💊 Pharmacy Medicine</option>
-              </select>
-            </div>
-          )}
-
-          {!sidebarCollapsed && !multiSectorEnabled && (
+          {!sidebarCollapsed && (
             <div className="mt-1 flex flex-col gap-1 animate-fade-in">
-              <span className={`text-[8px] font-black uppercase tracking-widest opacity-50 ${darkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+              <span className={`text-[8px] font-black uppercase tracking-widest opacity-50 text-[var(--text-muted)]`}>
                 Industry Mode
               </span>
               <div className="flex">
-                <span className={`text-[9.5px] px-2.5 py-1 rounded-lg font-black tracking-wide uppercase shadow-sm select-none border bg-gradient-to-r ${sectorProfile.gradient} text-white border-transparent`}>
-                  {activeSector === 'pharmacy' && '🧪 '}
-                  {activeSector === 'restaurant' && '🍽️ '}
-                  {activeSector === 'wholesale' && '🏢 '}
-                  {activeSector === 'retail' && '🛒 '}
+                <span className="glass-btn glass-btn-accent text-[9.5px] px-2.5 py-1 rounded-lg font-black tracking-wide uppercase select-none">
+                  🛒
                   {sectorProfile.label}
                 </span>
               </div>
@@ -1752,12 +1482,10 @@ export function Layout() {
                 key={link.id}
                 title={link.title}
                 onClick={() => handleLinkClick(link)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-left relative group hover:scale-[1.02] active:scale-[0.98] select-none ${
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-left relative group select-none ${
                   isActive
-                    ? `bg-gradient-to-r ${sectorProfile.gradient} text-white shadow-lg`
-                    : darkMode
-                      ? 'text-gray-300 hover:bg-gray-800'
-                      : 'text-gray-700 hover:bg-gray-100'
+                    ? 'glass-btn glass-btn-selected'
+                    : 'text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]'
                 }`}
               >
                 <div className="relative flex-shrink-0">
@@ -1786,11 +1514,7 @@ export function Layout() {
           <button
             onClick={toggleDarkMode}
             title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-left group hover:scale-[1.02] active:scale-[0.98] select-none ${
-              darkMode
-                ? 'text-yellow-400 hover:bg-gray-800'
-                : 'text-gray-700 hover:bg-gray-100'
-            }`}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-left group hover:scale-[1.02] active:scale-[0.98] select-none text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]`}
           >
             {darkMode
               ? <Sun size={20} className="flex-shrink-0" />
@@ -1807,12 +1531,10 @@ export function Layout() {
             <button
               title="Settings"
               onClick={() => setShowSettings(true)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-left group hover:scale-[1.02] active:scale-[0.98] select-none ${
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-left group select-none ${
                 showSettings
-                  ? `bg-gradient-to-r ${sectorProfile.gradient} text-white shadow-lg`
-                  : darkMode
-                    ? 'text-gray-300 hover:bg-gray-800'
-                    : 'text-gray-700 hover:bg-gray-100'
+                  ? 'glass-btn glass-btn-selected'
+                  : 'text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]'
               }`}
             >
               <Settings size={20} className="flex-shrink-0" />
@@ -1822,7 +1544,7 @@ export function Layout() {
         </nav>
 
         {/* Bottom Panel */}
-        <div className={`border-t ${darkMode ? 'border-gray-700' : 'border-gray-200'} ${
+        <div className={`border-t border-[var(--border-glass)] ${
           sidebarCollapsed ? 'p-2 space-y-2' : 'p-3 space-y-2'
         }`}>
           {sidebarCollapsed ? (
@@ -1835,7 +1557,7 @@ export function Layout() {
                   className={`w-full flex items-center justify-center p-2 rounded-lg transition-colors ${
                     isOnBreak
                       ? 'bg-orange-500 text-white'
-                      : darkMode ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      : 'bg-[var(--surface-hover)] text-[var(--text-secondary)] hover:bg-[var(--surface-elevated)]'
                   }`}
                 >
                   <Coffee size={18} />
@@ -1844,18 +1566,14 @@ export function Layout() {
               <button
                 onClick={() => setShowAttendanceModal(true)}
                 title="Attendance & Calendar"
-                className={`w-full flex items-center justify-center p-2 rounded-lg transition-colors ${
-                  darkMode ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
+                className={`w-full flex items-center justify-center p-2 rounded-lg transition-colors bg-[var(--surface-hover)] text-[var(--text-secondary)] hover:bg-[var(--surface-elevated)]`}
               >
                 <Clock size={18} />
               </button>
               <button
                 onClick={user?.role === 'employee' ? endShift : logout}
                 title={user?.role === 'employee' ? 'End Shift' : 'Logout'}
-                className={`w-full flex items-center justify-center p-2 rounded-lg transition-colors ${
-                  darkMode ? 'bg-red-900/20 text-red-400 hover:bg-red-900/30' : 'bg-red-50 text-red-600 hover:bg-red-100'
-                }`}
+                className={`w-full flex items-center justify-center p-2 rounded-lg transition-colors bg-[var(--danger)]/10 text-[var(--danger)] hover:bg-[var(--danger)]/20`}
               >
                 <LogOut size={18} />
               </button>
@@ -1863,16 +1581,16 @@ export function Layout() {
           ) : (
             /* Expanded: full user card */
             <>
-              <div className={`p-2.5 ${darkMode ? 'bg-gray-700' : 'bg-gray-100'} rounded-lg`}>
+              <div className={`p-2.5 bg-[var(--surface-hover)] rounded-lg`}>
                 <div className="flex items-center gap-2.5 mb-2">
-                  <div className={`p-1.5 flex-shrink-0 ${darkMode ? 'bg-gray-600' : 'bg-white'} rounded-lg`}>
-                    <User size={16} className={darkMode ? 'text-gray-300' : 'text-gray-600'} />
+                  <div className={`p-1.5 flex-shrink-0 bg-[var(--surface-elevated)] rounded-lg`}>
+                    <User size={16} className={'text-[var(--text-secondary)]'} />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-medium ${darkMode ? 'text-white' : 'text-gray-800'} truncate`}>
+                    <p className={`text-sm font-medium text-[var(--text-primary)] truncate`}>
                       {user?.name}
                     </p>
-                    <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                    <p className={`text-xs text-[var(--text-muted)]`}>
                       {user?.role === 'owner' ? 'Owner' : user?.role === 'co-owner' ? 'Co-Owner' : 'Employee'}
                     </p>
                   </div>
@@ -1881,20 +1599,16 @@ export function Layout() {
                 {user?.role === 'employee' ? (
                   <>
                     {isOnBreak && (
-                      <div className={`mb-1.5 px-2 py-1 ${darkMode ? 'bg-orange-900/30 border-orange-800' : 'bg-orange-50 border-orange-200'} border rounded-lg flex items-center gap-1.5 animate-pulse`}>
+                      <div className={`mb-1.5 px-2 py-1 bg-[var(--warning)]/15 border-[var(--warning)]/40 border rounded-lg flex items-center gap-1.5 animate-pulse`}>
                         <Clock size={12} className="text-orange-500" />
-                        <span className={`text-xs font-medium ${darkMode ? 'text-orange-400' : 'text-orange-700'}`}>On Break</span>
+                        <span className={`text-xs font-medium text-[var(--warning)]`}>On Break</span>
                       </div>
                     )}
                     
                     <div className="grid grid-cols-2 gap-2 mt-2">
                       <button
                         onClick={() => setShowAttendanceModal(true)}
-                        className={`flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-semibold border transition-all hover:scale-[1.02] active:scale-[0.98] select-none ${
-                          darkMode
-                            ? 'bg-slate-800 hover:bg-slate-750 border-slate-700/50 text-slate-200 shadow-md shadow-black/5'
-                            : 'bg-white hover:bg-gray-50 border-gray-300 text-gray-700'
-                        }`}
+                        className={`flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-semibold border transition-all hover:scale-[1.02] active:scale-[0.98] select-none bg-[var(--surface)] hover:bg-[var(--surface-hover)] border-[var(--border-glass)] text-[var(--text-secondary)]`}
                       >
                         <Clock size={13} />
                         Attendance
@@ -1905,9 +1619,7 @@ export function Layout() {
                         className={`flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-semibold transition-all hover:scale-[1.02] active:scale-[0.98] select-none ${
                           isOnBreak
                             ? 'bg-orange-500 hover:bg-orange-600 text-white shadow-md shadow-orange-500/10'
-                            : darkMode
-                            ? 'bg-slate-800 hover:bg-slate-750 border-slate-700/50 text-slate-200 border shadow-md shadow-black/5'
-                            : 'bg-white hover:bg-gray-50 border border-gray-300 text-gray-700'
+                            : 'bg-[var(--surface)] hover:bg-[var(--surface-hover)] border border-[var(--border-glass)] text-[var(--text-secondary)]'
                         }`}
                       >
                         <Coffee size={13} />
@@ -1918,11 +1630,7 @@ export function Layout() {
                 ) : (
                   <button
                     onClick={() => setShowAttendanceModal(true)}
-                    className={`w-full mt-2 flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all hover:scale-[1.02] active:scale-[0.98] select-none ${
-                      darkMode
-                        ? 'bg-slate-800 hover:bg-slate-750 border-slate-700/50 text-slate-200 shadow-md shadow-black/5'
-                        : 'bg-white hover:bg-gray-50 border border-gray-300 text-gray-700'
-                    }`}
+                    className={`w-full mt-2 flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all hover:scale-[1.02] active:scale-[0.98] select-none bg-[var(--surface)] hover:bg-[var(--surface-hover)] border border-[var(--border-glass)] text-[var(--text-secondary)]`}
                   >
                     <Clock size={14} />
                     Attendance & Calendar
@@ -1932,11 +1640,7 @@ export function Layout() {
 
               <button
                 onClick={user?.role === 'employee' ? endShift : logout}
-                className={`w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                  darkMode
-                    ? 'bg-red-900/20 text-red-400 hover:bg-red-900/30'
-                    : 'bg-red-50 text-red-600 hover:bg-red-100'
-                }`}
+                className="glass-btn glass-btn-danger w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg"
               >
                 <LogOut size={16} />
                 <span className="text-xs font-medium">
@@ -1951,8 +1655,20 @@ export function Layout() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-hidden relative">
-        <Suspense fallback={<PageLoader darkMode={darkMode} />}>
+      <main className="flex-1 overflow-hidden relative min-w-0">
+        {/* Drawer trigger — below md only, where the sidebar is off-canvas. */}
+        <button
+          onClick={() => setMobileNavOpen(true)}
+          aria-label="Open navigation"
+          // z-45 clears the billing screen's own sticky mobile header (z-40)
+          // while still sitting under the drawer itself (z-50). Hidden while the
+          // drawer is open so it doesn't float over the backdrop.
+          className={`md:hidden ${mobileNavOpen ? 'hidden' : 'flex'} fixed left-3 top-3 z-[45] w-10 h-10 rounded-lg items-center justify-center shadow-md border bg-[var(--surface)] border-[var(--border-glass)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] transition-colors`}
+        >
+          <Menu size={18} />
+        </button>
+
+        <Suspense fallback={<PageLoader />}>
           <Outlet />
         </Suspense>
 
@@ -1969,21 +1685,19 @@ export function Layout() {
         {/* Unified Attendance & Shifts Calendar Modal */}
         {showAttendanceModal && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[100] flex items-center justify-center p-4 md:p-6 animate-fade-in">
-            <div className={`w-full max-w-5xl h-[82vh] ${
-              darkMode ? 'bg-gray-900 border-gray-800 text-white' : 'bg-white border-gray-200 text-gray-800'
-            } shadow-2xl rounded-2xl flex flex-col z-50 overflow-hidden border border-gray-100 dark:border-gray-800 animate-scale-in`}>
+            <div className={`w-full max-w-5xl h-[82vh] bg-[var(--surface-elevated)] border-[var(--border-glass)] text-[var(--text-primary)] shadow-2xl rounded-2xl flex flex-col z-50 overflow-hidden border border-gray-100 dark:border-gray-800 animate-scale-in`}>
               
               {/* Modal Header */}
-              <div className={`p-5 border-b ${darkMode ? 'border-gray-800' : 'border-gray-100'} flex justify-between items-center bg-opacity-70 backdrop-blur-md flex-shrink-0`}>
+              <div className={`p-5 border-b border-[var(--border-glass)] flex justify-between items-center bg-opacity-70 backdrop-blur-md flex-shrink-0`}>
                 <div>
-                  <h2 className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>Attendance & Calendar Log</h2>
-                  <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'} mt-1`}>
+                  <h2 className={`text-2xl font-bold text-[var(--text-primary)]`}>Attendance & Calendar Log</h2>
+                  <p className={`text-xs text-[var(--text-muted)] mt-1`}>
                     Track daily shifts login/logout times, schedule employee leaves, and declare store holidays.
                   </p>
                 </div>
                 <button 
                   onClick={() => setShowAttendanceModal(false)}
-                  className={`p-2 rounded-xl transition-all ${darkMode ? 'hover:bg-gray-800 text-gray-400 hover:text-white' : 'hover:bg-gray-100 text-gray-555 hover:text-gray-900'}`}
+                  className={`p-2 rounded-xl transition-all hover:bg-[var(--surface-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)]`}
                 >
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -1992,13 +1706,13 @@ export function Layout() {
               </div>
 
               {/* Navigation Tabs */}
-              <div className={`p-4 border-b ${darkMode ? 'border-gray-800' : 'border-gray-100'} flex gap-3 flex-shrink-0`}>
+              <div className={`p-4 border-b border-[var(--border-glass)] flex gap-3 flex-shrink-0`}>
                 <button
                   onClick={() => setAttendanceTab('logs')}
                   className={`flex items-center gap-2 px-5 py-2 rounded-lg text-xs font-bold transition-all select-none cursor-pointer ${
                     attendanceTab === 'logs'
                       ? 'bg-blue-600 text-white shadow-md shadow-blue-600/10'
-                      : darkMode ? 'text-gray-300 hover:bg-gray-800' : 'text-gray-600 hover:bg-gray-100'
+                      : 'text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]'
                   }`}
                 >
                   <History size={14} />
@@ -2009,7 +1723,7 @@ export function Layout() {
                   className={`flex items-center gap-2 px-5 py-2 rounded-lg text-xs font-bold transition-all select-none cursor-pointer ${
                     attendanceTab === 'calendar'
                       ? 'bg-blue-600 text-white shadow-md shadow-blue-600/10'
-                      : darkMode ? 'text-gray-300 hover:bg-gray-800' : 'text-gray-600 hover:bg-gray-100'
+                      : 'text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]'
                   }`}
                 >
                   <Calendar size={14} />
@@ -2025,7 +1739,7 @@ export function Layout() {
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 flex-shrink-0">
                       <div>
                         <h3 className="text-sm font-bold tracking-wide">Daily Shift Duration Logs</h3>
-                        <p className={`text-[11px] ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        <p className={`text-[11px] text-[var(--text-muted)]`}>
                           All local terminal active login sessions and logout timestamps.
                         </p>
                       </div>
@@ -2036,9 +1750,7 @@ export function Layout() {
                           <select
                             value={sessionsEmployeeFilter}
                             onChange={(e) => setSessionsEmployeeFilter(e.target.value)}
-                            className={`px-2 py-1 text-xs border rounded-lg ${
-                              darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
-                            } focus:outline-none focus:ring-1 focus:ring-blue-500`}
+                            className={`px-2 py-1 text-xs border rounded-lg bg-[var(--input-bg)] border-[var(--input-border)] text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-blue-500`}
                           >
                             <option value="all">All Employees</option>
                             {employees.map((emp: any) => (
@@ -2050,9 +1762,9 @@ export function Layout() {
                     </div>
 
                     {/* Table View */}
-                    <div className="flex-1 overflow-y-auto border border-gray-150/10 rounded-xl min-h-0">
+                    <div className="flex-1 overflow-y-auto border border-gray-100/10 rounded-xl min-h-0">
                       <table className="w-full text-left border-collapse">
-                        <thead className={`sticky top-0 z-10 ${darkMode ? 'bg-gray-800 text-gray-300' : 'bg-gray-50 text-gray-600'} text-[10px] font-bold uppercase tracking-wider`}>
+                        <thead className={`sticky top-0 z-10 bg-[var(--surface-hover)] text-[var(--text-secondary)] text-[10px] font-bold uppercase tracking-wider`}>
                           <tr>
                             <th className="px-4 py-3">Cashier/User</th>
                             <th className="px-4 py-3">Role</th>
@@ -2061,7 +1773,7 @@ export function Layout() {
                             <th className="px-4 py-3 text-right">Active Duration</th>
                           </tr>
                         </thead>
-                        <tbody className={`divide-y text-xs ${darkMode ? 'divide-slate-800/80 text-gray-200' : 'divide-gray-155 text-gray-705'}`}>
+                        <tbody className={`divide-y text-xs divide-[var(--border-glass)] text-[var(--text-secondary)]`}>
                           {sessions.filter(s => sessionsEmployeeFilter === 'all' || s.user_id === sessionsEmployeeFilter).length === 0 ? (
                             <tr>
                               <td colSpan={5} className="px-4 py-10 text-center text-gray-400">
@@ -2115,7 +1827,7 @@ export function Layout() {
                   <div className="h-full flex flex-col md:flex-row gap-5 min-h-0 overflow-hidden">
                     
                     {/* Calendar grid container */}
-                    <div className="flex-1 flex flex-col min-h-0 overflow-hidden border border-gray-150/10 p-4 rounded-2xl bg-gray-50/20 dark:bg-gray-950/20">
+                    <div className="flex-1 flex flex-col min-h-0 overflow-hidden border border-gray-100/10 p-4 rounded-2xl bg-gray-50/20 dark:bg-gray-950/20">
                       
                       {/* Active Filter Resolution */}
                       {(() => {
@@ -2157,7 +1869,7 @@ export function Layout() {
                             return {
                               btnClass: `bg-emerald-500/10 dark:bg-emerald-500/5 border-emerald-500/30 hover:border-emerald-500/40 text-emerald-600 dark:text-emerald-400 ${todayClass}`,
                               badge: (
-                                <span className="px-1 py-0.5 rounded text-[7px] font-extrabold uppercase bg-emerald-500/20 text-emerald-600 dark:text-emerald-450 leading-none truncate w-full text-center">
+                                <span className="px-1 py-0.5 rounded text-[7px] font-extrabold uppercase bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 leading-none truncate w-full text-center">
                                   🎉 Holiday
                                 </span>
                               )
@@ -2168,7 +1880,7 @@ export function Layout() {
                             return {
                               btnClass: `bg-amber-500/10 dark:bg-amber-500/5 border-amber-500/30 hover:border-amber-500/40 text-amber-600 dark:text-amber-400 ${todayClass}`,
                               badge: (
-                                <span className="px-1 py-0.5 rounded text-[7px] font-extrabold uppercase bg-amber-500/20 text-amber-600 dark:text-amber-450 leading-none truncate w-full text-center">
+                                <span className="px-1 py-0.5 rounded text-[7px] font-extrabold uppercase bg-amber-500/20 text-amber-600 dark:text-amber-400 leading-none truncate w-full text-center">
                                   📅 Leave
                                 </span>
                               )
@@ -2179,7 +1891,7 @@ export function Layout() {
                             return {
                               btnClass: `bg-blue-500/10 dark:bg-blue-500/5 border-blue-500/30 hover:border-blue-500/40 text-blue-600 dark:text-blue-400 ${todayClass}`,
                               badge: (
-                                <span className="px-1 py-0.5 rounded text-[7px] font-extrabold uppercase bg-blue-500/20 text-blue-600 dark:text-blue-450 leading-none truncate w-full text-center">
+                                <span className="px-1 py-0.5 rounded text-[7px] font-extrabold uppercase bg-blue-500/20 text-blue-600 dark:text-blue-400 leading-none truncate w-full text-center">
                                   ✅ Present
                                 </span>
                               )
@@ -2190,7 +1902,7 @@ export function Layout() {
                             return {
                               btnClass: `bg-rose-500/10 dark:bg-rose-500/5 border-rose-500/30 hover:border-rose-500/40 text-rose-600 dark:text-rose-400 ${todayClass}`,
                               badge: (
-                                <span className="px-1 py-0.5 rounded text-[7px] font-extrabold uppercase bg-rose-500/20 text-rose-600 dark:text-rose-450 leading-none truncate w-full text-center">
+                                <span className="px-1 py-0.5 rounded text-[7px] font-extrabold uppercase bg-rose-500/20 text-rose-600 dark:text-rose-400 leading-none truncate w-full text-center">
                                   ❌ Absent
                                 </span>
                               )
@@ -2198,11 +1910,7 @@ export function Layout() {
                           }
 
                           return {
-                            btnClass: `${
-                              darkMode
-                                ? 'bg-gray-900 border-gray-850 hover:bg-gray-800/40 hover:border-gray-750 text-slate-300'
-                                : 'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300 shadow-sm text-gray-800'
-                            } ${todayClass}`,
+                            btnClass: `bg-[var(--surface)] border-[var(--border-glass)] hover:bg-[var(--surface-hover)] hover:border-[var(--primary-accent)]/40 text-[var(--text-secondary)] ${todayClass}`,
                             badge: null
                           };
                         };
@@ -2219,17 +1927,13 @@ export function Layout() {
                                 <div className="flex gap-1">
                                   <button
                                     onClick={prevMonth}
-                                    className={`px-3 py-1 rounded-lg border text-[11px] font-extrabold transition-all select-none cursor-pointer ${
-                                      darkMode ? 'bg-gray-800 border-gray-700 hover:bg-gray-700 text-white' : 'bg-white border-gray-300 hover:bg-gray-100 text-gray-700'
-                                    }`}
+                                    className={`px-3 py-1 rounded-lg border text-[11px] font-extrabold transition-all select-none cursor-pointer bg-[var(--input-bg)] border-[var(--input-border)] hover:bg-[var(--surface-hover)] text-[var(--text-primary)]`}
                                   >
                                     Prev
                                   </button>
                                   <button
                                     onClick={nextMonth}
-                                    className={`px-3 py-1 rounded-lg border text-[11px] font-extrabold transition-all select-none cursor-pointer ${
-                                      darkMode ? 'bg-gray-800 border-gray-700 hover:bg-gray-700 text-white' : 'bg-white border-gray-300 hover:bg-gray-100 text-gray-700'
-                                    }`}
+                                    className={`px-3 py-1 rounded-lg border text-[11px] font-extrabold transition-all select-none cursor-pointer bg-[var(--input-bg)] border-[var(--input-border)] hover:bg-[var(--surface-hover)] text-[var(--text-primary)]`}
                                   >
                                     Next
                                   </button>
@@ -2242,9 +1946,7 @@ export function Layout() {
                                   <select
                                     value={calendarEmployeeFilter}
                                     onChange={(e) => setCalendarEmployeeFilter(e.target.value)}
-                                    className={`px-2 py-1 text-xs border rounded-lg ${
-                                      darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
-                                    } focus:outline-none focus:ring-1 focus:ring-blue-500`}
+                                    className={`px-2 py-1 text-xs border rounded-lg bg-[var(--input-bg)] border-[var(--input-border)] text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-blue-500`}
                                   >
                                     <option value="all">All Employees (Leaves/Holidays)</option>
                                     {employees.map((emp: any) => (
@@ -2309,9 +2011,7 @@ export function Layout() {
                     </div>
 
                     {/* Right column details popup/panel */}
-                    <div className={`w-full md:w-80 border rounded-2xl p-4 flex flex-col flex-shrink-0 overflow-y-auto ${
-                      darkMode ? 'bg-slate-950/20 border-slate-800/80' : 'bg-white border-gray-200 shadow-md shadow-black/5'
-                    }`}>
+                    <div className={`w-full md:w-80 border rounded-2xl p-4 flex flex-col flex-shrink-0 overflow-y-auto bg-[var(--surface)] border-[var(--border-glass)]`}>
                       {selectedDateStr ? (
                         <div className="flex flex-col justify-between h-full min-h-0">
                           
@@ -2390,7 +2090,7 @@ export function Layout() {
                                     className={`px-3 py-1.5 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
                                       newLeaveType === 'leave'
                                         ? 'bg-amber-500/15 border-amber-500/30 text-amber-500'
-                                        : darkMode ? 'bg-gray-800 border-gray-700 text-gray-400' : 'bg-white border-gray-300 text-gray-600'
+                                        : 'bg-[var(--input-bg)] border-[var(--input-border)] text-[var(--text-muted)]'
                                     }`}
                                   >
                                     Employee Leave
@@ -2401,7 +2101,7 @@ export function Layout() {
                                     className={`px-3 py-1.5 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
                                       newLeaveType === 'holiday'
                                         ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-500'
-                                        : darkMode ? 'bg-gray-800 border-gray-700 text-gray-400' : 'bg-white border-gray-300 text-gray-600'
+                                        : 'bg-[var(--input-bg)] border-[var(--input-border)] text-[var(--text-muted)]'
                                     }`}
                                   >
                                     Store Holiday
@@ -2415,9 +2115,7 @@ export function Layout() {
                                     <select
                                       value={newLeaveUserId}
                                       onChange={(e) => setNewLeaveUserId(e.target.value)}
-                                      className={`w-full px-2 py-1 text-xs border rounded-lg ${
-                                        darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
-                                      } focus:outline-none focus:ring-1 focus:ring-blue-500`}
+                                      className={`w-full px-2 py-1 text-xs border rounded-lg bg-[var(--input-bg)] border-[var(--input-border)] text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-blue-500`}
                                     >
                                       {employees.map((emp: any) => (
                                         <option key={emp.id} value={emp.id}>{emp.name}</option>
@@ -2434,9 +2132,7 @@ export function Layout() {
                                     value={newLeaveReason}
                                     onChange={(e) => setNewLeaveReason(e.target.value)}
                                     placeholder={newLeaveType === 'holiday' ? 'e.g. Diwali Festival' : 'e.g. Vacation / Medical'}
-                                    className={`w-full px-2.5 py-1.5 text-xs rounded-lg border ${
-                                      darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
-                                    } focus:outline-none focus:ring-1 focus:ring-blue-500`}
+                                    className={`w-full px-2.5 py-1.5 text-xs rounded-lg border bg-[var(--input-bg)] border-[var(--input-border)] text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-blue-500`}
                                     required
                                   />
                                 </div>
@@ -2458,7 +2154,7 @@ export function Layout() {
                                 setShowLeaveForm(true);
                                 setNewLeaveReason('');
                               }}
-                              className="mt-3 w-full py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/10 transform active:scale-95 transition-all cursor-pointer select-none"
+                              className="mt-3 w-full py-2 bg-gradient-to-r from-blue-500 to-indigo-600 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/10 transform active:scale-[0.97] transition-all cursor-pointer select-none"
                             >
                               <Plus size={14} />
                               Schedule Leave / Holiday
@@ -2483,14 +2179,6 @@ export function Layout() {
 
       {/* 🔒 Client-Side End-to-End Encrypted LAN Chatbox Drawer */}
       {chatEnabled && <E2EEChatbox />}
-
-      {activeSectorPanel && (
-        <SectorPanelModal
-          panel={activeSectorPanel}
-          onClose={() => setActiveSectorPanel(null)}
-          darkMode={darkMode}
-        />
-      )}
 
       {isKioskLocked && (
         <KioskLockOverlay

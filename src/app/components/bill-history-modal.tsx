@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { X, Search, Eye, Calendar } from 'lucide-react';
-import { SavedBill } from './cashier-billing';
+import type { SavedBill } from './cashier-billing-advanced';
 
 interface BillHistoryModalProps {
   billHistory: SavedBill[];

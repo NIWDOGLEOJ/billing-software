@@ -1,16 +1,21 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/auth-context';
-import { useTheme } from '../contexts/theme-context';
 import { useNavigate } from 'react-router';
-import { Store, Lock, User, AlertCircle, Eye, EyeOff, Coffee, Info } from 'lucide-react';
+import { Store, Lock, User, AlertCircle, Eye, EyeOff, Coffee } from 'lucide-react';
 import { InteractiveMeshBackground } from './ui/interactive-mesh-background';
 
-
+/**
+ * Styling note: this screen is written entirely against the CSS design tokens
+ * in globals.css, with no `darkMode ? … : …` ternaries. It previously hardcoded
+ * blue/indigo and Tailwind greys, which meant the owner's chosen accent colour
+ * recoloured every page in the app except the first one anybody sees.
+ */
 export function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [rememberDevice, setRememberDevice] = useState(false);
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<{ username?: string; password?: string }>({});
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [hasActiveBreak, setHasActiveBreak] = useState(false);
@@ -18,7 +23,6 @@ export function LoginPage() {
   const [mounted, setMounted] = useState(false);
 
   const { login, isAuthenticated } = useAuth();
-  const { darkMode } = useTheme();
   const navigate = useNavigate();
 
   // Track mouse coordinates for interactive parallax animations
@@ -34,8 +38,13 @@ export function LoginPage() {
 
   // Check for active breaks on mount
   useEffect(() => {
-    const breaks = JSON.parse(localStorage.getItem('breakRecords') || '[]');
-    const activeBreak = breaks.find((b: any) => !b.endTime);
+    let activeBreak: unknown;
+    try {
+      const breaks = JSON.parse(localStorage.getItem('breakRecords') || '[]');
+      activeBreak = Array.isArray(breaks) ? breaks.find((b: any) => !b.endTime) : undefined;
+    } catch {
+      // Unreadable break history just means we don't show the banner.
+    }
     setHasActiveBreak(!!activeBreak);
     setMounted(true);
   }, []);
@@ -49,14 +58,19 @@ export function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    setIsLoading(true);
 
-    if (!username || !password) {
-      setError('Please enter both username and password');
-      setIsLoading(false);
+    // Per-field messages, so the cashier is told which box to fix rather than
+    // getting one combined banner above both of them.
+    const nextFieldErrors: { username?: string; password?: string } = {};
+    if (!username.trim()) nextFieldErrors.username = 'Enter your username';
+    if (!password) nextFieldErrors.password = 'Enter your password';
+    setFieldErrors(nextFieldErrors);
+    if (Object.keys(nextFieldErrors).length > 0) {
+      document.getElementById(nextFieldErrors.username ? 'username' : 'password')?.focus();
       return;
     }
 
+    setIsLoading(true);
     const result = await login(username, password, rememberDevice);
 
     if (result.success) {
@@ -79,27 +93,38 @@ export function LoginPage() {
     } else {
       setError(result.error ?? 'Invalid username or password');
       setPassword('');
+      // Put the cursor where the correction has to happen.
+      document.getElementById('password')?.focus();
     }
 
     setIsLoading(false);
   };
 
+  const fieldClasses = (invalid: boolean) =>
+    [
+      'w-full pl-10 py-3 rounded-lg border transition-all duration-300',
+      'bg-[var(--input-bg)] text-[var(--text-primary)]',
+      'placeholder:text-[var(--text-muted)]',
+      'focus:outline-none focus:ring-2',
+      invalid
+        ? 'border-[var(--danger)] focus:border-[var(--danger)] focus:ring-[var(--danger)]/20'
+        : 'border-[var(--input-border)] focus:border-[var(--primary-accent)] focus:ring-[var(--primary-accent)]/20',
+    ].join(' ');
+
   return (
-    <div className={`relative min-h-screen flex items-center justify-center ${darkMode ? 'bg-gray-955 text-white' : 'bg-gray-55 text-gray-900'} px-4 overflow-hidden`}>
+    <div className="relative min-h-screen flex items-center justify-center px-4 py-8 overflow-hidden bg-[var(--background)] text-[var(--text-primary)]">
       {/* 🔮 Interactive High-Performance Mesh Background Constellation & Parallax Blobs */}
       <InteractiveMeshBackground />
 
-
       {/* 💳 Floating glassmorphic card container */}
-      <div 
-        className={`relative w-full max-w-md ${
-          darkMode 
-            ? 'bg-gray-900/75 border-gray-800/80 text-white shadow-indigo-950/20' 
-            : 'bg-white/75 border-white/60 text-gray-850 shadow-gray-200/50'
-        } border backdrop-blur-xl rounded-2xl shadow-2xl p-8 z-10 transition-all duration-[1000ms] cubic-bezier(0.16, 1, 0.3, 1) ${
+      <div
+        className={`relative w-full max-w-md z-10 rounded-2xl border p-6 sm:p-8 shadow-2xl backdrop-blur-xl
+          bg-[var(--bg-glass)] border-[var(--border-glass)] text-[var(--text-primary)]
+          transition-all duration-[1000ms] ease-[cubic-bezier(0.16,1,0.3,1)] ${
           mounted ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 translate-y-12'
         }`}
         style={{
+          // Parallax tilt is a pointer affordance; skip it on touch/small screens.
           transform: `perspective(1000px) rotateY(${mousePosition.x * 6}deg) rotateX(${mousePosition.y * -6}deg)`
         }}
       >
@@ -107,28 +132,28 @@ export function LoginPage() {
         <div className={`text-center mb-8 transition-all duration-700 delay-100 transform ${
           mounted ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'
         }`}>
-          <div className={`inline-flex items-center justify-center w-16 h-16 ${darkMode ? 'bg-blue-900/30' : 'bg-blue-100'} rounded-full mb-4 hover:rotate-12 transition-transform duration-300`}>
-            <Store size={32} className="text-blue-500 animate-pulse" />
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full mb-4 bg-[var(--primary-accent)]/15 hover:rotate-12 transition-transform duration-300">
+            <Store size={32} className="text-[var(--primary-accent)]" />
           </div>
-          <h1 className={`text-3xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'} mb-2`}>
+          <h1 className="text-2xl sm:text-3xl font-bold text-[var(--text-primary)] mb-2">
             NexusFlow
           </h1>
-          <p className={`${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+          <p className="text-[var(--text-muted)]">
             Sign in to your account
           </p>
         </div>
 
         {/* Break Info Message */}
         {hasActiveBreak && (
-          <div className={`mb-6 p-4 ${darkMode ? 'bg-orange-900/20 border-orange-800' : 'bg-orange-50 border-orange-200'} border rounded-lg flex items-start gap-3 transition-all duration-500 transform ${
+          <div className={`mb-6 p-4 rounded-lg border flex items-start gap-3 bg-[var(--warning)]/10 border-[var(--warning)]/30 transition-all duration-500 transform ${
             mounted ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
           }`}>
-            <Coffee className="text-orange-500 flex-shrink-0 mt-0.5" size={20} />
+            <Coffee className="text-[var(--warning)] flex-shrink-0 mt-0.5" size={20} />
             <div>
-              <p className={`text-sm font-medium ${darkMode ? 'text-orange-400' : 'text-orange-700'} mb-1`}>
+              <p className="text-sm font-medium text-[var(--text-primary)] mb-1">
                 Returning from Break
               </p>
-              <p className={`text-xs ${darkMode ? 'text-orange-400/80' : 'text-orange-600'}`}>
+              <p className="text-xs text-[var(--text-muted)]">
                 Log in to resume work and end your break.
               </p>
             </div>
@@ -137,80 +162,97 @@ export function LoginPage() {
 
         {/* Error Message */}
         {error && (
-          <div className={`mb-6 p-4 ${darkMode ? 'bg-red-900/20 border-red-800' : 'bg-red-50 border-red-200'} border rounded-lg flex items-center gap-3 transition-all duration-500 transform ${
-            mounted ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
-          }`}>
-            <AlertCircle className="text-red-500 flex-shrink-0" size={20} />
-            <p className={`text-sm ${darkMode ? 'text-red-400' : 'text-red-700'}`}>{error}</p>
+          <div
+            role="alert"
+            className={`mb-6 p-4 rounded-lg border flex items-center gap-3 bg-[var(--danger)]/10 border-[var(--danger)]/30 transition-all duration-500 transform ${
+              mounted ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
+            }`}
+          >
+            <AlertCircle className="text-[var(--danger)] flex-shrink-0" size={20} />
+            <p className="text-sm text-[var(--text-primary)]">{error}</p>
           </div>
         )}
 
         {/* Login Form */}
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <form onSubmit={handleSubmit} className="space-y-5" noValidate>
           {/* Username Field */}
           <div className={`transition-all duration-700 delay-200 transform ${
             mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
           }`}>
-            <label className={`block text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'} mb-2`}>
+            <label htmlFor="username" className="block text-sm font-medium text-[var(--text-secondary)] mb-2">
               Username or Email
             </label>
             <div className="relative group">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <User size={20} className={`${darkMode ? 'text-gray-500' : 'text-gray-400'} group-focus-within:text-blue-500 transition-colors`} />
+                <User size={20} className="text-[var(--text-muted)] group-focus-within:text-[var(--primary-accent)] transition-colors" />
               </div>
               <input
+                id="username"
                 type="text"
                 value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                className={`w-full pl-10 pr-4 py-3 border ${
-                  darkMode
-                    ? 'bg-gray-800/80 border-gray-700 text-white placeholder-gray-400 focus:bg-gray-800 focus:border-blue-500'
-                    : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500 focus:bg-white focus:border-blue-500'
-                } rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all duration-300`}
+                onChange={(e) => {
+                  setUsername(e.target.value);
+                  if (fieldErrors.username) setFieldErrors(p => ({ ...p, username: undefined }));
+                }}
+                className={`${fieldClasses(!!fieldErrors.username)} pr-4`}
                 placeholder="Enter your username"
                 autoComplete="username"
+                // The till is a single-purpose machine: the cursor should already
+                // be here when the screen appears.
+                autoFocus
+                aria-invalid={!!fieldErrors.username}
+                aria-describedby={fieldErrors.username ? 'username-error' : undefined}
                 disabled={isLoading}
               />
             </div>
+            {fieldErrors.username && (
+              <p id="username-error" className="mt-1.5 text-xs text-[var(--danger)]">
+                {fieldErrors.username}
+              </p>
+            )}
           </div>
 
           {/* Password Field */}
           <div className={`transition-all duration-700 delay-300 transform ${
             mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
           }`}>
-            <label className={`block text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'} mb-2`}>
+            <label htmlFor="password" className="block text-sm font-medium text-[var(--text-secondary)] mb-2">
               Password
             </label>
             <div className="relative group">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Lock size={20} className={`${darkMode ? 'text-gray-500' : 'text-gray-400'} group-focus-within:text-blue-500 transition-colors`} />
+                <Lock size={20} className="text-[var(--text-muted)] group-focus-within:text-[var(--primary-accent)] transition-colors" />
               </div>
               <input
+                id="password"
                 type={showPassword ? 'text' : 'password'}
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className={`w-full pl-10 pr-12 py-3 border ${
-                  darkMode
-                    ? 'bg-gray-800/80 border-gray-700 text-white placeholder-gray-400 focus:bg-gray-800 focus:border-blue-500'
-                    : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500 focus:bg-white focus:border-blue-500'
-                } rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all duration-300`}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (fieldErrors.password) setFieldErrors(p => ({ ...p, password: undefined }));
+                }}
+                className={`${fieldClasses(!!fieldErrors.password)} pr-12`}
                 placeholder="Enter your password"
                 autoComplete="current-password"
+                aria-invalid={!!fieldErrors.password}
+                aria-describedby={fieldErrors.password ? 'password-error' : undefined}
                 disabled={isLoading}
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute inset-y-0 right-0 pr-3 flex items-center hover:scale-105 active:scale-95 transition-transform"
+                className="absolute inset-y-0 right-0 pr-3 flex items-center text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:scale-105 active:scale-95 transition-transform"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
                 disabled={isLoading}
               >
-                {showPassword ? (
-                  <EyeOff size={20} className={darkMode ? 'text-gray-500' : 'text-gray-400'} />
-                ) : (
-                  <Eye size={20} className={darkMode ? 'text-gray-500' : 'text-gray-400'} />
-                )}
+                {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
               </button>
             </div>
+            {fieldErrors.password && (
+              <p id="password-error" className="mt-1.5 text-xs text-[var(--danger)]">
+                {fieldErrors.password}
+              </p>
+            )}
           </div>
 
           {/* Remember Device */}
@@ -222,26 +264,25 @@ export function LoginPage() {
               id="remember"
               checked={rememberDevice}
               onChange={(e) => setRememberDevice(e.target.checked)}
-              className="w-4 h-4 text-blue-500 border-gray-300 rounded focus:ring-blue-500/30 transition-shadow"
+              className="w-4 h-4 rounded accent-[var(--primary-accent)] border-[var(--input-border)] focus:ring-2 focus:ring-[var(--primary-accent)]/30 transition-shadow"
               disabled={isLoading}
             />
-            <label htmlFor="remember" className={`ml-2 text-sm ${darkMode ? 'text-gray-300' : 'text-gray-700'} hover:cursor-pointer select-none`}>
+            <label htmlFor="remember" className="ml-2 text-sm text-[var(--text-secondary)] hover:cursor-pointer select-none">
               Remember this device
             </label>
           </div>
 
           {/* Login Button */}
-          <div className={`transition-all duration-700 delay-400 transform ${
+          <div className={`transition-all duration-700 delay-[400ms] transform ${
             mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
           }`}>
             <button
               type="submit"
               disabled={isLoading}
-              className={`w-full py-3 px-4 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-semibold rounded-lg shadow-lg shadow-blue-500/10 hover:shadow-blue-500/20 hover:scale-[1.01] active:scale-[0.98] transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                darkMode ? 'focus:ring-offset-gray-900' : 'focus:ring-offset-white'
-              } ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+              className="glass-btn glass-btn-accent w-full py-3 px-4 rounded-lg font-semibold
+                disabled:cursor-not-allowed"
             >
-              {isLoading ? 'Signing in...' : 'Sign In'}
+              {isLoading ? 'Signing in…' : 'Sign In'}
             </button>
           </div>
         </form>
@@ -250,7 +291,7 @@ export function LoginPage() {
         <div className={`mt-8 text-center transition-all duration-700 delay-500 transform ${
           mounted ? 'opacity-100' : 'opacity-0'
         }`}>
-          <p className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
+          <p className="text-xs text-[var(--text-muted)]">
             © 2026 NexusFlow System. All rights reserved.
           </p>
         </div>

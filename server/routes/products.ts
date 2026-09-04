@@ -57,7 +57,7 @@ router.post('/', authenticateToken, requirePermission('access_inventory'), (req:
         brand, uom, purchase_price, wholesale_price, mrp, discount_percent, 
         batch_number, expiry_date, status, barcode_type, moq, distributor_price
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       sku,
@@ -67,7 +67,7 @@ router.post('/', authenticateToken, requirePermission('access_inventory'), (req:
       Number(gst_rate || 0),
       Number(stock || 0),
       Number(low_stock_threshold || 10),
-      hsn_code,
+      hsn_code || '',
       brand || '',
       uom || 'PCS',
       Number(purchase_price || 0),
@@ -155,7 +155,7 @@ router.put('/:id', authenticateToken, requirePermission('access_inventory'), (re
       Number(gst_rate || 0),
       Number(stock || 0),
       Number(low_stock_threshold || 10),
-      hsn_code,
+      hsn_code || '',
       brand !== undefined ? brand : ((product as any).brand || ''),
       uom !== undefined ? uom : ((product as any).uom || 'PCS'),
       purchase_price !== undefined ? Number(purchase_price) : ((product as any).purchase_price || 0),

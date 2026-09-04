@@ -1,88 +1,178 @@
 @custom-variant dark (&:is(.dark *));
-
 :root {
+  --glare-x: 50%;
+  --glare-y: 0%;
+  --primary-accent: #10b981;
+  --primary-accent-rgb: 16, 185, 129;
+  /* Panel translucency. Kept in a range that still reads as glass: above ~0.8
+     the panel is visually identical to the page and the effect disappears,
+     which is exactly what was shipping (default was 0.85). */
+  --liquid-glass-opacity: 0.46;
+  --button-opacity: 1.0;
+  --element-opacity: 1.0;
   --font-size: 16px;
-  --background: #ffffff;
-  --foreground: oklch(0.145 0 0);
+
+  /* Core surface tokens */
+  --background: #f3f6fa;
+  --foreground: #0f172a;
+  --surface: #ffffff;
+  --surface-rgb: 255, 255, 255;
+  --surface-elevated: #ffffff;
+  --surface-hover: #e8eef6;
+
+  /* Standardized aliases & typography */
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #475569;
   --card: #ffffff;
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: #030213;
-  --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.95 0.0058 264.53);
-  --secondary-foreground: #030213;
-  --muted: #ececf0;
-  --muted-foreground: #717182;
-  --accent: #e9ebef;
-  --accent-foreground: #030213;
-  --destructive: #d4183d;
+  --card-bg: var(--card);
+  --card-foreground: #0f172a;
+  --card-border: rgba(203, 213, 225, 0.95);
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+  --primary: #059669;
+  --primary-foreground: #ffffff;
+  --secondary: #e0f2fe;
+  --secondary-foreground: #0369a1;
+  --muted: #e8eef6;
+  --muted-foreground: #475569;
+  --accent: #f0fdf4;
+  --accent-foreground: #166534;
+  --success: #10b981;
+  --warning: #d97706; /* WCAG AA 4.62:1 vs #ffffff */
+  --danger: #e11d48;
+  --destructive: #e11d48;
   --destructive-foreground: #ffffff;
-  --border: rgba(0, 0, 0, 0.1);
-  --input: transparent;
-  --input-background: #f3f3f5;
-  --switch-background: #cbced4;
+  --border: rgba(203, 213, 225, 0.95);
+  --divider: rgba(203, 213, 225, 0.75);
+
+  /* Input tokens */
+  --input: #f8fafc;
+  --input-bg: var(--input-background);
+  --input-background: #ffffff;
+  --input-border: rgba(148, 163, 184, 0.65);
+  --switch-background: #cbd5e1;
+
+  /* Glass tokens.
+     Two levels so panels can sit on panels without compounding into mud:
+     --bg-glass is the standard panel, --bg-glass-raised is for things that sit
+     ON a panel (rows, inner cards) and is nearly transparent by design. */
+  --bg-glass: rgba(255, 255, 255, var(--liquid-glass-opacity, 0.46));
+  --bg-glass-raised: rgba(255, 255, 255, calc(var(--liquid-glass-opacity, 0.46) * 0.45));
+  --border-glass: rgba(203, 213, 225, 0.85);
+  --border-glass-highlight: rgba(255, 255, 255, 0.95);
+  --shadow-glass: 0 10px 30px -5px rgba(15, 23, 42, 0.08), 0 4px 10px -2px rgba(15, 23, 42, 0.03);
+  --liquid-glass-bg: var(--bg-glass);
+  --liquid-glass-border: var(--border-glass);
+  --liquid-glass-blur: 16px;
+  --accent-glow: 0 0 25px 2px rgba(16, 185, 129, 0.35);
+
   --font-weight-medium: 500;
   --font-weight-normal: 400;
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: #030213;
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --ring: #10b981;
+  --shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.01);
+  --chart-1: #059669;
+  --chart-2: #0284c7;
+  --chart-3: #7c3aed;
+  --chart-4: #d97706;
+  --chart-5: #e11d48;
+  --radius: 0.75rem;
+  --sidebar: rgba(255, 255, 255, calc(var(--liquid-glass-opacity, 0.46) * 1.18));
+  --sidebar-foreground: #0f172a;
+  --sidebar-primary: #059669;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f0fdf4;
+  --sidebar-accent-foreground: #15803d;
+  --sidebar-border: #cbd5e1;
+  --sidebar-ring: #10b981;
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.145 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.145 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.985 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.396 0.141 25.723);
-  --destructive-foreground: oklch(0.637 0.237 25.331);
-  --border: oklch(0.269 0 0);
-  --input: oklch(0.269 0 0);
-  --ring: oklch(0.439 0 0);
+  /* Core surface tokens - Neutral warm charcoal/slate (no heavy blue tint) */
+  --background: #121316;
+  --surface: #1c1d22;
+  --surface-rgb: 28, 29, 34;
+  --surface-elevated: #26272f;
+  --surface-hover: #31333d;
+  --foreground: #f3f4f6;
+
+  /* Standardized aliases & typography */
+  --text-primary: #f3f4f6;
+  --text-secondary: #d1d5db;
+  --text-muted: #9ca3af;
+  --card: #1c1d22;
+  --card-bg: var(--card);
+  --card-foreground: #f3f4f6;
+  --card-border: rgba(255, 255, 255, 0.14);
+  --popover: #1c1d22;
+  --popover-foreground: #f3f4f6;
+  --primary: #10b981;
+  --primary-foreground: #121316;
+  --secondary: #282a33;
+  --secondary-foreground: #38bdf8;
+  --muted: #26272f;
+  --muted-foreground: #d1d5db;
+  --accent: #1c2b26;
+  --accent-foreground: #34d399;
+  --success: #34d399;
+  --warning: #fbbf24;
+  --danger: #e11d48;
+  --destructive: #e11d48; /* WCAG AA 4.77:1 vs white text */
+  --destructive-foreground: #ffffff;
+  --border: rgba(255, 255, 255, 0.14);
+  --divider: rgba(255, 255, 255, 0.08);
+
+  /* Input tokens */
+  --input: #26272f;
+  --input-bg: var(--input-background);
+  --input-background: #26272f;
+  --input-border: rgba(255, 255, 255, 0.18);
+  --switch-background: #374151;
+
+  /* Glass tokens — see the light-theme block for the two-level rationale. */
+  --bg-glass: rgba(38, 40, 48, var(--liquid-glass-opacity, 0.46));
+  --bg-glass-raised: rgba(52, 55, 66, calc(var(--liquid-glass-opacity, 0.46) * 0.5));
+  --border-glass: rgba(255, 255, 255, 0.16);
+  --border-glass-highlight: rgba(255, 255, 255, 0.28);
+  --shadow-glass: 0 20px 40px -12px rgba(0, 0, 0, 0.6);
+  --liquid-glass-bg: var(--bg-glass);
+  --liquid-glass-border: var(--border-glass);
+  --liquid-glass-blur: 20px;
+  --accent-glow: 0 0 30px 4px rgba(16, 185, 129, 0.45);
+
+  --ring: #34d399;
+  --shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.5), 0 8px 12px -6px rgba(0, 0, 0, 0.3);
   --font-weight-medium: 500;
   --font-weight-normal: 400;
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.269 0 0);
-  --sidebar-ring: oklch(0.439 0 0);
+  --chart-1: #34d399;
+  --chart-2: #38bdf8;
+  --chart-3: #a78bfa;
+  --chart-4: #fbbf24;
+  --chart-5: #fb7185;
+  --sidebar: rgba(30, 32, 40, calc(var(--liquid-glass-opacity, 0.46) * 1.18));
+  --sidebar-foreground: #f3f4f6;
+  --sidebar-primary: #10b981;
+  --sidebar-primary-foreground: #121316;
+  --sidebar-accent: #1c2b26;
+  --sidebar-accent-foreground: #34d399;
+  --sidebar-border: rgba(255, 255, 255, 0.12);
+  --sidebar-ring: #34d399;
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-rgb: var(--surface-rgb);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-surface-hover: var(--surface-hover);
   --color-foreground: var(--foreground);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
   --color-card: var(--card);
+  --color-card-bg: var(--card-bg);
   --color-card-foreground: var(--card-foreground);
+  --color-card-border: var(--card-border);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
@@ -93,13 +183,28 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
+  --color-divider: var(--divider);
   --color-input: var(--input);
+  --color-input-bg: var(--input-bg);
   --color-input-background: var(--input-background);
+  --color-input-border: var(--input-border);
   --color-switch-background: var(--switch-background);
+  --color-bg-glass: var(--bg-glass);
+  --color-border-glass: var(--border-glass);
+  --color-border-glass-highlight: var(--border-glass-highlight);
+  --shadow-glass: var(--shadow-glass);
+  --blur-glass: var(--liquid-glass-blur);
+  --backdrop-blur-glass: var(--liquid-glass-blur);
+  --color-accent-glow: var(--accent-glow);
   --color-ring: var(--ring);
+  --color-liquid-glass-bg: var(--liquid-glass-bg);
+  --color-liquid-glass-border: var(--liquid-glass-border);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -117,10 +222,19 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-primary-accent: var(--primary-accent);
+  --color-primary-accent-rgb: var(--primary-accent-rgb);
+  --color-emerald-500: var(--primary-accent);
+  --color-emerald-600: var(--primary-accent);
+  --color-emerald-700: var(--primary-accent);
+  --color-emerald-400: var(--primary-accent);
+  --color-emerald-300: var(--primary-accent);
   
-  /* Custom layered dark theme colors */
   --color-gray-750: rgb(42, 47, 56);
   --color-gray-850: rgb(26, 30, 37);
+
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-display: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, sans-serif;
 }
 
 @layer base {
@@ -130,60 +244,649 @@
 
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  h1, h2, h3, h4, th, .font-display {
+    font-family: var(--font-display);
   }
 }
 
-/**
- * Base typography. This is not applied to elements which have an ancestor with a Tailwind text class.
- */
-@layer base {
-  :where(:not(:has([class*=' text-']), :not(:has([class^='text-'])))) {
-    h1 {
-      font-size: var(--text-2xl);
-      font-weight: var(--font-weight-medium);
-      line-height: 1.5;
-    }
-
-    h2 {
-      font-size: var(--text-xl);
-      font-weight: var(--font-weight-medium);
-      line-height: 1.5;
-    }
-
-    h3 {
-      font-size: var(--text-lg);
-      font-weight: var(--font-weight-medium);
-      line-height: 1.5;
-    }
-
-    h4 {
-      font-size: var(--text-base);
-      font-weight: var(--font-weight-medium);
-      line-height: 1.5;
-    }
-
-    label {
-      font-size: var(--text-base);
-      font-weight: var(--font-weight-medium);
-      line-height: 1.5;
-    }
-
-    button {
-      font-size: var(--text-base);
-      font-weight: var(--font-weight-medium);
-      line-height: 1.5;
-    }
-
-    input {
-      font-size: var(--text-base);
-      font-weight: var(--font-weight-normal);
-      line-height: 1.5;
-    }
+/* 🔮 Liquid Glass Keyframe Animations */
+@keyframes liquid-shimmer {
+  0% {
+    background-position: -200% 0;
   }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes liquid-float {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-6px) rotate(0.5deg);
+  }
+}
+
+@keyframes liquid-pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 15px -3px rgba(16, 185, 129, 0.25), 0 0 30px -5px rgba(13, 148, 136, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 25px 2px rgba(16, 185, 129, 0.45), 0 0 45px 5px rgba(56, 189, 248, 0.3);
+  }
+}
+
+/* Base Liquid Glass Class with 4 layers */
+.liquid-glass {
+  background: var(--bg-glass);
+  backdrop-filter: blur(var(--liquid-glass-blur, 20px)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--liquid-glass-blur, 20px)) saturate(160%);
+  border: 1px solid var(--border-glass);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.5), inset 0 -1px 1px rgba(0, 0, 0, 0.08), var(--shadow-glass);
+  transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.25s ease;
+}
+
+.liquid-glass:active {
+  transform: scale(0.97);
+}
+
+/* Custom UI Utilities for Modern Glassmorphism & Liquid Animations (liquid-glass.skill 4-layer recipe) */
+.glass-panel {
+  background: var(--bg-glass);
+  /* Same Frost / Light / Depth as .glass-btn so panels and controls read as
+     the same material rather than two different glasses. */
+  backdrop-filter: blur(var(--glass-frost)) saturate(170%);
+  -webkit-backdrop-filter: blur(var(--glass-frost)) saturate(170%);
+  border: 1px solid var(--border-glass);
+  box-shadow:
+    inset 2px 2px var(--glass-depth) calc(var(--glass-depth) * -0.6)
+      rgba(255, 255, 255, calc(var(--glass-light) * 0.55)),
+    inset -2px -2px var(--glass-depth) calc(var(--glass-depth) * -0.6)
+      rgba(0, 0, 0, 0.22),
+    var(--shadow-glass);
+}
+
+.liquid-glass-card {
+  position: relative;
+  background: var(--bg-glass);
+  backdrop-filter: blur(var(--liquid-glass-blur, 20px)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--liquid-glass-blur, 20px)) saturate(180%);
+  border: 1px solid var(--border-glass-highlight);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.4), inset 0 -1px 1px rgba(0, 0, 0, 0.08), var(--shadow-glass);
+  transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+.liquid-glass-card:hover {
+  transform: translateY(-3px) scale(1.005);
+  border-color: rgba(var(--primary-accent-rgb, 16, 185, 129), 0.4);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.6), inset 0 -1px 1px rgba(0, 0, 0, 0.08), var(--accent-glow);
+}
+
+.liquid-glass-card:active {
+  transform: scale(0.97);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Liquid glass controls
+
+   Tuned to match the Figma "Glass" effect with these settings:
+
+     Light        135°, 80%   → specular runs along the top-left edge
+     Refraction   0           → the backdrop is not bent, only blurred
+     Depth        33          → a ~3px bevel band rather than a hairline edge
+     Dispersion   50          → chromatic fringing, cool on the lit edge,
+                                warm on the opposite one
+     Frost        100         → maximum blur
+     Splay        0           → the refraction does not spread outward
+
+   Because Refraction and Splay are both 0 there is no geometric distortion to
+   reproduce, so this is achievable with backdrop-filter plus edge treatment —
+   no SVG displacement maps needed.
+
+   A control is a piece of material, never a coloured rectangle: colour appears
+   as a low-alpha tint, a brighter edge, and the label itself.
+   ──────────────────────────────────────────────────────────────────────────── */
+:root {
+  /* Figma Glass parameters, kept as variables so they stay legible and tunable. */
+  --glass-frost: 32px;          /* Frost 100 */
+  --glass-light-angle: 135deg;  /* Light angle */
+  --glass-light: 0.8;           /* Light intensity 80% */
+  --glass-depth: 3px;           /* Depth 33 → bevel band width */
+  --glass-dispersion: 0.5;      /* Dispersion 50 → fringe strength */
+}
+
+.glass-btn {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background-color: var(--glass-btn-fill, rgba(255, 255, 255, 0.10));
+  /* Frost 100 */
+  backdrop-filter: blur(var(--glass-frost)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-frost)) saturate(180%);
+  border: 1px solid var(--glass-btn-edge, rgba(255, 255, 255, 0.22));
+  color: var(--glass-btn-ink, var(--text-primary));
+  box-shadow:
+    /* Light 135° @ 80% — lit face, top-left. Depth 33 gives it a band, not a line. */
+    inset 2px 2px var(--glass-depth) calc(var(--glass-depth) * -0.6)
+      rgba(255, 255, 255, calc(var(--glass-light) * 0.85)),
+    /* the face turned away from the light */
+    inset -2px -2px var(--glass-depth) calc(var(--glass-depth) * -0.6)
+      rgba(0, 0, 0, 0.34),
+    0 6px 18px -8px rgba(0, 0, 0, 0.38);
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.14s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Sheen along the light axis — what makes the surface read as glass rather
+   than as a flat translucent panel. */
+.glass-btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(
+    var(--glass-light-angle),
+    rgba(255, 255, 255, calc(var(--glass-light) * 0.20)) 0%,
+    rgba(255, 255, 255, calc(var(--glass-light) * 0.05)) 46%,
+    rgba(255, 255, 255, 0) 100%
+  );
+}
+
+/* Dispersion 50 — the prism fringe. Painted on the border ring only, via a
+   two-layer mask that excludes the padding box. Cool on the lit edge, warm on
+   the far edge, matching how glass splits light. */
+.glass-btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  /* Warm edge is a pale gold rather than magenta. Real dispersion does run to
+     red, but at any visible alpha magenta reads as "this button is pink", which
+     is a colour statement rather than an optical one. Alphas are ~1/4 of the
+     first attempt so the fringe reads as light on an edge, not as a tint. */
+  background: linear-gradient(
+    var(--glass-light-angle),
+    rgba(150, 210, 255, calc(var(--glass-dispersion) * 0.34)) 0%,
+    rgba(255, 255, 255, 0) 40%,
+    rgba(255, 255, 255, 0) 62%,
+    rgba(255, 226, 178, calc(var(--glass-dispersion) * 0.26)) 100%
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+
+.glass-btn:hover:not(:disabled) {
+  background-color: var(--glass-btn-fill-hover, rgba(255, 255, 255, 0.16));
+  border-color: var(--glass-btn-edge-hover, rgba(255, 255, 255, 0.32));
+  box-shadow:
+    inset 2px 2px var(--glass-depth) calc(var(--glass-depth) * -0.6)
+      rgba(255, 255, 255, var(--glass-light)),
+    inset -2px -2px var(--glass-depth) calc(var(--glass-depth) * -0.6)
+      rgba(0, 0, 0, 0.34),
+    0 10px 24px -8px rgba(0, 0, 0, 0.42);
+}
+
+/* Glass compresses under a press; it does not change hue. */
+.glass-btn:active:not(:disabled) {
+  transform: scale(0.975);
+  box-shadow:
+    inset 0 1px 3px rgba(0, 0, 0, 0.24),
+    inset 1px 1px 0 rgba(255, 255, 255, calc(var(--glass-light) * 0.3));
+}
+
+.glass-btn:disabled {
+  opacity: 0.45;
+  box-shadow: none;
+}
+.glass-btn:disabled::after { opacity: 0.35; }
+
+/* Tints. The accent one follows the user's chosen accent colour. */
+.glass-btn-accent {
+  --glass-btn-fill: rgba(var(--primary-accent-rgb, 16, 185, 129), 0.16);
+  --glass-btn-fill-hover: rgba(var(--primary-accent-rgb, 16, 185, 129), 0.26);
+  --glass-btn-edge: rgba(var(--primary-accent-rgb, 16, 185, 129), 0.45);
+  --glass-btn-edge-hover: rgba(var(--primary-accent-rgb, 16, 185, 129), 0.65);
+  --glass-btn-ink: var(--primary-accent);
+}
+
+.glass-btn-danger {
+  --glass-btn-fill: rgba(225, 29, 72, 0.15);
+  --glass-btn-fill-hover: rgba(225, 29, 72, 0.25);
+  --glass-btn-edge: rgba(225, 29, 72, 0.45);
+  --glass-btn-edge-hover: rgba(225, 29, 72, 0.65);
+  --glass-btn-ink: var(--danger);
+}
+
+.glass-btn-warning {
+  --glass-btn-fill: rgba(217, 119, 6, 0.15);
+  --glass-btn-fill-hover: rgba(217, 119, 6, 0.25);
+  --glass-btn-edge: rgba(217, 119, 6, 0.45);
+  --glass-btn-edge-hover: rgba(217, 119, 6, 0.65);
+  --glass-btn-ink: var(--warning);
+}
+
+/* Selected state of a segmented control — more presence than a resting
+   control, still material rather than a filled block. */
+.glass-btn-selected {
+  --glass-btn-fill: rgba(var(--primary-accent-rgb, 16, 185, 129), 0.28);
+  --glass-btn-fill-hover: rgba(var(--primary-accent-rgb, 16, 185, 129), 0.34);
+  --glass-btn-edge: rgba(var(--primary-accent-rgb, 16, 185, 129), 0.75);
+  --glass-btn-edge-hover: rgba(var(--primary-accent-rgb, 16, 185, 129), 0.85);
+  --glass-btn-ink: var(--primary-accent);
+  box-shadow:
+    inset 2px 2px var(--glass-depth) calc(var(--glass-depth) * -0.6)
+      rgba(255, 255, 255, var(--glass-light)),
+    inset -2px -2px var(--glass-depth) calc(var(--glass-depth) * -0.6)
+      rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(var(--primary-accent-rgb, 16, 185, 129), 0.18),
+    0 8px 22px -8px rgba(var(--primary-accent-rgb, 16, 185, 129), 0.45);
+}
+
+/* Light theme needs a darker specular scheme; white-on-white has no edge.
+   Scoped away from the tinted variants: this selector is more specific than a
+   bare `.glass-btn-accent`, so without the :not() it silently overwrote every
+   variant's fill and edge and selected states became unreadable in light mode. */
+:root:not(.dark) .glass-btn:not([class*="glass-btn-"]) {
+  --glass-btn-fill: rgba(255, 255, 255, 0.55);
+  --glass-btn-fill-hover: rgba(255, 255, 255, 0.75);
+  --glass-btn-edge: rgba(15, 23, 42, 0.12);
+  --glass-btn-edge-hover: rgba(15, 23, 42, 0.2);
+}
+
+:root:not(.dark) .glass-btn {
+  box-shadow:
+    inset 2px 2px var(--glass-depth) calc(var(--glass-depth) * -0.6)
+      rgba(255, 255, 255, 0.95),
+    inset -2px -2px var(--glass-depth) calc(var(--glass-depth) * -0.6)
+      rgba(15, 23, 42, 0.10),
+    0 6px 18px -8px rgba(15, 23, 42, 0.22);
+}
+
+/* The prism fringe has to be dialled back on light backgrounds or it reads as
+   a colour cast rather than an optical edge. */
+:root:not(.dark) .glass-btn::after {
+  background: linear-gradient(
+    var(--glass-light-angle),
+    rgba(70, 155, 255, calc(var(--glass-dispersion) * 0.20)) 0%,
+    rgba(255, 255, 255, 0) 42%,
+    rgba(255, 255, 255, 0) 62%,
+    rgba(235, 175, 110, calc(var(--glass-dispersion) * 0.14)) 100%
+  );
+}
+
+/* Tints need more presence against a light backdrop than a dark one. */
+:root:not(.dark) .glass-btn-accent {
+  --glass-btn-fill: rgba(var(--primary-accent-rgb, 16, 185, 129), 0.14);
+  --glass-btn-fill-hover: rgba(var(--primary-accent-rgb, 16, 185, 129), 0.22);
+  --glass-btn-edge: rgba(var(--primary-accent-rgb, 16, 185, 129), 0.55);
+  --glass-btn-edge-hover: rgba(var(--primary-accent-rgb, 16, 185, 129), 0.75);
+}
+
+:root:not(.dark) .glass-btn-selected {
+  --glass-btn-fill: rgba(var(--primary-accent-rgb, 16, 185, 129), 0.22);
+  --glass-btn-fill-hover: rgba(var(--primary-accent-rgb, 16, 185, 129), 0.3);
+  --glass-btn-edge: rgba(var(--primary-accent-rgb, 16, 185, 129), 0.85);
+  --glass-btn-edge-hover: rgba(var(--primary-accent-rgb, 16, 185, 129), 0.95);
+}
+
+/* Kept as an alias so existing markup picks up the material. It used to be a
+   solid accent fill, which is the opposite of glass. */
+.liquid-glass-button {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background-color: rgba(var(--primary-accent-rgb, 16, 185, 129), 0.18);
+  backdrop-filter: blur(var(--glass-frost)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-frost)) saturate(180%);
+  border: 1px solid rgba(var(--primary-accent-rgb, 16, 185, 129), 0.5);
+  color: var(--primary-accent);
+  box-shadow:
+    inset 2px 2px var(--glass-depth) calc(var(--glass-depth) * -0.6)
+      rgba(255, 255, 255, calc(var(--glass-light) * 0.85)),
+    inset -2px -2px var(--glass-depth) calc(var(--glass-depth) * -0.6)
+      rgba(0, 0, 0, 0.34),
+    0 6px 18px -8px rgba(0, 0, 0, 0.38);
+  transition: transform 0.14s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.liquid-glass-button:hover:not(:disabled) {
+  background-color: rgba(var(--primary-accent-rgb, 16, 185, 129), 0.28);
+  border-color: rgba(var(--primary-accent-rgb, 16, 185, 129), 0.7);
+}
+
+.liquid-glass-button:active:not(:disabled) {
+  transform: scale(0.975);
+}
+
+.liquid-glass-button::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: linear-gradient(
+    60deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.25) 50%,
+    transparent 70%
+  );
+  transform: rotate(30deg);
+  transition: transform 0.6s ease;
+  pointer-events: none;
+}
+
+.liquid-glass-button:hover::after {
+  transform: rotate(30deg) translate(80%, 80%);
+}
+
+.liquid-glass-button:active {
+  transform: scale(0.97);
+}
+
+/* Accessibility fallbacks (liquid-glass.skill compliance) */
+@media (prefers-reduced-transparency: reduce) {
+  .liquid-glass,
+  .glass-panel,
+  .liquid-glass-card {
+    background: var(--surface) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  .liquid-glass-button {
+    background-color: var(--primary-accent, #10b981) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .liquid-glass,
+  .glass-panel,
+  .liquid-glass-card,
+  .liquid-glass-button,
+  .liquid-float-animation,
+  .liquid-pulse-glow {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
+  .liquid-glass-card [class*="glare"],
+  [class*="glare"] {
+    display: none !important;
+  }
+  .liquid-glass-button::after {
+    display: none !important;
+  }
+}
+
+.liquid-float-animation {
+  animation: liquid-float 4s ease-in-out infinite;
+}
+
+.liquid-pulse-glow {
+  animation: liquid-pulse-glow 3s ease-in-out infinite;
+}
+
+.glow-emerald {
+  box-shadow: 0 0 20px -5px rgba(16, 185, 129, 0.35);
+}
+
+.glow-cyan {
+  box-shadow: 0 0 20px -5px rgba(56, 189, 248, 0.35);
+}
+
+/* Sleek custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.7);
 }
 
 html {
   font-size: var(--font-size);
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+*,
+*::before,
+*::after {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+::selection {
+  background: transparent;
+  color: inherit;
+}
+
+::-moz-selection {
+  background: transparent;
+  color: inherit;
+}
+
+/* Keep text layers solid and crisp even when panels use translucent surfaces. */
+h1, h2, h3, h4, h5, h6, p, span, label, th, td, button, input, select, textarea, b, strong, i, em, code, pre, a {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.custom-theme-text,
+p, span, h1, h2, h3, h4, h5, h6, label, th, td, a, button, input, select, textarea {
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Universal Custom Surface Color override when user sets a custom surface color */
+:root[style*="--theme-surface-color"] body,
+:root[style*="--theme-surface-color"] #root,
+:root[style*="--theme-surface-color"] .app-bg-surface {
+  background-color: rgba(var(--surface-rgb, 15, 23, 42), var(--liquid-glass-opacity, 0.85)) !important;
+}
+
+/* 3D Color Sphere Orb */
+.color-sphere-orb {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  position: relative;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  box-shadow: inset -3px -3px 8px rgba(0, 0, 0, 0.4), inset 3px 3px 8px rgba(255, 255, 255, 0.5), 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.color-sphere-orb:hover {
+  transform: scale(1.18) translateY(-2px);
+  box-shadow: inset -2px -2px 6px rgba(0, 0, 0, 0.3), inset 3px 3px 10px rgba(255, 255, 255, 0.7), 0 8px 20px rgba(0, 0, 0, 0.3);
+}
+
+.color-sphere-orb.active {
+  transform: scale(1.15);
+  box-shadow: inset -2px -2px 6px rgba(0, 0, 0, 0.3), inset 3px 3px 10px rgba(255, 255, 255, 0.8), 0 0 20px var(--sphere-color, #10b981);
+}
+
+/* Universal Tactile Background Texture System */
+body,
+#root,
+.app-bg-surface,
+.liquid-glass-card,
+[class*="bg-background"],
+[class*="bg-surface"],
+[class*="bg-card"] {
+  background-image: 
+    radial-gradient(ellipse at 50% 0%, rgba(var(--primary-accent-rgb, 16, 185, 129), 0.05) 0%, transparent 65%),
+    radial-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+  background-size: 100% 100%, 20px 20px;
+}
+
+.dark body,
+.dark #root,
+.dark .app-bg-surface,
+.dark .liquid-glass-card,
+.dark [class*="bg-background"],
+.dark [class*="bg-surface"],
+.dark [class*="bg-card"] {
+  background-image: 
+    radial-gradient(ellipse at 50% 0%, rgba(var(--primary-accent-rgb, 52, 211, 153), 0.08) 0%, transparent 70%),
+    radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 100% 100%, 20px 20px;
+}
+
+/* Global Noise Grain Overlay */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  mix-blend-mode: overlay;
+}
+
+.dark body::before {
+  opacity: 0.05;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Liquid glass: making the effect actually visible
+
+   backdrop-filter only shows something when there is something BEHIND the
+   element worth blurring. The app previously painted a flat near-black page and
+   then put 85%-opaque panels on it, so the blur had nothing to reveal and every
+   panel read as the same slab of grey.
+
+   Two things fix that: panels are translucent enough to see through (the token
+   block above), and the page itself carries a soft colour field for them to
+   sit on (below).
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.app-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(60rem 40rem at 12% -10%,
+      rgba(var(--primary-accent-rgb, 16, 185, 129), 0.20), transparent 60%),
+    radial-gradient(50rem 36rem at 105% 15%,
+      rgba(99, 102, 241, 0.16), transparent 62%),
+    radial-gradient(46rem 34rem at 45% 115%,
+      rgba(14, 165, 233, 0.14), transparent 60%);
+}
+
+.dark .app-backdrop {
+  background:
+    radial-gradient(60rem 40rem at 12% -10%,
+      rgba(var(--primary-accent-rgb, 52, 211, 153), 0.26), transparent 60%),
+    radial-gradient(50rem 36rem at 105% 15%,
+      rgba(99, 102, 241, 0.22), transparent 62%),
+    radial-gradient(46rem 34rem at 45% 115%,
+      rgba(14, 165, 233, 0.18), transparent 60%);
+}
+
+/* A panel that sits directly ON another glass panel. Uses the raised (more
+   transparent) fill and no blur of its own, so stacking doesn't compound into
+   an opaque block. */
+.glass-inset {
+  background: var(--bg-glass-raised);
+  border: 1px solid var(--border-glass);
+}
+
+/* Content layer marker — everything the user interacts with sits above the
+   backdrop. */
+.app-content {
+  position: relative;
+  z-index: 1;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Keyboard focus
+
+   The app used `focus:outline-none` in 109 places and defined no focus-visible
+   style at all, so a cashier working without a mouse had no way to tell where
+   they were. These rules restore a visible ring.
+
+   `:focus-visible` only matches keyboard focus, so mouse clicks stay clean —
+   which is presumably why the outlines were removed in the first place.
+   !important is deliberate: it has to beat the inline `outline-none` utilities
+   without editing all 109 call sites.
+   ──────────────────────────────────────────────────────────────────────────── */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:not([tabindex="-1"]):focus-visible {
+  outline: 2px solid var(--primary-accent) !important;
+  outline-offset: 2px !important;
+  border-radius: 0.5rem;
+  /* Lifts the ring clear of adjacent panels and sticky headers. */
+  position: relative;
+  z-index: 2;
+}
+
+/* The product search box is the app's home position; give it a persistent,
+   softer indicator so the cashier can always see the cursor is parked there. */
+.pos-search-field:focus-within {
+  border-color: var(--primary-accent) !important;
+  box-shadow: 0 0 0 3px rgba(var(--primary-accent-rgb, 16, 185, 129), 0.18);
+}
+
+/* Keyboard hint chips (the shortcut bar and inline key badges). */
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35rem;
+  padding: 0.05rem 0.3rem;
+  border-radius: 0.3rem;
+  border: 1px solid var(--border-glass);
+  background: var(--bg-glass-raised);
+  color: var(--text-secondary);
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1.25;
+  font-family: var(--font-sans);
+  white-space: nowrap;
 }

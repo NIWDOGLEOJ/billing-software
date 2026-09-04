@@ -51,7 +51,7 @@ export function KioskLockOverlay({ onRestore, onBreak, onLogout, darkMode }: Kio
       title="Click anywhere on backdrop to restore fullscreen"
       className={`fixed inset-0 z-[9999] flex items-center justify-center p-4 backdrop-blur-2xl cursor-pointer ${
         darkMode 
-          ? 'bg-gray-955/95 text-white' 
+          ? 'bg-[var(--background)]/95 text-white' 
           : 'bg-gray-900/90 text-white'
       } transition-all duration-500 overflow-hidden`}
     >

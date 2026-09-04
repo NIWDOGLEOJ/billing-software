@@ -4,6 +4,10 @@ import { InsightsDashboard } from './insights-dashboard';
 import { useTheme } from '../contexts/theme-context';
 import { useAuth } from '../contexts/auth-context';
 import { api } from '../utils/api';
+import { toast } from 'sonner';
+import { updatePointerGlare, SpecularGlareOverlay } from '../utils/glare';
+import { Skeleton } from './ui/skeleton';
+import { PageShell, PageHeader } from './page-shell';
 import {
   TrendingUp,
   DollarSign,
@@ -48,7 +52,7 @@ import {
 type DateFilter = 'today' | 'week' | 'month' | 'custom';
 
 export function AnalyticsDashboard() {
-  const { darkMode } = useTheme();
+  const { darkMode, accentColor } = useTheme();
   const { isOwner } = useAuth();
   const [activeTab, setActiveTab] = useState<'overview' | 'breakdown' | 'products' | 'gst-report' | 'insights' | 'shifts'>('overview');
   const [dateFilter, setDateFilter] = useState<DateFilter>('week');
@@ -62,6 +66,9 @@ export function AnalyticsDashboard() {
   const [shifts, setShifts] = useState<any[]>([]);
   const [isLoadingShifts, setIsLoadingShifts] = useState(false);
   const [expandedShiftId, setExpandedShiftId] = useState<string | null>(null);
+  // Without this the dashboard paints every KPI as ₹0.00 during the initial
+  // fetch, which reads as "the shop sold nothing today".
+  const [isLoadingBills, setIsLoadingBills] = useState(true);
 
   const fetchBills = useCallback(async () => {
     try {
@@ -88,8 +95,13 @@ export function AnalyticsDashboard() {
         roundingAdjustment: b.rounding_adjustment || 0,
         generatedBy: b.cashier_id
       })));
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to fetch bills for analytics:', e);
+      toast.error(`Couldn't load sales data: ${e?.message || 'Server unreachable'}`, {
+        description: 'The figures below may be incomplete.',
+      });
+    } finally {
+      setIsLoadingBills(false);
     }
   }, []);
 
@@ -99,8 +111,9 @@ export function AnalyticsDashboard() {
     try {
       const data = await api.get<any[]>('/shifts');
       setShifts(data || []);
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to fetch shifts:', e);
+      toast.error(`Couldn't load shift records: ${e?.message || 'Server unreachable'}`);
     } finally {
       setIsLoadingShifts(false);
     }
@@ -588,32 +601,52 @@ export function AnalyticsDashboard() {
       .slice(0, 5);
   }, [filteredBills]);
 
-  const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#3f51b5'];
+  // Z-report audit totals for the Shifts tab. This MUST stay at the top level:
+  // it previously lived inside the `activeTab === 'shifts'` branch, so switching
+  // tabs changed the hook count and React threw "Rendered fewer hooks than
+  // expected", blanking the whole dashboard.
+  const shiftAuditMetrics = useMemo(() => {
+    const closedShifts = shifts.filter(s => s.status === 'closed');
+
+    let netCashDiscrepancy = 0;
+    let netDigitalDiscrepancy = 0;
+
+    closedShifts.forEach(s => {
+      netCashDiscrepancy += (s.discrepancy_cash || 0);
+      const upiDiff = (s.actual_upi ?? 0) - (s.system_upi ?? 0);
+      const cardDiff = (s.actual_card ?? 0) - (s.system_card ?? 0);
+      netDigitalDiscrepancy += (upiDiff + cardDiff);
+    });
+
+    const avgTicketVal = filteredBills.length > 0
+      ? filteredBills.reduce((sum, b) => sum + b.total, 0) / filteredBills.length
+      : 0;
+
+    return {
+      totalAudited: closedShifts.length,
+      netCashDiscrepancy,
+      netDigitalDiscrepancy,
+      avgTicketVal,
+    };
+  }, [shifts, filteredBills]);
+
+  const COLORS = [accentColor || 'var(--primary-accent)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--chart-1)'];
 
   return (
-    <div className={`p-6 ${darkMode ? 'bg-gray-900 text-white' : 'bg-gray-50 text-gray-800'} h-screen flex flex-col overflow-hidden`}>
-      {/* Header */}
-      <div className="mb-4 flex items-center justify-between flex-shrink-0">
-        <div>
-          <h1 className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'} tracking-tight`}>
-            Sales Analytics Dashboard
-          </h1>
-          <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'} mt-0.5`}>
-            Monitor store sales, payment mode distribution, top inventory, and Z-report trends.
-          </p>
-        </div>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Sales Analytics Dashboard"
+        description="Monitor store sales, payment mode distribution, top inventory, and Z-report trends."
+      />
 
       {/* Tabs */}
-      <div className={`${darkMode ? 'bg-gray-800/80 border-gray-700/50' : 'bg-white border-gray-200'} rounded-xl shadow-sm p-1 flex gap-2 flex-shrink-0 border mb-4`}>
+      <div className="glass-panel backdrop-blur-xl backdrop-saturate-200 border-[var(--border-glass)] rounded-xl shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6),var(--shadow-glass)] p-1 flex gap-2 flex-shrink-0 mb-4 overflow-x-auto">
         <button
           onClick={() => setActiveTab('overview')}
-          className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-all ${
+          className={`flex shrink-0 whitespace-nowrap items-center gap-2 px-4 sm:px-5 py-2 rounded-lg text-sm font-semibold transition-all active:scale-[0.97] cursor-pointer ${
             activeTab === 'overview'
-              ? 'bg-blue-600 text-white shadow-md shadow-blue-600/10'
-              : darkMode
-              ? 'text-gray-300 hover:bg-gray-700'
-              : 'text-gray-700 hover:bg-gray-100'
+              ? 'liquid-glass-button text-white shadow-md'
+              : 'text-muted-foreground hover:text-[var(--text-primary)] hover:bg-[var(--input-bg)]'
           }`}
         >
           <BarChart3 size={16} />
@@ -621,12 +654,10 @@ export function AnalyticsDashboard() {
         </button>
         <button
           onClick={() => setActiveTab('breakdown')}
-          className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-all ${
+          className={`flex shrink-0 whitespace-nowrap items-center gap-2 px-4 sm:px-5 py-2 rounded-lg text-sm font-semibold transition-all active:scale-[0.97] cursor-pointer ${
             activeTab === 'breakdown'
-              ? 'bg-blue-600 text-white shadow-md shadow-blue-600/10'
-              : darkMode
-              ? 'text-gray-300 hover:bg-gray-700'
-              : 'text-gray-700 hover:bg-gray-100'
+              ? 'liquid-glass-button text-white shadow-md'
+              : 'text-muted-foreground hover:text-[var(--text-primary)] hover:bg-[var(--input-bg)]'
           }`}
         >
           <CreditCard size={16} />
@@ -634,12 +665,10 @@ export function AnalyticsDashboard() {
         </button>
         <button
           onClick={() => setActiveTab('products')}
-          className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-all ${
+          className={`flex shrink-0 whitespace-nowrap items-center gap-2 px-4 sm:px-5 py-2 rounded-lg text-sm font-semibold transition-all active:scale-[0.97] cursor-pointer ${
             activeTab === 'products'
-              ? 'bg-blue-600 text-white shadow-md shadow-blue-600/10'
-              : darkMode
-              ? 'text-gray-300 hover:bg-gray-700'
-              : 'text-gray-700 hover:bg-gray-100'
+              ? 'liquid-glass-button text-white shadow-md'
+              : 'text-muted-foreground hover:text-[var(--text-primary)] hover:bg-[var(--input-bg)]'
           }`}
         >
           <Package size={16} />
@@ -647,54 +676,48 @@ export function AnalyticsDashboard() {
         </button>
         <button
           onClick={() => setActiveTab('gst-report')}
-          className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-all ${
+          className={`flex shrink-0 whitespace-nowrap items-center gap-2 px-4 sm:px-5 py-2 rounded-lg text-sm font-semibold transition-all active:scale-[0.97] cursor-pointer ${
             activeTab === 'gst-report'
-              ? 'bg-blue-600 text-white shadow-md shadow-blue-600/10'
-              : darkMode
-              ? 'text-gray-300 hover:bg-gray-700'
-              : 'text-gray-700 hover:bg-gray-100'
+              ? 'liquid-glass-button text-white shadow-md'
+              : 'text-muted-foreground hover:text-[var(--text-primary)] hover:bg-[var(--input-bg)]'
           }`}
         >
           <FileText size={16} />
-          GST GSTR-1 Report
+          GST Tax Register
         </button>
         <button
           onClick={() => setActiveTab('insights')}
-          className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-all ${
+          className={`flex shrink-0 whitespace-nowrap items-center gap-2 px-4 sm:px-5 py-2 rounded-lg text-sm font-semibold transition-all active:scale-[0.97] cursor-pointer ${
             activeTab === 'insights'
-              ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md shadow-purple-600/10'
-              : darkMode
-              ? 'text-gray-300 hover:bg-gray-700'
-              : 'text-gray-700 hover:bg-gray-100'
+              ? 'liquid-glass-button text-white shadow-md'
+              : 'text-muted-foreground hover:text-[var(--text-primary)] hover:bg-[var(--input-bg)]'
           }`}
         >
           <Sparkles size={16} />
-          AI Analytics Insights
+          AI Store Insights
         </button>
         {isOwner() && (
           <button
             onClick={() => setActiveTab('shifts')}
-            className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold transition-all ${
+            className={`flex shrink-0 whitespace-nowrap items-center gap-2 px-4 sm:px-5 py-2 rounded-lg text-sm font-semibold transition-all active:scale-[0.97] cursor-pointer ${
               activeTab === 'shifts'
-                ? 'bg-blue-600 text-white shadow-md shadow-blue-600/10'
-                : darkMode
-                ? 'text-gray-300 hover:bg-gray-700'
-                : 'text-gray-700 hover:bg-gray-100'
+                ? 'liquid-glass-button text-white shadow-md'
+                : 'text-muted-foreground hover:text-[var(--text-primary)] hover:bg-[var(--input-bg)]'
             }`}
           >
-            <Clock size={16} />
-            Shifts Auditing
+            <History size={16} />
+            Shift Z-Reports Auditing
           </button>
         )}
       </div>
 
       {/* Filters (Hidden for AI Insights & Shifts Auditing to conserve space) */}
       {activeTab !== 'insights' && activeTab !== 'shifts' && (
-        <div className={`${darkMode ? 'bg-gray-800 border-gray-700/50' : 'bg-white border-gray-200'} rounded-xl shadow-sm p-4 mb-4 flex-shrink-0 border`}>
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <Filter size={16} className={darkMode ? 'text-gray-400' : 'text-gray-500'} />
-              <span className={`font-bold text-xs ${darkMode ? 'text-gray-300' : 'text-gray-700'} uppercase tracking-wider`}>Active Filters:</span>
+        <div className="glass-panel backdrop-blur-xl backdrop-saturate-200 border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6),var(--shadow-glass)] p-4 mb-4 flex-shrink-0 border">
+          <div className="flex flex-wrap items-center gap-4 text-xs">
+            <div className="flex items-center gap-1.5 font-semibold">
+              <Filter size={16} className="text-[var(--text-muted)]" />
+              <span className="font-bold text-xs text-[var(--text-secondary)] uppercase tracking-wider">Active Filters:</span>
             </div>
 
             <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 md:grid-cols-4 gap-4 items-center">
@@ -704,32 +727,39 @@ export function AnalyticsDashboard() {
                 <select
                   value={dateFilter}
                   onChange={(e) => setDateFilter(e.target.value as DateFilter)}
-                  className={`w-full px-2 py-1 text-xs border ${darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500`}
+                  className="w-full px-2 py-1 text-xs border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
                 >
                   <option value="today">Today</option>
-                  <option value="week">Last 7 Days</option>
-                  <option value="month">Last 30 Days</option>
+                  <option value="yesterday">Yesterday</option>
+                  <option value="7days">Last 7 Days</option>
+                  <option value="30days">Last 30 Days</option>
+                  <option value="thisMonth">This Month</option>
                   <option value="custom">Custom Range</option>
                 </select>
               </div>
 
               {/* Custom Date selectors */}
               {dateFilter === 'custom' && (
-                <div className="col-span-2 flex items-center gap-2">
-                  <input
-                    type="date"
-                    value={customStartDate}
-                    onChange={(e) => setCustomStartDate(e.target.value)}
-                    className={`w-full px-2 py-1 text-xs border ${darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500`}
-                  />
-                  <span className="text-[10px] opacity-40">to</span>
-                  <input
-                    type="date"
-                    value={customEndDate}
-                    onChange={(e) => setCustomEndDate(e.target.value)}
-                    className={`w-full px-2 py-1 text-xs border ${darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500`}
-                  />
-                </div>
+                <>
+                  <div className="flex items-center gap-1 min-w-[140px]">
+                    <span className="opacity-60 text-[11px]">From:</span>
+                    <input
+                      type="date"
+                      value={customStartDate}
+                      onChange={(e) => setCustomStartDate(e.target.value)}
+                      className="w-full px-2 py-1 text-xs border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1 min-w-[140px]">
+                    <span className="opacity-60 text-[11px]">To:</span>
+                    <input
+                      type="date"
+                      value={customEndDate}
+                      onChange={(e) => setCustomEndDate(e.target.value)}
+                      className="w-full px-2 py-1 text-xs border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                </>
               )}
 
               {/* Payment Filter */}
@@ -738,7 +768,7 @@ export function AnalyticsDashboard() {
                 <select
                   value={paymentFilter}
                   onChange={(e) => setPaymentFilter(e.target.value)}
-                  className={`w-full px-2 py-1 text-xs border ${darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500`}
+                  className="w-full px-2 py-1 text-xs border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
                 >
                   <option value="all">All Methods</option>
                   <option value="cash">Cash</option>
@@ -765,6 +795,7 @@ export function AnalyticsDashboard() {
                 color="bg-blue-500"
                 change={null}
                 darkMode={darkMode}
+                loading={isLoadingBills}
               />
               <MetricCard
                 title="Sales (Today Context)"
@@ -773,6 +804,7 @@ export function AnalyticsDashboard() {
                 color="bg-green-500"
                 change={null}
                 darkMode={darkMode}
+                loading={isLoadingBills}
               />
               <MetricCard
                 title="Sales (Last 30 Days)"
@@ -781,6 +813,7 @@ export function AnalyticsDashboard() {
                 color="bg-purple-500"
                 change={null}
                 darkMode={darkMode}
+                loading={isLoadingBills}
               />
               <MetricCard
                 title="Bills Generated"
@@ -789,6 +822,7 @@ export function AnalyticsDashboard() {
                 color="bg-orange-500"
                 change={null}
                 darkMode={darkMode}
+                loading={isLoadingBills}
               />
               <MetricCard
                 title="Avg Ticket Value"
@@ -797,16 +831,17 @@ export function AnalyticsDashboard() {
                 color="bg-pink-500"
                 change={null}
                 darkMode={darkMode}
+                loading={isLoadingBills}
               />
             </div>
 
             {/* Sales Trend chart card */}
-            <div className={`flex-1 ${darkMode ? 'bg-gray-800 border-gray-700/50' : 'bg-white border-gray-200'} rounded-xl shadow-sm p-5 border overflow-hidden flex flex-col`}>
+            <div className="flex-1 glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-sm p-5 border overflow-hidden flex flex-col">
               
               {/* Header with AI Forecast Toggle */}
-              <div className="flex items-center justify-between mb-3 flex-shrink-0">
-                <h3 className={`font-semibold text-sm ${darkMode ? 'text-white' : 'text-gray-800'} flex items-center gap-2`}>
-                  <TrendingUp size={16} className="text-blue-500" />
+              <div className="flex items-center justify-between mb-4 flex-shrink-0">
+                <h3 className="font-semibold text-sm text-[var(--text-primary)] flex items-center gap-2">
+                  <TrendingUp size={16} className="text-emerald-500" />
                   Sales Revenue Trend
                 </h3>
                 
@@ -814,8 +849,8 @@ export function AnalyticsDashboard() {
                   onClick={() => setShowForecast(!showForecast)}
                   className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all border select-none cursor-pointer ${
                     showForecast
-                      ? 'bg-purple-500/15 border-purple-500/35 text-purple-600 dark:text-purple-400 shadow-sm'
-                      : darkMode ? 'bg-gray-750 border-gray-700 text-gray-400 hover:text-white' : 'bg-gray-50 border-gray-250 text-gray-650 hover:bg-gray-100'
+                      ? 'bg-purple-500/15 border-purple-500/35 text-purple-400 shadow-sm'
+                      : 'bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                   }`}
                 >
                   <Sparkles size={13} className={showForecast ? 'animate-pulse text-purple-500' : ''} />
@@ -832,19 +867,19 @@ export function AnalyticsDashboard() {
                     <AreaChart data={salesTrendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                       <defs>
                         <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                          <stop offset="5%" stopColor={accentColor || "var(--primary-accent)"} stopOpacity={0.3} />
+                          <stop offset="95%" stopColor={accentColor || "var(--primary-accent)"} stopOpacity={0} />
                         </linearGradient>
                       </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke={darkMode ? '#374151' : '#e5e7eb'} />
-                      <XAxis dataKey="date" stroke="#6b7280" style={{ fontSize: '10px' }} />
-                      <YAxis stroke="#6b7280" style={{ fontSize: '10px' }} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border-glass)" />
+                      <XAxis dataKey="date" stroke="var(--text-muted)" style={{ fontSize: '10px' }} />
+                      <YAxis stroke="var(--text-muted)" style={{ fontSize: '10px' }} />
                       <Tooltip
                         contentStyle={{
-                          backgroundColor: darkMode ? '#1f2937' : '#fff',
-                          border: darkMode ? '1px solid #374151' : '1px solid #e5e7eb',
+                          backgroundColor: 'var(--input-bg)',
+                          border: '1px solid var(--border-glass)',
                           borderRadius: '8px',
-                          color: darkMode ? '#fff' : '#000'
+                          color: 'var(--text-primary)',
                         }}
                       />
                       <Legend style={{ fontSize: '10px' }} />
@@ -852,7 +887,7 @@ export function AnalyticsDashboard() {
                         name="Actual Sales (INR)"
                         type="monotone"
                         dataKey="sales"
-                        stroke="#3b82f6"
+                        stroke={accentColor || "var(--primary-accent)"}
                         strokeWidth={2}
                         fill="url(#colorSales)"
                         connectNulls
@@ -862,10 +897,10 @@ export function AnalyticsDashboard() {
                           name="Projected Sales (INR)"
                           type="monotone"
                           dataKey="forecast"
-                          stroke="#8b5cf6"
+                          stroke="var(--chart-3)"
                           strokeWidth={2.5}
                           strokeDasharray="4 4"
-                          dot={{ r: 3.5, stroke: '#8b5cf6', strokeWidth: 1, fill: '#fff' }}
+                          dot={{ r: 3.5, stroke: 'var(--chart-3)', strokeWidth: 1, fill: 'var(--text-primary)' }}
                           activeDot={{ r: 5 }}
                           connectNulls
                         />
@@ -876,12 +911,10 @@ export function AnalyticsDashboard() {
 
                 {/* AI Predictive Intelligence details */}
                 {showForecast && (
-                  <div className={`w-full lg:w-72 border rounded-xl p-4 flex flex-col flex-shrink-0 overflow-y-auto ${
-                    darkMode ? 'bg-purple-950/15 border-purple-900/30' : 'bg-purple-500/[0.03] border-purple-200 shadow-sm shadow-purple-500/5'
-                  } animate-scale-in`}>
+                  <div className="w-full lg:w-72 border rounded-xl p-4 flex flex-col flex-shrink-0 overflow-y-auto bg-[var(--bg-glass)] border-[var(--border-glass)] text-[var(--text-primary)] animate-scale-in">
                     <div className="flex items-center gap-1.5 mb-3">
                       <Sparkles className="text-purple-500" size={15} />
-                      <h4 className="font-extrabold text-[10px] uppercase tracking-wider text-purple-600 dark:text-purple-400">
+                      <h4 className="font-extrabold text-[10px] uppercase tracking-wider text-purple-400">
                         AI Predictive Insights
                       </h4>
                     </div>
@@ -890,7 +923,7 @@ export function AnalyticsDashboard() {
                       {/* Metric 1: Projected Revenue */}
                       <div>
                         <span className="text-[10px] font-bold opacity-60 block">Projected Revenue (7 Days)</span>
-                        <span className="text-xl font-black text-purple-600 dark:text-purple-400 block mt-0.5">
+                        <span className="text-xl font-black text-purple-400 block mt-0.5">
                           ₹{forecastMetrics.projectedTotal.toLocaleString('en-IN', { maximumFractionDigits: 1 })}
                         </span>
                       </div>
@@ -916,7 +949,7 @@ export function AnalyticsDashboard() {
                       <div>
                         <span className="text-[10px] font-bold opacity-60 block">AI Forecast Confidence</span>
                         <div className="flex items-center gap-2 mt-1">
-                          <div className="w-full bg-gray-200 dark:bg-gray-800 rounded-full h-1.5 overflow-hidden">
+                          <div className="w-full bg-[var(--input-bg)] rounded-full h-1.5 overflow-hidden">
                             <div className="bg-purple-500 h-1.5 rounded-full" style={{ width: `${forecastMetrics.confidence}%` }} />
                           </div>
                           <span className="text-[10px] font-bold">{forecastMetrics.confidence}%</span>
@@ -924,7 +957,7 @@ export function AnalyticsDashboard() {
                       </div>
 
                       {/* Brief description text */}
-                      <p className="text-[10px] opacity-75 leading-relaxed border-t dark:border-gray-800/85 pt-3">
+                      <p className="text-[10px] opacity-75 leading-relaxed border-t border-[var(--border-glass)] pt-3">
                         {forecastMetrics.slope >= 0 
                           ? 'Continuous upward trajectory detected based on rolling transaction volume. Recommended to verify stock levels in high-velocity procurement tables.'
                           : 'Recent decline or stagnation in transaction volume noticed. Consider running category-wise discount campaigns or setting up promo points.'
@@ -941,8 +974,8 @@ export function AnalyticsDashboard() {
         {activeTab === 'breakdown' && (
           <div className="h-full grid grid-cols-1 lg:grid-cols-2 gap-4 overflow-hidden">
             {/* Payment Distribution */}
-            <div className={`${darkMode ? 'bg-gray-800 border-gray-700/50' : 'bg-white border-gray-200'} rounded-xl p-5 border overflow-hidden flex flex-col`}>
-              <h3 className={`font-semibold text-sm ${darkMode ? 'text-white' : 'text-gray-800'} mb-3 flex items-center gap-2 flex-shrink-0`}>
+            <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl p-5 border overflow-hidden flex flex-col">
+              <h3 className="font-semibold text-sm text-[var(--text-primary)] mb-3 flex items-center gap-2 flex-shrink-0">
                 <CreditCard size={16} className="text-green-500" />
                 Payment Method Revenue Share
               </h3>
@@ -959,7 +992,7 @@ export function AnalyticsDashboard() {
                         labelLine={true}
                         label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
                         outerRadius="70%"
-                        fill="#8884d8"
+                        fill="var(--primary-accent)"
                         dataKey="value"
                       >
                         {paymentMethodData.map((entry, index) => (
@@ -968,10 +1001,10 @@ export function AnalyticsDashboard() {
                       </Pie>
                       <Tooltip
                         contentStyle={{
-                          backgroundColor: darkMode ? '#1f2937' : '#fff',
-                          border: darkMode ? '1px solid #374151' : '1px solid #e5e7eb',
+                          backgroundColor: 'var(--input-bg)',
+                          border: '1px solid var(--border-glass)',
                           borderRadius: '8px',
-                          color: darkMode ? '#fff' : '#005'
+                          color: 'var(--text-primary)'
                         }}
                       />
                     </PieChart>
@@ -981,9 +1014,9 @@ export function AnalyticsDashboard() {
             </div>
 
             {/* Category Performance */}
-            <div className={`${darkMode ? 'bg-gray-800 border-gray-700/50' : 'bg-white border-gray-200'} rounded-xl p-5 border overflow-hidden flex flex-col`}>
-              <h3 className={`font-semibold text-sm ${darkMode ? 'text-white' : 'text-gray-800'} mb-3 flex items-center gap-2 flex-shrink-0`}>
-                <ShoppingCart size={16} className="text-pink-500" />
+            <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl p-5 border overflow-hidden flex flex-col">
+              <h3 className="font-semibold text-sm text-[var(--text-primary)] mb-3 flex items-center gap-2 flex-shrink-0">
+                <ShoppingCart size={16} className="text-[var(--primary-accent)]" />
                 Category Performance Summary
               </h3>
               <div className="flex-1 w-full overflow-hidden">
@@ -992,18 +1025,18 @@ export function AnalyticsDashboard() {
                 ) : (
                   <ResponsiveContainer width="100%" height="95%">
                     <BarChart data={categoryData} margin={{ top: 10, right: 10, left: -20, bottom: 5 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke={darkMode ? '#374151' : '#e5e7eb'} />
-                      <XAxis dataKey="name" stroke="#6b7280" style={{ fontSize: '10px' }} />
-                      <YAxis stroke="#6b7280" style={{ fontSize: '10px' }} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border-glass)" />
+                      <XAxis dataKey="name" stroke="var(--text-muted)" style={{ fontSize: '10px' }} />
+                      <YAxis stroke="var(--text-muted)" style={{ fontSize: '10px' }} />
                       <Tooltip
                         contentStyle={{
-                          backgroundColor: darkMode ? '#1f2937' : '#fff',
-                          border: darkMode ? '1px solid #374151' : '1px solid #e5e7eb',
+                          backgroundColor: 'var(--input-bg)',
+                          border: '1px solid var(--border-glass)',
                           borderRadius: '8px',
-                          color: darkMode ? '#fff' : '#000'
+                          color: 'var(--text-primary)'
                         }}
                       />
-                      <Bar dataKey="value" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="value" fill="var(--chart-3)" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 )}
@@ -1015,58 +1048,58 @@ export function AnalyticsDashboard() {
         {activeTab === 'products' && (
           <div className="h-full grid grid-cols-1 lg:grid-cols-2 gap-4 overflow-hidden">
             {/* Top Products */}
-            <div className={`${darkMode ? 'bg-gray-800 border-gray-700/50' : 'bg-white border-gray-200'} rounded-xl p-5 border overflow-hidden flex flex-col`}>
-              <h3 className={`font-semibold text-sm ${darkMode ? 'text-white' : 'text-gray-800'} mb-3 flex items-center gap-2 flex-shrink-0`}>
-                <Package size={16} className="text-purple-500" />
+            <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl p-5 border overflow-hidden flex flex-col">
+              <h3 className="font-semibold text-sm text-[var(--text-primary)] mb-3 flex items-center gap-2 flex-shrink-0">
+                <Package size={16} className="text-[var(--primary-accent)]" />
                 Top Selling Products List
               </h3>
               <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
                 {topProducts.map((product, index) => (
                   <div
                     key={product.code}
-                    className={`flex items-center justify-between p-3 ${darkMode ? 'bg-gray-700/50 hover:bg-gray-700' : 'bg-gray-50 hover:bg-gray-100/85'} rounded-xl border border-gray-150/10 transition-all`}
+                    className="flex items-center justify-between p-3 bg-[var(--input-bg)] rounded-xl border border-[var(--border-glass)] transition-all"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="flex items-center justify-center w-7 h-7 bg-blue-500 text-white rounded-full font-bold text-xs shadow-sm">
+                      <div className="flex items-center justify-center w-7 h-7 bg-[var(--primary-accent)] text-white rounded-full font-bold text-xs shadow-sm">
                         {index + 1}
                       </div>
                       <div>
-                        <p className={`font-semibold text-sm ${darkMode ? 'text-white' : 'text-gray-800'}`}>{product.name}</p>
-                        <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-550'}`}>{product.quantity} units sold</p>
+                        <p className="font-semibold text-sm text-[var(--text-primary)]">{product.name}</p>
+                        <p className="text-xs text-muted-foreground">{product.quantity} units sold</p>
                       </div>
                     </div>
                     <div className="text-right">
-                      <p className="font-bold text-sm text-green-600">₹{product.revenue.toFixed(2)}</p>
+                      <p className="font-bold text-sm text-emerald-500">₹{product.revenue.toFixed(2)}</p>
                     </div>
                   </div>
                 ))}
                 {topProducts.length === 0 && (
-                  <p className={`text-center py-8 text-sm ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>No product sales registered.</p>
+                  <p className="text-center py-8 text-sm text-muted-foreground">No product sales registered.</p>
                 )}
               </div>
             </div>
 
             {/* Peak Hours */}
-            <div className={`${darkMode ? 'bg-gray-800 border-gray-700/50' : 'bg-white border-gray-200'} rounded-xl p-5 border overflow-hidden flex flex-col`}>
-              <h3 className={`font-semibold text-sm ${darkMode ? 'text-white' : 'text-gray-800'} mb-3 flex items-center gap-2 flex-shrink-0`}>
-                <Clock size={16} className="text-orange-500" />
+            <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl p-5 border overflow-hidden flex flex-col">
+              <h3 className="font-semibold text-sm text-[var(--text-primary)] mb-3 flex items-center gap-2 flex-shrink-0">
+                <Clock size={16} className="text-amber-500" />
                 Peak Checkout Trading Hours
               </h3>
               <div className="flex-1 w-full overflow-hidden">
                 <ResponsiveContainer width="100%" height="95%">
                   <BarChart data={peakHoursData.filter((d) => d.sales > 0)} margin={{ top: 10, right: 10, left: -20, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={darkMode ? '#374151' : '#e5e7eb'} />
-                    <XAxis dataKey="hour" stroke="#6b7280" style={{ fontSize: '10px' }} />
-                    <YAxis stroke="#6b7280" style={{ fontSize: '10px' }} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-glass)" />
+                    <XAxis dataKey="hour" stroke="var(--text-muted)" style={{ fontSize: '10px' }} />
+                    <YAxis stroke="var(--text-muted)" style={{ fontSize: '10px' }} />
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: darkMode ? '#1f2937' : '#fff',
-                        border: darkMode ? '1px solid #374151' : '1px solid #e5e7eb',
+                        backgroundColor: 'var(--input-bg)',
+                        border: '1px solid var(--border-glass)',
                         borderRadius: '8px',
-                        color: darkMode ? '#fff' : '#000'
+                        color: 'var(--text-primary)'
                       }}
                     />
-                    <Bar dataKey="sales" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="sales" fill="var(--chart-4)" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -1075,7 +1108,7 @@ export function AnalyticsDashboard() {
         )}
 
         {activeTab === 'insights' && (
-          <div className="h-full overflow-y-auto pr-1 border border-gray-150/10 rounded-xl p-4 bg-gray-50/20 dark:bg-gray-950/20">
+          <div className="h-full overflow-y-auto pr-1 border border-[var(--border-glass)] rounded-xl p-4 bg-[var(--bg-glass)] text-[var(--text-primary)]">
             <InsightsDashboard bills={bills} filteredBills={filteredBills} />
           </div>
         )}
@@ -1084,38 +1117,30 @@ export function AnalyticsDashboard() {
           <div className="h-full overflow-y-auto pr-1 flex flex-col gap-4">
             {/* Quick GST summary cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 flex-shrink-0">
-              <div className={`p-4 rounded-xl border shadow-sm ${
-                darkMode ? 'bg-slate-900/60 border-slate-800/80' : 'bg-white border-gray-150'
-              }`}>
-                <h4 className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-gray-500'} uppercase tracking-wider mb-1`}>Total Taxable Value</h4>
-                <p className={`text-xl font-extrabold tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>
+              <div className="p-4 rounded-xl border shadow-sm glass-panel border-[var(--border-glass)] text-[var(--text-primary)]">
+                <h4 className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">Total Taxable Value</h4>
+                <p className="text-xl font-extrabold tracking-tight text-[var(--text-primary)]">
                   ₹{hsnAggregatedData.reduce((sum, d) => sum + d.taxableValue, 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </p>
                 <div className="mt-1 h-1 w-12 rounded bg-gradient-to-r from-blue-500 to-indigo-500" />
               </div>
-              <div className={`p-4 rounded-xl border shadow-sm ${
-                darkMode ? 'bg-slate-900/60 border-slate-800/80' : 'bg-white border-gray-150'
-              }`}>
-                <h4 className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-gray-500'} uppercase tracking-wider mb-1`}>CGST Collected</h4>
-                <p className={`text-xl font-extrabold tracking-tight ${darkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>
+              <div className="p-4 rounded-xl border shadow-sm glass-panel border-[var(--border-glass)] text-[var(--text-primary)]">
+                <h4 className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">CGST Collected</h4>
+                <p className="text-xl font-extrabold tracking-tight text-emerald-500">
                   ₹{hsnAggregatedData.reduce((sum, d) => sum + d.cgst, 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </p>
                 <div className="mt-1 h-1 w-12 rounded bg-emerald-500" />
               </div>
-              <div className={`p-4 rounded-xl border shadow-sm ${
-                darkMode ? 'bg-slate-900/60 border-slate-800/80' : 'bg-white border-gray-150'
-              }`}>
-                <h4 className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-gray-500'} uppercase tracking-wider mb-1`}>SGST Collected</h4>
-                <p className={`text-xl font-extrabold tracking-tight ${darkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>
+              <div className="p-4 rounded-xl border shadow-sm glass-panel border-[var(--border-glass)] text-[var(--text-primary)]">
+                <h4 className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">SGST Collected</h4>
+                <p className="text-xl font-extrabold tracking-tight text-emerald-500">
                   ₹{hsnAggregatedData.reduce((sum, d) => sum + d.sgst, 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </p>
                 <div className="mt-1 h-1 w-12 rounded bg-emerald-500" />
               </div>
-              <div className={`p-4 rounded-xl border shadow-sm ${
-                darkMode ? 'bg-slate-900/60 border-slate-800/80' : 'bg-white border-gray-150'
-              }`}>
-                <h4 className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-gray-500'} uppercase tracking-wider mb-1`}>Total GST Liability</h4>
-                <p className={`text-xl font-extrabold tracking-tight ${darkMode ? 'text-blue-400' : 'text-blue-600'}`}>
+              <div className="p-4 rounded-xl border shadow-sm glass-panel border-[var(--border-glass)] text-[var(--text-primary)]">
+                <h4 className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">Total GST Liability</h4>
+                <p className="text-xl font-extrabold tracking-tight text-blue-500">
                   ₹{hsnAggregatedData.reduce((sum, d) => sum + d.totalTax, 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </p>
                 <div className="mt-1 h-1 w-12 rounded bg-gradient-to-r from-teal-400 to-blue-500" />
@@ -1123,13 +1148,11 @@ export function AnalyticsDashboard() {
             </div>
 
             {/* Export and Table Slate */}
-            <div className={`p-5 rounded-2xl border backdrop-blur-md shadow-md ${
-              darkMode ? 'bg-slate-950/20 border-slate-800/80' : 'bg-white border-gray-200'
-            } flex-1 flex flex-col overflow-hidden min-h-[300px]`}>
+            <div className="p-5 rounded-2xl border backdrop-blur-md shadow-md glass-panel border-[var(--border-glass)] text-[var(--text-primary)] flex-1 flex flex-col overflow-hidden min-h-[300px]">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 flex-shrink-0">
                 <div>
-                  <h3 className={`text-sm font-bold tracking-wide ${darkMode ? 'text-gray-100' : 'text-gray-800'}`}>HSN-wise Outward Taxable Supplies</h3>
-                  <p className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-400'} mt-0.5`}>
+                  <h3 className="text-sm font-bold tracking-wide text-[var(--text-primary)]">HSN-wise Outward Taxable Supplies</h3>
+                  <p className="text-xs text-[var(--text-muted)] mt-0.5">
                     Summary of legal tax liabilities grouped by HSN and GST slabs for local intra-state retail sales.
                   </p>
                 </div>
@@ -1138,8 +1161,8 @@ export function AnalyticsDashboard() {
                   disabled={hsnAggregatedData.length === 0}
                   className={`flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-lg select-none cursor-pointer ${
                     hsnAggregatedData.length === 0
-                      ? 'opacity-40 cursor-not-allowed bg-gray-300 dark:bg-gray-800 text-gray-500'
-                      : 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-teal-500/10 transform active:scale-95'
+                      ? 'opacity-40 cursor-not-allowed bg-[var(--input-bg)] text-[var(--text-muted)]'
+                      : 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-teal-500/10 transform active:scale-[0.97]'
                   }`}
                 >
                   <FileSpreadsheet size={15} />
@@ -1148,9 +1171,9 @@ export function AnalyticsDashboard() {
               </div>
 
               {/* Data Table Container */}
-              <div className="flex-1 overflow-y-auto rounded-lg border border-gray-150/10 min-h-0">
+              <div className="flex-1 overflow-y-auto rounded-lg border border-[var(--border-glass)] min-h-0">
                 <table className="w-full text-left border-collapse">
-                  <thead className={`sticky top-0 z-10 ${darkMode ? 'bg-slate-900 text-gray-300' : 'bg-gray-50 text-gray-600'} text-[11px] font-bold uppercase tracking-wider`}>
+                  <thead className="sticky top-0 z-10 bg-[var(--input-bg)] text-[var(--text-muted)] border-b border-[var(--border-glass)] text-[11px] font-bold uppercase tracking-wider">
                     <tr>
                       <th className="px-4 py-3">HSN Code</th>
                       <th className="px-4 py-3">Description</th>
@@ -1160,22 +1183,22 @@ export function AnalyticsDashboard() {
                       <th className="px-3 py-3 text-center">Rate</th>
                       <th className="px-3 py-3 text-right">CGST</th>
                       <th className="px-3 py-3 text-right">SGST</th>
-                      <th className="px-3 py-3 text-right text-gray-400 dark:text-gray-600">IGST</th>
+                      <th className="px-3 py-3 text-right text-[var(--text-muted)]">IGST</th>
                       <th className="px-4 py-3 text-right">Total Invoice</th>
                     </tr>
                   </thead>
-                  <tbody className={`divide-y text-xs ${darkMode ? 'divide-slate-800/80 text-gray-200' : 'divide-gray-100 text-gray-700'}`}>
+                  <tbody className="divide-y text-xs divide-[var(--border-glass)] text-[var(--text-primary)]">
                     {hsnAggregatedData.length === 0 ? (
                       <tr>
-                        <td colSpan={10} className="px-4 py-12 text-center text-gray-400 dark:text-gray-500">
+                        <td colSpan={10} className="px-4 py-12 text-center text-[var(--text-muted)]">
                           <p className="font-medium text-sm">No transaction records found matching active filters</p>
                           <p className="text-xs mt-1">Try expanding your active filter date range or generating checkouts first.</p>
                         </td>
                       </tr>
                     ) : (
                       hsnAggregatedData.map((row) => (
-                        <tr key={`${row.hsnCode}_${row.gstRate}`} className={`hover:bg-gray-50/50 dark:hover:bg-slate-900/20 transition-colors`}>
-                          <td className="px-4 py-3 font-mono font-bold text-blue-500 dark:text-blue-400">
+                        <tr key={`${row.hsnCode}_${row.gstRate}`} className={`hover:bg-[var(--surface-hover)] transition-colors`}>
+                          <td className="px-4 py-3 font-mono font-bold text-blue-500">
                             {row.hsnCode}
                           </td>
                           <td className="px-4 py-3 font-medium truncate max-w-[150px]" title={row.description}>
@@ -1187,16 +1210,16 @@ export function AnalyticsDashboard() {
                           <td className="px-3 py-3 text-center">
                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                               row.gstRate === 0
-                                ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
-                                : 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
+                                ? 'bg-[var(--input-bg)] text-[var(--text-muted)]'
+                                : 'bg-blue-500/15 text-blue-500'
                             }`}>
                               {row.gstRate}%
                             </span>
                           </td>
-                          <td className="px-3 py-3 text-right font-mono text-emerald-600 dark:text-emerald-400">₹{row.cgst.toFixed(2)}</td>
-                          <td className="px-3 py-3 text-right font-mono text-emerald-600 dark:text-emerald-400">₹{row.sgst.toFixed(2)}</td>
-                          <td className="px-3 py-3 text-right font-mono text-gray-400 dark:text-gray-600 opacity-40">₹0.00</td>
-                          <td className="px-4 py-3 text-right font-mono font-extrabold text-blue-600 dark:text-blue-400">
+                          <td className="px-3 py-3 text-right font-mono text-emerald-500">₹{row.cgst.toFixed(2)}</td>
+                          <td className="px-3 py-3 text-right font-mono text-emerald-500">₹{row.sgst.toFixed(2)}</td>
+                          <td className="px-3 py-3 text-right font-mono text-[var(--text-muted)] opacity-40">₹0.00</td>
+                          <td className="px-4 py-3 text-right font-mono font-extrabold text-blue-500">
                             ₹{row.totalValue.toFixed(2)}
                           </td>
                         </tr>
@@ -1207,10 +1230,8 @@ export function AnalyticsDashboard() {
               </div>
 
               {/* GST compliance warning notice */}
-              <div className={`mt-4 p-3 rounded-xl border flex items-start gap-2.5 ${
-                darkMode ? 'bg-slate-900/30 border-slate-800/80 text-slate-400' : 'bg-amber-50/40 border-amber-100 text-gray-500'
-              }`}>
-                <div className={`p-1 rounded-lg ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-amber-100 text-amber-700'} flex-shrink-0`}>
+              <div className="mt-4 p-3 rounded-xl border flex items-start gap-2.5 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-muted)]">
+                <div className="p-1 rounded-lg bg-[var(--bg-glass)] text-[var(--text-primary)] flex-shrink-0">
                   <Receipt size={14} />
                 </div>
                 <div className="text-[11px] leading-relaxed">
@@ -1224,92 +1245,61 @@ export function AnalyticsDashboard() {
         {activeTab === 'shifts' && (
           <div className="h-full overflow-y-auto pr-1 flex flex-col gap-4">
             
-            {/* Shifts Audit Metrics Overview */}
-            {useMemo(() => {
-              const closedShifts = shifts.filter(s => s.status === 'closed');
-              const totalAudited = closedShifts.length;
-              
-              let netCashDiscrepancy = 0;
-              let netDigitalDiscrepancy = 0;
-              let totalExpectedSales = 0;
-              let totalActualSales = 0;
+            {/* Shifts Audit Metrics Overview — values come from the top-level
+                `shiftAuditMetrics` memo; keep hooks out of this branch. */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 flex-shrink-0">
+              <div className="p-4 rounded-xl border shadow-sm glass-panel border-[var(--border-glass)] text-[var(--text-primary)]">
+                <h4 className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">Audited Closed Shifts</h4>
+                <p className="text-xl font-extrabold tracking-tight text-[var(--text-primary)]">
+                  {shiftAuditMetrics.totalAudited} Z-Reports
+                </p>
+                <div className="mt-1 h-1 w-12 rounded bg-gradient-to-r from-blue-500 to-indigo-500" />
+              </div>
 
-              closedShifts.forEach(s => {
-                netCashDiscrepancy += (s.discrepancy_cash || 0);
-                const upiDiff = (s.actual_upi ?? 0) - (s.system_upi ?? 0);
-                const cardDiff = (s.actual_card ?? 0) - (s.system_card ?? 0);
-                netDigitalDiscrepancy += (upiDiff + cardDiff);
-                
-                totalExpectedSales += (s.system_cash || 0) + (s.system_upi || 0) + (s.system_card || 0);
-                totalActualSales += ((s.actual_cash || 0) - s.initial_cash) + (s.actual_upi || 0) + (s.actual_card || 0);
-              });
+              <div className="p-4 rounded-xl border shadow-sm glass-panel border-[var(--border-glass)] text-[var(--text-primary)]">
+                <h4 className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">Net Cash Discrepancy</h4>
+                <p className={`text-xl font-extrabold tracking-tight ${
+                  shiftAuditMetrics.netCashDiscrepancy === 0
+                    ? 'text-[var(--text-muted)]'
+                    : shiftAuditMetrics.netCashDiscrepancy > 0
+                    ? 'text-emerald-500'
+                    : 'text-rose-500'
+                }`}>
+                  {shiftAuditMetrics.netCashDiscrepancy >= 0 ? '+' : ''}₹{shiftAuditMetrics.netCashDiscrepancy.toFixed(2)}
+                </p>
+                <div className={`mt-1 h-1 w-12 rounded ${shiftAuditMetrics.netCashDiscrepancy >= 0 ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+              </div>
 
-              const avgTicketVal = filteredBills.length > 0 ? (filteredBills.reduce((sum, b) => sum + b.total, 0) / filteredBills.length) : 0;
+              <div className="p-4 rounded-xl border shadow-sm glass-panel border-[var(--border-glass)] text-[var(--text-primary)]">
+                <h4 className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">Net Digital Discrepancy</h4>
+                <p className={`text-xl font-extrabold tracking-tight ${
+                  shiftAuditMetrics.netDigitalDiscrepancy === 0
+                    ? 'text-[var(--text-muted)]'
+                    : shiftAuditMetrics.netDigitalDiscrepancy > 0
+                    ? 'text-emerald-500'
+                    : 'text-rose-500'
+                }`}>
+                  {shiftAuditMetrics.netDigitalDiscrepancy >= 0 ? '+' : ''}₹{shiftAuditMetrics.netDigitalDiscrepancy.toFixed(2)}
+                </p>
+                <div className={`mt-1 h-1 w-12 rounded ${shiftAuditMetrics.netDigitalDiscrepancy >= 0 ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+              </div>
 
-              return (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 flex-shrink-0">
-                  <div className={`p-4 rounded-xl border shadow-sm ${
-                    darkMode ? 'bg-slate-900/60 border-slate-800/80 text-white' : 'bg-white border-gray-150 text-gray-800'
-                  }`}>
-                    <h4 className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-gray-500'} uppercase tracking-wider mb-1`}>Audited Closed Shifts</h4>
-                    <p className={`text-xl font-extrabold tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>
-                      {totalAudited} Z-Reports
-                    </p>
-                    <div className="mt-1 h-1 w-12 rounded bg-gradient-to-r from-blue-500 to-indigo-500" />
-                  </div>
-
-                  <div className={`p-4 rounded-xl border shadow-sm ${
-                    darkMode ? 'bg-slate-900/60 border-slate-800/80 text-white' : 'bg-white border-gray-150 text-gray-800'
-                  }`}>
-                    <h4 className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-gray-500'} uppercase tracking-wider mb-1`}>Net Cash Discrepancy</h4>
-                    <p className={`text-xl font-extrabold tracking-tight ${
-                      netCashDiscrepancy === 0
-                        ? (darkMode ? 'text-gray-350' : 'text-gray-600')
-                        : netCashDiscrepancy > 0
-                        ? 'text-emerald-500'
-                        : 'text-rose-500'
-                    }`}>
-                      {netCashDiscrepancy >= 0 ? '+' : ''}₹{netCashDiscrepancy.toFixed(2)}
-                    </p>
-                    <div className={`mt-1 h-1 w-12 rounded ${netCashDiscrepancy >= 0 ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                  </div>
-
-                  <div className={`p-4 rounded-xl border shadow-sm ${
-                    darkMode ? 'bg-slate-900/60 border-slate-800/80 text-white' : 'bg-white border-gray-150 text-gray-800'
-                  }`}>
-                    <h4 className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-gray-500'} uppercase tracking-wider mb-1`}>Net Digital Discrepancy</h4>
-                    <p className={`text-xl font-extrabold tracking-tight ${
-                      netDigitalDiscrepancy === 0
-                        ? (darkMode ? 'text-gray-350' : 'text-gray-600')
-                        : netDigitalDiscrepancy > 0
-                        ? 'text-emerald-500'
-                        : 'text-rose-500'
-                    }`}>
-                      {netDigitalDiscrepancy >= 0 ? '+' : ''}₹{netDigitalDiscrepancy.toFixed(2)}
-                    </p>
-                    <div className={`mt-1 h-1 w-12 rounded ${netDigitalDiscrepancy >= 0 ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                  </div>
-
-                  <div className={`p-4 rounded-xl border shadow-sm ${
-                    darkMode ? 'bg-slate-900/60 border-slate-800/80 text-white' : 'bg-white border-gray-150 text-gray-800'
-                  }`}>
-                    <h4 className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-gray-500'} uppercase tracking-wider mb-1`}>Avg Transaction Value</h4>
-                    <p className={`text-xl font-extrabold tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>
-                      ₹{avgTicketVal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </p>
-                    <div className="mt-1 h-1 w-12 rounded bg-gradient-to-r from-teal-400 to-blue-500" />
-                  </div>
-                </div>
-              );
-            }, [shifts, darkMode, filteredBills])}
+              <div className="p-4 rounded-xl border shadow-sm glass-panel border-[var(--border-glass)] text-[var(--text-primary)]">
+                <h4 className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider mb-1">Avg Transaction Value</h4>
+                <p className="text-xl font-extrabold tracking-tight text-[var(--text-primary)]">
+                  ₹{shiftAuditMetrics.avgTicketVal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                <div className="mt-1 h-1 w-12 rounded bg-gradient-to-r from-teal-400 to-blue-500" />
+              </div>
+            </div>
 
             {/* Visual Charts Container */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 flex-shrink-0">
               
               {/* Peak Trading Hours */}
-              <div className={`${darkMode ? 'bg-gray-800 border-gray-700/50' : 'bg-white border-gray-200'} rounded-xl p-5 border overflow-hidden flex flex-col h-[320px]`}>
+              <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl p-5 border overflow-hidden flex flex-col h-[320px]">
                 <div className="flex items-center justify-between mb-3 flex-shrink-0">
-                  <h3 className={`font-semibold text-sm ${darkMode ? 'text-white' : 'text-gray-800'} flex items-center gap-2`}>
+                  <h3 className="font-semibold text-sm text-[var(--text-primary)] flex items-center gap-2">
                     <Clock size={16} className="text-purple-500" />
                     Hourly Peak Trading Analysis
                   </h3>
@@ -1323,39 +1313,39 @@ export function AnalyticsDashboard() {
                     <AreaChart data={peakHoursData} margin={{ top: 10, right: 10, left: -20, bottom: 5 }}>
                       <defs>
                         <linearGradient id="colorPeakSales" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.25} />
-                          <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                          <stop offset="5%" stopColor="var(--primary-accent)" stopOpacity={0.25} />
+                          <stop offset="95%" stopColor="var(--primary-accent)" stopOpacity={0} />
                         </linearGradient>
                       </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke={darkMode ? '#374151' : '#e5e7eb'} />
-                      <XAxis dataKey="hour" stroke="#6b7280" style={{ fontSize: '9px' }} />
-                      <YAxis yAxisId="left" stroke="#8b5cf6" style={{ fontSize: '9px' }} tickFormatter={(val) => `₹${val}`} />
-                      <YAxis yAxisId="right" orientation="right" stroke="#f59e0b" style={{ fontSize: '9px' }} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border-glass)" />
+                      <XAxis dataKey="hour" stroke="var(--text-muted)" style={{ fontSize: '9px' }} />
+                      <YAxis yAxisId="left" stroke="var(--chart-3)" style={{ fontSize: '9px' }} tickFormatter={(val) => `₹${val}`} />
+                      <YAxis yAxisId="right" orientation="right" stroke="var(--chart-4)" style={{ fontSize: '9px' }} />
                       <Tooltip
                         contentStyle={{
-                          backgroundColor: darkMode ? '#1f2937' : '#fff',
-                          border: darkMode ? '1px solid #374151' : '1px solid #e5e7eb',
+                          backgroundColor: 'var(--input-bg)',
+                          border: '1px solid var(--border-glass)',
                           borderRadius: '8px',
-                          color: darkMode ? '#fff' : '#000'
+                          color: 'var(--text-primary)'
                         }}
                       />
-                      <Area yAxisId="left" type="monotone" name="Sales Volume" dataKey="sales" fill="url(#colorPeakSales)" stroke="#8b5cf6" strokeWidth={2} />
-                      <Line yAxisId="right" type="monotone" name="Transactions Count" dataKey="transactions" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+                      <Area yAxisId="left" type="monotone" name="Sales Volume" dataKey="sales" fill="url(#colorPeakSales)" stroke="var(--chart-3)" strokeWidth={2} />
+                      <Line yAxisId="right" type="monotone" name="Transactions Count" dataKey="transactions" stroke="var(--chart-4)" strokeWidth={2} dot={{ r: 3 }} />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
               </div>
 
               {/* Cashier Performance Sales comparison */}
-              <div className={`${darkMode ? 'bg-gray-800 border-gray-700/50' : 'bg-white border-gray-200'} rounded-xl p-5 border overflow-hidden flex flex-col h-[320px]`}>
+              <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl p-5 border overflow-hidden flex flex-col h-[320px]">
                 <div className="flex items-center justify-between mb-3 flex-shrink-0">
-                  <h3 className={`font-semibold text-sm ${darkMode ? 'text-white' : 'text-gray-800'} flex items-center gap-2`}>
-                    <UserCheck size={16} className="text-emerald-500" />
+                  <h3 className="font-semibold text-sm text-[var(--text-primary)] flex items-center gap-2">
+                    <UserCheck size={16} className="text-[var(--primary-accent)]" />
                     Cashier Performance Grid
                   </h3>
                   <div className="flex items-center gap-4 text-[10px]">
-                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-emerald-500 inline-block" /> Sales (Left Y-Axis)</span>
-                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-blue-500 inline-block" /> Bills (Right Y-Axis)</span>
+                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-[var(--primary-accent)] inline-block" /> Sales (Left Y-Axis)</span>
+                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-[var(--chart-2)] inline-block" /> Bills (Right Y-Axis)</span>
                   </div>
                 </div>
                 <div className="flex-1 w-full overflow-hidden">
@@ -1364,20 +1354,20 @@ export function AnalyticsDashboard() {
                   ) : (
                     <ResponsiveContainer width="100%" height="95%">
                       <BarChart data={cashierPerformanceData} margin={{ top: 10, right: 10, left: -20, bottom: 5 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke={darkMode ? '#374151' : '#e5e7eb'} />
-                        <XAxis dataKey="name" stroke="#6b7280" style={{ fontSize: '9px' }} />
-                        <YAxis yAxisId="left" stroke="#10b981" style={{ fontSize: '9px' }} tickFormatter={(val) => `₹${val}`} />
-                        <YAxis yAxisId="right" orientation="right" stroke="#3b82f6" style={{ fontSize: '9px' }} />
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border-glass)" />
+                        <XAxis dataKey="name" stroke="var(--text-muted)" style={{ fontSize: '9px' }} />
+                        <YAxis yAxisId="left" stroke={accentColor || "var(--primary-accent)"} style={{ fontSize: '9px' }} tickFormatter={(val) => `₹${val}`} />
+                        <YAxis yAxisId="right" orientation="right" stroke="var(--chart-2)" style={{ fontSize: '9px' }} />
                         <Tooltip
                           contentStyle={{
-                            backgroundColor: darkMode ? '#1f2937' : '#fff',
-                            border: darkMode ? '1px solid #374151' : '1px solid #e5e7eb',
+                            backgroundColor: 'var(--input-bg)',
+                            border: '1px solid var(--border-glass)',
                             borderRadius: '8px',
-                            color: darkMode ? '#fff' : '#000'
+                            color: 'var(--text-primary)'
                           }}
                         />
-                        <Bar yAxisId="left" name="Sales Volume" dataKey="sales" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={30} />
-                        <Bar yAxisId="right" name="Bills Completed" dataKey="transactions" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={30} />
+                        <Bar yAxisId="left" name="Sales Volume" dataKey="sales" fill={accentColor || "var(--primary-accent)"} radius={[4, 4, 0, 0]} maxBarSize={30} />
+                        <Bar yAxisId="right" name="Bills Completed" dataKey="transactions" fill="var(--chart-2)" radius={[4, 4, 0, 0]} maxBarSize={30} />
                       </BarChart>
                     </ResponsiveContainer>
                   )}
@@ -1386,23 +1376,17 @@ export function AnalyticsDashboard() {
             </div>
 
             {/* Shift Performance & Discrepancies Grid */}
-            <div className={`p-5 rounded-2xl border backdrop-blur-md shadow-md ${
-              darkMode ? 'bg-slate-950/20 border-slate-800/80' : 'bg-white border-gray-200'
-            } flex-1 flex flex-col overflow-hidden min-h-[400px]`}>
+            <div className="p-5 rounded-2xl border backdrop-blur-md shadow-md glass-panel border-[var(--border-glass)] text-[var(--text-primary)] flex-1 flex flex-col overflow-hidden min-h-[400px]">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 flex-shrink-0">
                 <div>
-                  <h3 className={`text-sm font-bold tracking-wide ${darkMode ? 'text-gray-100' : 'text-gray-800'}`}>Closed Shift Z-Reports & Live Registers</h3>
-                  <p className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-400'} mt-0.5`}>
+                  <h3 className="text-sm font-bold tracking-wide text-[var(--text-primary)]">Closed Shift Z-Reports & Live Registers</h3>
+                  <p className="text-xs text-[var(--text-muted)] mt-0.5">
                     Audit logs representing system register sales, final till counts, and active cashier session floats.
                   </p>
                 </div>
                 <button
                   onClick={fetchShifts}
-                  className={`flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-md select-none cursor-pointer border ${
-                    darkMode 
-                      ? 'bg-gray-800 border-gray-700 hover:bg-gray-750 text-gray-200' 
-                      : 'bg-white border-gray-200 hover:bg-gray-50 text-gray-700'
-                  }`}
+                  className="flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-md select-none cursor-pointer border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] hover:bg-[var(--bg-glass)]"
                 >
                   <History size={14} className={isLoadingShifts ? 'animate-spin' : ''} />
                   Refresh Shifts
@@ -1410,9 +1394,9 @@ export function AnalyticsDashboard() {
               </div>
 
               {/* Data Table Container */}
-              <div className="flex-1 overflow-y-auto rounded-lg border border-gray-150/10 min-h-0">
+              <div className="flex-1 overflow-y-auto rounded-lg border border-[var(--border-glass)] min-h-0">
                 <table className="w-full text-left border-collapse">
-                  <thead className={`sticky top-0 z-10 ${darkMode ? 'bg-slate-900 text-gray-300' : 'bg-gray-50 text-gray-600'} text-[11px] font-bold uppercase tracking-wider`}>
+                  <thead className="sticky top-0 z-10 bg-[var(--input-bg)] text-[var(--text-muted)] border-b border-[var(--border-glass)] text-[11px] font-bold uppercase tracking-wider">
                     <tr>
                       <th className="px-4 py-3 w-10"></th>
                       <th className="px-4 py-3">Cashier</th>
@@ -1424,10 +1408,10 @@ export function AnalyticsDashboard() {
                       <th className="px-3 py-3 text-center">Status</th>
                     </tr>
                   </thead>
-                  <tbody className={`divide-y text-xs ${darkMode ? 'divide-slate-800/80 text-gray-200' : 'divide-gray-100 text-gray-700'}`}>
+                  <tbody className="divide-y text-xs divide-[var(--border-glass)] text-[var(--text-primary)]">
                     {shifts.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="px-4 py-12 text-center text-gray-400 dark:text-gray-500">
+                        <td colSpan={8} className="px-4 py-12 text-center text-[var(--text-muted)]">
                           {isLoadingShifts ? (
                             <p className="font-medium text-sm">Loading Z-reports from SQLite DB...</p>
                           ) : (
@@ -1457,13 +1441,13 @@ export function AnalyticsDashboard() {
                         let discrepancyText = '';
 
                         if (row.status === 'active') {
-                          statusColor = 'bg-blue-500/15 text-blue-500 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-500/20';
+                          statusColor = 'bg-blue-500/15 text-blue-500 border border-blue-500/20';
                         } else {
-                          statusColor = 'bg-gray-500/15 text-gray-500 dark:bg-gray-800/40 dark:text-gray-400 border border-gray-500/20';
+                          statusColor = 'bg-[var(--input-bg)] text-[var(--text-muted)] border border-[var(--border-glass)]';
                         }
 
                         if (!isClosed) {
-                          discrepancyColor = 'text-gray-400 dark:text-gray-500';
+                          discrepancyColor = 'text-[var(--text-muted)]';
                           discrepancyText = 'Live Shift';
                         } else if (cashDiff === 0) {
                           discrepancyColor = 'text-emerald-500 bg-emerald-500/15 px-2 py-0.5 rounded border border-emerald-500/20';
@@ -1481,19 +1465,19 @@ export function AnalyticsDashboard() {
                             <tr 
                               key={row.id} 
                               onClick={() => toggleExpandShift(row.id)}
-                              className={`hover:bg-gray-50/50 dark:hover:bg-slate-900/20 transition-colors cursor-pointer ${
-                                isExpanded ? 'bg-gray-50/70 dark:bg-slate-900/30' : ''
+                              className={`hover:bg-[var(--surface-hover)] transition-colors cursor-pointer ${
+                                isExpanded ? 'bg-[var(--surface-hover)]' : ''
                               }`}
                             >
                               <td className="px-4 py-3 text-center">
-                                <button className="focus:outline-none p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700">
+                                <button className="focus:outline-none p-1 rounded hover:bg-[var(--surface-hover)]">
                                   {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                                 </button>
                               </td>
-                              <td className="px-4 py-3 font-semibold text-gray-800 dark:text-gray-200">
+                              <td className="px-4 py-3 font-semibold text-[var(--text-primary)]">
                                 {row.user_name}
                               </td>
-                              <td className="px-4 py-3 text-gray-500 dark:text-gray-400">
+                              <td className="px-4 py-3 text-[var(--text-muted)]">
                                 <div className="font-medium text-[11px]">{formatShiftTime(row.start_time)}</div>
                                 <div className="text-[10px] opacity-65">to {isClosed ? formatShiftTime(row.end_time) : 'Active'}</div>
                               </td>
@@ -1518,10 +1502,10 @@ export function AnalyticsDashboard() {
                             
                             {/* Expanded Details Card */}
                             {isExpanded && (
-                              <tr key={`${row.id}-details`} className="bg-gray-50/40 dark:bg-slate-900/10">
+                              <tr key={`${row.id}-details`} className="bg-[var(--bg-glass)]">
                                 <td colSpan={8} className="px-6 py-4 border-l-2 border-blue-500">
                                   <div className="space-y-4">
-                                    <div className="flex items-center justify-between border-b dark:border-gray-800 pb-2">
+                                    <div className="flex items-center justify-between border-b border-[var(--border-glass)] pb-2">
                                       <h4 className="font-bold text-xs text-blue-500 uppercase tracking-wide flex items-center gap-1.5">
                                         <History size={14} />
                                         Shift Reconciliation Breakdown
@@ -1532,8 +1516,8 @@ export function AnalyticsDashboard() {
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                       
                                       {/* Cash Audit Card */}
-                                      <div className={`p-3 rounded-xl border ${darkMode ? 'bg-slate-900/50 border-slate-800 text-white' : 'bg-white border-gray-150 text-gray-800'}`}>
-                                        <h5 className="font-bold text-[10px] uppercase text-gray-400 tracking-wider mb-2 flex items-center justify-between">
+                                      <div className="p-3 rounded-xl border glass-panel border-[var(--border-glass)] text-[var(--text-primary)]">
+                                        <h5 className="font-bold text-[10px] uppercase text-[var(--text-muted)] tracking-wider mb-2 flex items-center justify-between">
                                           <span>💵 Cash Tally</span>
                                           {isClosed && (
                                             <span className={`font-mono font-black ${
@@ -1552,7 +1536,7 @@ export function AnalyticsDashboard() {
                                             <span className="opacity-60">System Sales:</span>
                                             <span>₹{(row.system_cash || 0).toFixed(2)}</span>
                                           </div>
-                                          <div className="flex justify-between font-bold border-t dark:border-gray-800/60 pt-1 mt-1 font-semibold">
+                                          <div className="flex justify-between font-bold border-t border-[var(--border-glass)] pt-1 mt-1 font-semibold">
                                             <span>Expected Cash:</span>
                                             <span>₹{expectedCash.toFixed(2)}</span>
                                           </div>
@@ -1564,8 +1548,8 @@ export function AnalyticsDashboard() {
                                       </div>
 
                                       {/* UPI Audit Card */}
-                                      <div className={`p-3 rounded-xl border ${darkMode ? 'bg-slate-900/50 border-slate-800 text-white' : 'bg-white border-gray-150 text-gray-800'}`}>
-                                        <h5 className="font-bold text-[10px] uppercase text-gray-400 tracking-wider mb-2 flex items-center justify-between">
+                                      <div className="p-3 rounded-xl border glass-panel border-[var(--border-glass)] text-[var(--text-primary)]">
+                                        <h5 className="font-bold text-[10px] uppercase text-[var(--text-muted)] tracking-wider mb-2 flex items-center justify-between">
                                           <span>📱 UPI Payments</span>
                                           {isClosed && (
                                             <span className={`font-mono font-black ${
@@ -1580,7 +1564,7 @@ export function AnalyticsDashboard() {
                                             <span className="opacity-60">System UPI Sales:</span>
                                             <span>₹{(row.system_upi || 0).toFixed(2)}</span>
                                           </div>
-                                          <div className="flex justify-between font-bold border-t dark:border-gray-800/60 pt-1 mt-1 font-semibold">
+                                          <div className="flex justify-between font-bold border-t border-[var(--border-glass)] pt-1 mt-1 font-semibold">
                                             <span>Expected UPI:</span>
                                             <span>₹{(row.system_upi || 0).toFixed(2)}</span>
                                           </div>
@@ -1592,8 +1576,8 @@ export function AnalyticsDashboard() {
                                       </div>
 
                                       {/* Card Audit Card */}
-                                      <div className={`p-3 rounded-xl border ${darkMode ? 'bg-slate-900/50 border-slate-800 text-white' : 'bg-white border-gray-150 text-gray-800'}`}>
-                                        <h5 className="font-bold text-[10px] uppercase text-gray-400 tracking-wider mb-2 flex items-center justify-between">
+                                      <div className="p-3 rounded-xl border glass-panel border-[var(--border-glass)] text-[var(--text-primary)]">
+                                        <h5 className="font-bold text-[10px] uppercase text-[var(--text-muted)] tracking-wider mb-2 flex items-center justify-between">
                                           <span>💳 Card Payments</span>
                                           {isClosed && (
                                             <span className={`font-mono font-black ${
@@ -1608,7 +1592,7 @@ export function AnalyticsDashboard() {
                                             <span className="opacity-60">System Card Sales:</span>
                                             <span>₹{(row.system_card || 0).toFixed(2)}</span>
                                           </div>
-                                          <div className="flex justify-between font-bold border-t dark:border-gray-800/60 pt-1 mt-1 font-semibold">
+                                          <div className="flex justify-between font-bold border-t border-[var(--border-glass)] pt-1 mt-1 font-semibold">
                                             <span>Expected Card:</span>
                                             <span>₹{(row.system_card || 0).toFixed(2)}</span>
                                           </div>
@@ -1622,9 +1606,7 @@ export function AnalyticsDashboard() {
                                     </div>
 
                                     {/* Overall Discrepancy details & Cashier Notes */}
-                                    <div className={`p-3 rounded-xl border ${
-                                      darkMode ? 'bg-slate-900/20 border-slate-800/80 text-slate-300' : 'bg-gray-50 text-gray-600'
-                                    } flex flex-col md:flex-row md:items-center justify-between gap-4`}>
+                                    <div className="p-3 rounded-xl border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-secondary)] flex flex-col md:flex-row md:items-center justify-between gap-4">
                                       <div className="text-[11px]">
                                         <span className="font-bold">Total Shift Net Discrepancy: </span>
                                         {isClosed ? (
@@ -1659,7 +1641,7 @@ export function AnalyticsDashboard() {
           </div>
         )}
       </div>
-    </div>
+    </PageShell>
   );
 }
 
@@ -1668,18 +1650,25 @@ interface MetricCardProps {
   value: string;
   icon: React.ReactNode;
   color: string;
-  change: number | null;
-  darkMode: boolean;
+  change?: number | null;
+  darkMode?: boolean;
+  loading?: boolean;
 }
 
-function MetricCard({ title, value, icon, color, change, darkMode }: MetricCardProps) {
+function MetricCard({ title, value, icon, color, loading }: MetricCardProps) {
   return (
-    <div className={`${darkMode ? 'bg-gray-800 border-gray-700/50' : 'bg-white border-gray-150'} border rounded-xl shadow-sm p-4 flex items-center justify-between`}>
-      <div className="min-w-0">
-        <h3 className={`text-[10px] font-bold ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1 uppercase tracking-wider truncate`}>{title}</h3>
-        <p className={`text-lg font-bold ${darkMode ? 'text-white' : 'text-gray-800'} tracking-tight`}>{value}</p>
+    <div 
+      onPointerMove={updatePointerGlare}
+      className="group relative glass-panel backdrop-blur-xl backdrop-saturate-200 border-[var(--border-glass)] text-[var(--text-primary)] border rounded-xl shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6),var(--shadow-glass)] p-4 flex items-center justify-between overflow-hidden transition-all hover:-translate-y-1"
+    >
+      <SpecularGlareOverlay />
+      <div className="relative z-10 min-w-0">
+        <h3 className="text-[10px] font-bold text-[var(--text-muted)] mb-1 uppercase tracking-wider truncate">{title}</h3>
+        {loading
+          ? <Skeleton className="h-6 w-24 my-0.5" />
+          : <p className="text-lg font-bold text-[var(--text-primary)] tracking-tight">{value}</p>}
       </div>
-      <div className={`${color} text-white p-2.5 rounded-lg flex-shrink-0 shadow-md shadow-black/5`}>{icon}</div>
+      <div className={`relative z-10 ${color} text-white p-2.5 rounded-lg flex-shrink-0 shadow-md shadow-black/5`}>{icon}</div>
     </div>
   );
 }

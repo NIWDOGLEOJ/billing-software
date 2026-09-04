@@ -1,0 +1,29 @@
+[CASH DRAWER OPEN POP]RETAIL SUPERMARKET
+123 Main Street, City, State 12345
+Tel: (555) 123-4567
+========================================
+Bill #: BILL-260811-353541
+Date  : 11/8/2026, 3:45:53 pm
+Cashier: Developer Account
+----------------------------------------
+Item Name          Qty x Price     Total
+----------------------------------------
+Tata Gold Tea 500g
+  1 x 290.00                     ₹290.00
+----------------------------------------
+Subtotal                         ₹290.00
+CGST (9%)                          ₹7.25
+SGST (9%)                          ₹7.25
+Total GST                         ₹14.50
+Rounding                          +₹0.50
+========================================
+GRAND TOTAL                      ₹305.00
+========================================
+Payment Mode                        CASH
+
+THANK YOU FOR SHOPPING WITH US!
+--- Please visit again ---
+
+
+
+[PAPER CUT]

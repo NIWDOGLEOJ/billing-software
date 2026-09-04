@@ -3,10 +3,11 @@ import { useAuth } from '../contexts/auth-context';
 import { useTheme } from '../contexts/theme-context';
 import { Store, ArrowRight, DollarSign, Wallet, ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
+import { updatePointerGlare, SpecularGlareOverlay } from '../utils/glare';
 
 export function ShiftStartModal() {
   const { user, activeShift, startShift, logout } = useAuth();
-  const { darkMode } = useTheme();
+  const { darkMode, accentColor } = useTheme();
   const [initialCash, setInitialCash] = useState('1000');
   const [loading, setLoading] = useState(false);
 
@@ -39,21 +40,23 @@ export function ShiftStartModal() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
-      <div className={`w-full max-w-md rounded-2xl border ${
-        darkMode ? 'bg-gray-900/90 border-gray-800 text-white' : 'bg-white/95 border-gray-200 text-gray-800'
-      } shadow-2xl overflow-hidden transform scale-100 transition-all duration-300`}>
-        
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xl backdrop-saturate-200 p-4">
+      <div 
+        onPointerMove={updatePointerGlare}
+        className="group relative w-full max-w-md rounded-2xl border liquid-glass border-[var(--border-glass)] text-[var(--text-primary)] shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6),var(--shadow-glass)] overflow-hidden transform scale-100 transition-all duration-300"
+      >
+        <SpecularGlareOverlay />
+
         {/* Banner header */}
-        <div className="bg-gradient-to-r from-emerald-600 to-teal-700 p-6 text-white text-center relative">
-          <div className="mx-auto w-14 h-14 bg-white/10 rounded-full flex items-center justify-center mb-3 backdrop-blur-sm border border-white/20">
-            <Wallet size={28} className="text-emerald-100 animate-pulse" />
+        <div className="liquid-glass-button p-6 text-white text-center relative shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6)]">
+          <div className="mx-auto w-14 h-14 bg-white/10 rounded-full flex items-center justify-center mb-3 backdrop-blur-xl backdrop-saturate-200 border border-white/20">
+            <Wallet size={28} className="text-white animate-pulse" />
           </div>
           <h2 className="text-2xl font-bold tracking-tight">Open Cash Drawer</h2>
-          <p className="text-emerald-100/80 text-sm mt-1">Initialize your cash till for today's shift</p>
+          <p className="text-white/80 text-sm mt-1">Initialize your cash till for today's shift</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
+        <form onSubmit={handleSubmit} className="p-6 space-y-6 relative z-10">
           <div className="flex items-start gap-3 p-3.5 rounded-xl border border-amber-500/20 bg-amber-500/10 text-amber-500 text-xs leading-relaxed">
             <ShieldAlert size={20} className="shrink-0 mt-0.5" />
             <p>
@@ -62,11 +65,11 @@ export function ShiftStartModal() {
           </div>
 
           <div className="space-y-2">
-            <label className="block text-sm font-medium tracking-wide uppercase text-xs opacity-85">
+            <label className="block text-xs font-medium tracking-wide uppercase opacity-85 text-[var(--text-primary)]">
               Initial Floating Cash (₹)
             </label>
             <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-semibold text-lg">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground font-semibold text-lg">
                 ₹
               </span>
               <input
@@ -74,11 +77,7 @@ export function ShiftStartModal() {
                 value={initialCash}
                 onChange={(e) => setInitialCash(e.target.value)}
                 placeholder="1000"
-                className={`w-full pl-8 pr-4 py-3.5 text-xl font-bold rounded-xl border outline-none transition-all ${
-                  darkMode
-                    ? 'bg-gray-800/50 border-gray-700 focus:border-emerald-500 text-white focus:ring-2 focus:ring-emerald-500/20'
-                    : 'bg-gray-50 border-gray-200 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20'
-                }`}
+                className="w-full pl-8 pr-4 py-3.5 text-xl font-bold rounded-xl border border-[var(--border-glass)] bg-[var(--input-bg)] text-[var(--text-primary)] outline-none focus:border-[var(--primary-accent)] focus:ring-2 focus:ring-[var(--primary-accent)]/20 transition-all"
                 disabled={loading}
                 required
               />
@@ -89,7 +88,7 @@ export function ShiftStartModal() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white font-bold py-3.5 px-6 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 hover:shadow-emerald-600/30 transition-all cursor-pointer"
+              className="liquid-glass-button w-full disabled:opacity-50 text-white font-bold py-3.5 px-6 rounded-xl flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer active:scale-[0.97]"
             >
               {loading ? 'Initializing drawer...' : 'Open Till & Start Shift'}
               <ArrowRight size={20} />
@@ -98,11 +97,7 @@ export function ShiftStartModal() {
             <button
               type="button"
               onClick={() => logout()}
-              className={`w-full py-3 px-6 font-semibold rounded-xl text-center border transition-all cursor-pointer ${
-                darkMode
-                  ? 'border-gray-800 hover:bg-gray-800 text-gray-400 hover:text-white'
-                  : 'border-gray-200 hover:bg-gray-50 text-gray-500 hover:text-gray-800'
-              }`}
+              className="w-full py-3 px-6 font-semibold rounded-xl text-center border border-[var(--border-glass)] bg-[var(--bg-glass)] text-muted-foreground hover:text-[var(--text-primary)] transition-all cursor-pointer active:scale-[0.97]"
             >
               Cancel & Exit System
             </button>
@@ -112,3 +107,5 @@ export function ShiftStartModal() {
     </div>
   );
 }
+
+

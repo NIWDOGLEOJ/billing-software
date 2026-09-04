@@ -6,6 +6,59 @@
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
       <title>NexusFlow</title>
       <style>html, body { height: 100%; margin: 0; } #root { height: 100%; }</style>
+    <script>
+      (function() {
+        try {
+          var savedTheme = null;
+          try {
+            savedTheme = localStorage.getItem('theme') || localStorage.getItem('nexusflow_theme');
+          } catch (e) {}
+
+          var validThemes = ['system', 'light', 'dark'];
+          if (!savedTheme || validThemes.indexOf(savedTheme) === -1) {
+            savedTheme = null;
+          }
+
+          var legacyDark = null;
+          try {
+            legacyDark = localStorage.getItem('darkMode');
+          } catch (e) {}
+
+          var parsedLegacy = null;
+          if (legacyDark !== null) {
+            try {
+              parsedLegacy = JSON.parse(legacyDark);
+            } catch (e) {
+              parsedLegacy = null;
+            }
+          }
+
+          var theme = savedTheme;
+          if (!theme) {
+            if (typeof parsedLegacy === 'boolean') {
+              theme = parsedLegacy ? 'dark' : 'light';
+            } else {
+              theme = 'system';
+            }
+          }
+
+          var resolvedTheme = theme;
+          if (theme === 'system') {
+            resolvedTheme = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+          }
+
+          if (resolvedTheme !== 'dark' && resolvedTheme !== 'light') {
+            resolvedTheme = 'light';
+          }
+
+          var docEl = document.documentElement;
+          docEl.classList.remove('dark', 'light');
+          docEl.classList.add(resolvedTheme);
+          docEl.setAttribute('data-theme', resolvedTheme);
+          docEl.style.colorScheme = resolvedTheme;
+        } catch (e) {}
+      })();
+    </script>
     </head>
 
     <body>
@@ -13,4 +66,5 @@
       <script type="module" src="/src/main.tsx"></script>
     </body>
   </html>
+
   

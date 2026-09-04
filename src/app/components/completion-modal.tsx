@@ -54,7 +54,7 @@ export function CompletionModal({
         {/* Bill Summary */}
         <div className="p-6 space-y-4">
           <div className={`rounded-lg p-4 space-y-3 ${
-            darkMode ? 'bg-slate-950/40 border border-slate-800/60' : 'bg-gray-55 border border-gray-200/60'
+            darkMode ? 'bg-slate-950/40 border border-slate-800/60' : 'bg-[var(--background)] border border-gray-200/60'
           }`}>
             <div className="flex justify-between items-center">
               <span className={`text-sm ${darkMode ? 'text-slate-400' : 'text-gray-600'}`}>Bill Number</span>
@@ -103,8 +103,8 @@ export function CompletionModal({
             onClick={onClose}
             className={`flex-1 px-4 py-3 rounded-lg transition-colors font-medium border cursor-pointer ${
               darkMode 
-                ? 'bg-slate-850 hover:bg-slate-800 text-slate-300 border-slate-700/60' 
-                : 'bg-gray-150 hover:bg-gray-250 text-gray-700 border-transparent'
+                ? 'bg-[var(--surface-hover)] hover:bg-slate-800 text-slate-300 border-slate-700/60' 
+                : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border-transparent'
             }`}
           >
             <span className="flex items-center justify-center gap-2">

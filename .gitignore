@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-server/
+
+# OS files
+.DS_Store
+
+# SQLite runtime journals (transient, can be large)
+*.db-wal
+*.db-shm
+
+# Agent / tooling scratch
+.agents/
+.claude/
+.antigravitycli/
+scratch/

@@ -1,11 +1,16 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth, User } from '../contexts/auth-context';
-import { useTheme } from '../contexts/theme-context';
+import { useTheme, ThemeMode, COLOR_THEME_PRESETS, GLASS_OPACITY_MIN, GLASS_OPACITY_MAX } from '../contexts/theme-context';
 import { ShopDetails } from './cashier-billing-advanced';
-import { Store, User as UserIcon, Lock, Database, Shield, Eye, EyeOff, Plus, Trash2, Crown, Users as UsersIcon, Printer, Clock, X, Package, Edit2, Search, FileSpreadsheet, Camera, Settings } from 'lucide-react';
+import { Store, User as UserIcon, Lock, Database, Shield, Eye, EyeOff, Plus, Trash2, Crown, Users as UsersIcon, Printer, Clock, X, Package, Edit2, Search, FileSpreadsheet, Camera, Settings, Palette, Sliders, Sparkles, RotateCcw, Sun, Moon, Monitor } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../utils/api';
 import { useWebSocket } from '../hooks/useWebSocket';
+import { useConfirm } from '../hooks/useConfirm';
+import { updatePointerGlare, SpecularGlareOverlay } from '../utils/glare';
+import { Skeleton } from './ui/skeleton';
+
+const isAndroid = typeof window !== 'undefined' && (!!(window as any).Android || /Android/i.test(navigator.userAgent));
 
 const STANDARD_CATEGORIES = [
   'General',
@@ -35,10 +40,12 @@ interface POSSettingsProps {
 
 export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
   const { user, isOwner } = useAuth();
-  const { darkMode } = useTheme();
+  const { theme, setTheme, resolvedTheme, darkMode, accentColor, setAccentColor, activePresetId, selectPresetTheme, surfaceColor, setSurfaceColor, buttonOpacity, setButtonOpacity, elementOpacity, setElementOpacity, resetThemeDefaults } = useTheme();
+  // In-app replacement for native confirm(); `confirmDialog` is rendered below.
+  const { confirm, confirmDialog } = useConfirm();
 
   // Active drawer tab state
-  const [activeDrawerTab, setActiveDrawerTab] = useState<'shop' | 'workspace' | 'gst' | 'loyalty' | 'printer' | 'password' | 'owners' | 'database' | 'shifts' | 'products' | 'restock' | 'diagnostics' | 'inventory' | 'batches'>('shop');
+  const [activeDrawerTab, setActiveDrawerTab] = useState<'shop' | 'theme' | 'workspace' | 'gst' | 'loyalty' | 'printer' | 'password' | 'owners' | 'database' | 'shifts' | 'products' | 'restock' | 'diagnostics' | 'inventory' | 'batches' | 'restaurant_tables'>('shop');
 
   // Helper to load settings with backward compatibility
   const getStoredKey = (key: string, defaultVal: string): string => {
@@ -52,24 +59,26 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
         localStorage.setItem(nexusKey, oldVal);
         return oldVal;
       }
-    } catch {}
+    } catch {
+      // Storage unreadable — fall back to the default, same as a fresh install.
+    }
     return defaultVal;
   };
 
-  // Onboarding & Custom Industry Workspace states
-  const [activeSector, setActiveSector] = useState<'retail' | 'wholesale' | 'restaurant' | 'pharmacy'>(() => {
-    return (getStoredKey('Sector', 'retail') as any);
-  });
+  // Active sector configuration
+  const activeSector = 'retail' as const;
+  const multiSectorEnabled = false;
+  const setActiveSector = (_val: any) => {};
+  const setMultiSectorEnabled = (_val: boolean) => {};
 
-  const [multiSectorEnabled, setMultiSectorEnabled] = useState<boolean>(() => {
-    return getStoredKey('MultiSectorEnabled', 'false') === 'true';
-  });
 
   const [localTables, setLocalTables] = useState<any[]>(() => {
     try {
       const saved = localStorage.getItem('nexusflowTablesList');
       if (saved) return JSON.parse(saved);
-    } catch {}
+    } catch {
+      // Corrupt stored layout; start from an empty table list.
+    }
     return [];
   });
 
@@ -86,7 +95,9 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
       try {
         const saved = localStorage.getItem('nexusflowTablesList');
         if (saved) setLocalTables(JSON.parse(saved));
-      } catch {}
+      } catch {
+        // Malformed sync payload; keep the tables already on screen.
+      }
     };
     window.addEventListener('nexusflow-tables-updated', handleSync);
     return () => window.removeEventListener('nexusflow-tables-updated', handleSync);
@@ -121,8 +132,13 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
     toast.success(`🍽️ Table "${newTableName}" added!`);
   };
 
-  const handleDeleteTable = (id: string) => {
-    if (window.confirm('Are you sure you want to delete this table?')) {
+  const handleDeleteTable = async (id: string) => {
+    if (await confirm({
+      title: 'Delete this table?',
+      description: 'It will be removed from the dining room layout.',
+      confirmLabel: 'Delete table',
+      destructive: true,
+    })) {
       const updated = localTables.filter(t => t.id !== id);
       saveTables(updated);
       toast.success('Table deleted successfully.');
@@ -134,8 +150,13 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
     saveTables(updated);
   };
 
-  const handleBulkGenerate = () => {
-    if (window.confirm(`⚠️ This will completely replace your current dining room layout with ${bulkTableCount} tables of size ${bulkTableSeats} seats. Proceed?`)) {
+  const handleBulkGenerate = async () => {
+    if (await confirm({
+      title: 'Replace the whole dining room layout?',
+      description: `Your current tables will be discarded and replaced with ${bulkTableCount} tables of ${bulkTableSeats} seats each.`,
+      confirmLabel: 'Replace layout',
+      destructive: true,
+    })) {
       const generated = Array.from({ length: bulkTableCount }, (_, i) => ({
         id: `t-bulk-${i + 1}`,
         name: `Table ${i + 1}`,
@@ -174,6 +195,8 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
   const [gstEnabled, setGstEnabled] = useState(true);
   const [gstRate, setGstRate] = useState(18);
   const [gstNumber, setGstNumber] = useState('');
+  const [drugLicense20, setDrugLicense20] = useState('');
+  const [drugLicense21, setDrugLicense21] = useState('');
 
   // Rounding Settings
   const [roundingEnabled, setRoundingEnabled] = useState(true);
@@ -344,7 +367,12 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
   };
 
   const handleDeleteBatch = async (id: string, batchNumber: string) => {
-    if (confirm(`Are you sure you want to permanently delete batch [${batchNumber}]?`)) {
+    if (await confirm({
+      title: `Delete batch ${batchNumber}?`,
+      description: 'Stock tracked against this batch will no longer be available. This cannot be undone.',
+      confirmLabel: 'Delete batch',
+      destructive: true,
+    })) {
       try {
         await api.delete(`/batches/${id}`);
         toast.success('Batch deleted successfully');
@@ -358,6 +386,22 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
 
   // Product Management
   const [productsList, setProductsList] = useState<any[]>([]);
+  // Separates "still fetching" from "no products", so the catalog tab doesn't
+  // claim the shop is empty while the request is still in flight.
+  const [isLoadingProducts, setIsLoadingProducts] = useState(true);
+
+  // Product categories list for filtering
+  const productCategories = useMemo(() => {
+    const cats = new Set(productsList.map(p => p.category || 'General'));
+    return ['All', ...Array.from(cats)];
+  }, [productsList]);
+
+  // List of standard categories to present as default selectable options
+  const selectableCategories = useMemo(() => {
+    const dbCats = productsList.map(p => p.category || 'General');
+    const allCats = new Set([...STANDARD_CATEGORIES, ...dbCats]);
+    return Array.from(allCats).sort();
+  }, [productsList]);
 
   // Replenishment & Purchase Order State
   const [supplierName, setSupplierName] = useState('Central Grocery Distributors');
@@ -764,7 +808,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               barcodeType: 'EAN-13',
               moq: '1',
               distributorPrice: '0'
-            });
+            } as any);
             setIsAddingCustomCategory(false);
             setIsAddingCustomUom(false);
             stopSettingsCameraScan();
@@ -797,6 +841,140 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
       }
     };
   }, []);
+
+  // Global hardware barcode scanner listener in Settings (always active on web app)
+  useEffect(() => {
+    let buffer = '';
+    let lastKeyTime = Date.now();
+    let timeoutId: any = null;
+
+    const handleGlobalBarcode = (e: KeyboardEvent) => {
+      // Ignore modifier keys
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
+      
+      const currentTime = Date.now();
+      const timeDiff = currentTime - lastKeyTime;
+      lastKeyTime = currentTime;
+
+      // Handle barcode characters (alphanumeric)
+      if (e.key.length === 1 && /^[a-zA-Z0-9]$/.test(e.key)) {
+        if (timeoutId) clearTimeout(timeoutId);
+        
+        if (buffer.length === 0) {
+          // First character
+          buffer = e.key;
+          timeoutId = setTimeout(() => {
+            buffer = '';
+          }, 40);
+        } else {
+          if (timeDiff < 40) {
+            // High-speed scan character
+            buffer += e.key;
+            e.preventDefault();
+
+            // Delete the first character from the active input if it was typed there
+            if (buffer.length === 2) {
+              const target = e.target as HTMLElement;
+              if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+                const input = target as HTMLInputElement;
+                const value = input.value;
+                const selStart = input.selectionStart;
+                if (selStart !== null && selStart > 0) {
+                  if (value[selStart - 1] === buffer[0]) {
+                    input.value = value.slice(0, selStart - 1) + value.slice(selStart);
+                    input.setSelectionRange(selStart - 1, selStart - 1);
+                    const event = new Event('input', { bubbles: true });
+                    const tracker = (input as any)._valueTracker;
+                    if (tracker) tracker.setValue(value);
+                    input.dispatchEvent(event);
+                  }
+                }
+              }
+            }
+
+            timeoutId = setTimeout(() => {
+              buffer = '';
+            }, 40);
+          } else {
+            // Reset buffer with the new key as first character
+            buffer = e.key;
+            timeoutId = setTimeout(() => {
+              buffer = '';
+            }, 40);
+          }
+        }
+      } else if (e.key === 'Enter') {
+        if (buffer.length >= 3 && timeDiff < 40) {
+          e.preventDefault();
+          e.stopPropagation();
+          const scanCode = buffer;
+          buffer = '';
+          if (timeoutId) clearTimeout(timeoutId);
+
+          // Sound indicator
+          try {
+            const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.frequency.setValueAtTime(1200, audioCtx.currentTime);
+            gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.08);
+          } catch {
+            // Best-effort persistence; not worth interrupting the user.
+          }
+
+          if (showAddEditProductModal) {
+            setProductFormData(prev => ({ ...prev, sku: scanCode }));
+            toast.success(`🏷️ Barcode Scanned: ${scanCode}`);
+          } else {
+            // Open modal to add product
+            setEditingProduct(null);
+            const defaultCat = selectableCategories[0] || 'General';
+            setProductFormData({
+              id: `prod_${Date.now()}`,
+              sku: scanCode,
+              name: '',
+              price: '',
+              category: defaultCat,
+              gstRate: '18',
+              stock: '0',
+              lowStockThreshold: '10',
+              hsnCode: '',
+              brand: '',
+              uom: 'PCS',
+              purchasePrice: '0',
+              wholesalePrice: '0',
+              mrp: '0',
+              discountPercent: '0',
+              batchNumber: '',
+              expiryDate: '',
+              status: 'Active',
+              barcodeType: 'EAN-13',
+              moq: '1',
+              distributorPrice: '0'
+            } as any);
+            setIsAddingCustomCategory(false);
+            setIsAddingCustomUom(false);
+            stopSettingsCameraScan();
+            setShowAddEditProductModal(true);
+            toast.success(`🎉 Code "${scanCode}" scanned! Opening Add Product...`);
+          }
+        } else {
+          buffer = '';
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalBarcode, true);
+    return () => {
+      window.removeEventListener('keydown', handleGlobalBarcode, true);
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [showAddEditProductModal, selectableCategories]);
+
   const [productFormData, setProductFormData] = useState({
     id: '',
     sku: '',
@@ -818,15 +996,24 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
     status: 'Active',
     barcodeType: 'EAN-13',
     moq: '1',
-    distributorPrice: '0'
+    distributorPrice: '0',
+    genericName: '',
+    manufacturer: '',
+    dosageForm: '',
+    strength: '',
+    supplierDetails: '',
+    prescriptionSchedule: 'None'
   });
 
   const loadProducts = async () => {
     try {
       const prods = await api.get<any[]>('/products');
       setProductsList(prods);
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to load products:', e);
+      toast.error(`Couldn't load products: ${e?.message || 'Server unreachable'}`);
+    } finally {
+      setIsLoadingProducts(false);
     }
   };
 
@@ -852,7 +1039,13 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
       status,
       barcodeType,
       moq,
-      distributorPrice
+      distributorPrice,
+      genericName,
+      manufacturer,
+      dosageForm,
+      strength,
+      supplierDetails,
+      prescriptionSchedule
     } = productFormData;
     
     if (!id.trim()) return toast.error('Product ID is required');
@@ -889,7 +1082,13 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
         status: status || 'Active',
         barcode_type: barcodeType || 'EAN-13',
         moq: parseInt(moq) || 1,
-        distributor_price: parseFloat(distributorPrice) || 0
+        distributor_price: parseFloat(distributorPrice) || 0,
+        generic_name: genericName || '',
+        manufacturer: manufacturer || '',
+        dosage_form: dosageForm || '',
+        strength: strength || '',
+        supplier_details: supplierDetails || '',
+        prescription_schedule: prescriptionSchedule || 'None'
       };
 
       if (editingProduct) {
@@ -911,7 +1110,12 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
   };
 
   const handleDeleteProduct = async (id: string, name: string) => {
-    if (confirm(`Are you sure you want to permanently delete [${name}] from inventory?`)) {
+    if (await confirm({
+      title: `Delete ${name}?`,
+      description: 'The product is removed from inventory. Past bills that include it are unaffected.',
+      confirmLabel: 'Delete product',
+      destructive: true,
+    })) {
       try {
         await api.delete(`/products/${id}`);
         toast.success('Product deleted successfully');
@@ -935,11 +1139,17 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
         if (settings.gstEnabled !== undefined) setGstEnabled(settings.gstEnabled === 'true');
         if (settings.gstRate !== undefined) setGstRate(parseFloat(settings.gstRate));
         if (settings.gstNumber !== undefined) setGstNumber(settings.gstNumber);
+        if (settings.drugLicense20 !== undefined) setDrugLicense20(settings.drugLicense20);
+        if (settings.drugLicense21 !== undefined) setDrugLicense21(settings.drugLicense21);
         if (settings.roundingEnabled !== undefined) setRoundingEnabled(settings.roundingEnabled === 'true');
         if (settings.loyaltyEnabled !== undefined) setLoyaltyEnabled(settings.loyaltyEnabled === 'true');
         if (settings.chatEnabled !== undefined) {
           setChatEnabled(settings.chatEnabled === 'true');
-          try { localStorage.setItem('nexusflowChatEnabled', settings.chatEnabled); } catch {}
+          try {
+            localStorage.setItem('nexusflowChatEnabled', settings.chatEnabled);
+          } catch {
+            // Best-effort mirror of a server setting; storage may be full.
+          }
         }
         if (settings.pointsPerHundred !== undefined) setPointsPerHundred(parseInt(settings.pointsPerHundred));
         if (settings.pointValue !== undefined) setPointValue(parseFloat(settings.pointValue));
@@ -970,8 +1180,24 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
       setShiftsHistory(shifts);
       await loadProducts();
       await loadInventoryAndBatches();
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to load settings or owners:', e);
+      toast.error(`Couldn't load settings: ${e?.message || 'Server unreachable'}`, {
+        description: 'Some panels may show stale or empty values.',
+      });
+    }
+  };
+
+  /**
+   * Refreshes just the shift/attendance history — the only thing a break,
+   * shift, or session event can change on this screen.
+   */
+  const loadShiftActivity = async () => {
+    try {
+      setShiftsHistory(await api.get<any[]>('/shifts'));
+    } catch (e) {
+      // The panel keeps showing the last good data.
+      console.error('Failed to refresh shift activity:', e);
     }
   };
 
@@ -1011,19 +1237,22 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
     return () => clearInterval(interval);
   }, [isOwner]);
 
-  // Real-time WebSocket updates for shifts, breaks, database products, and sessions
+  // Real-time WebSocket updates.
+  //
+  // These four events used to call loadSettingsAndOwners(), which re-fetches
+  // settings, users, sessions, shifts, products, inventory and batches — six-plus
+  // requests. A sale rung up at another till was reloading this screen's owner
+  // list. Each event now refreshes only what it can actually change; BILL_CREATED
+  // is gone entirely because no panel here derives from an individual bill.
   useWebSocket({
     BREAK_CHANGED: () => {
-      loadSettingsAndOwners();
+      loadShiftActivity();
     },
     SHIFT_CHANGED: () => {
-      loadSettingsAndOwners();
+      loadShiftActivity();
     },
     SESSION_CHANGED: () => {
-      loadSettingsAndOwners();
-    },
-    BILL_CREATED: () => {
-      loadSettingsAndOwners();
+      loadShiftActivity();
     },
     STOCK_UPDATED: () => {
       loadProducts();
@@ -1036,7 +1265,9 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
         shopName: shopDetails.name,
         shopAddress: shopDetails.address,
         shopPhone: shopDetails.phone,
-        shopEmail: shopDetails.email
+        shopEmail: shopDetails.email,
+        drugLicense20,
+        drugLicense21
       });
       toast.success('Shop details saved successfully');
     } catch {
@@ -1176,7 +1407,12 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
       return;
     }
 
-    if (!confirm('Are you sure you want to remove this owner/co-owner?')) {
+    if (!await confirm({
+      title: 'Remove this owner?',
+      description: 'They immediately lose owner access to settings, staff, and reports.',
+      confirmLabel: 'Remove owner',
+      destructive: true,
+    })) {
       return;
     }
 
@@ -1237,7 +1473,12 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
           return;
         }
 
-        if (confirm('⚠️ WARNING: Restoring the database will overwrite all existing data. This action is permanent. Do you want to continue?')) {
+        if (await confirm({
+      title: 'Overwrite the entire database?',
+      description: 'Every product, bill, customer, and staff record in the current database is replaced by the backup file. This cannot be undone.',
+      confirmLabel: 'Overwrite everything',
+      destructive: true,
+    })) {
           await api.post('/settings/restore', backupData);
           toast.success('✨ Full database successfully restored!');
           
@@ -1254,11 +1495,11 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
 
   if (!isOwner()) {
     return (
-      <div className={`p-8 ${darkMode ? 'bg-gray-900' : 'bg-gray-50'} min-h-screen flex items-center justify-center`}>
-        <div className={`text-center ${darkMode ? 'text-white' : 'text-gray-800'}`}>
-          <Shield size={64} className="mx-auto mb-4 text-red-500" />
+      <div className="p-8 bg-[var(--bg-glass)] text-[var(--text-primary)] min-h-screen flex items-center justify-center">
+        <div className="text-center text-[var(--text-primary)]">
+          <Shield size={64} className="mx-auto mb-4 text-rose-500" />
           <h2 className="text-2xl font-bold mb-2">Access Denied</h2>
-          <p className={darkMode ? 'text-gray-400' : 'text-gray-600'}>
+          <p className="text-muted-foreground">
             Only owners and co-owners can access settings.
           </p>
         </div>
@@ -1268,12 +1509,12 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
 
   // Pre-compiled forms designed to fit exactly on the screen without scrolling
   const shopDetailsPanel = (
-    <div className={`${darkMode ? 'bg-gray-800 border-gray-700/50' : 'bg-white border-gray-200'} rounded-xl shadow-sm p-5 border`}>
+    <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-sm p-5 border">
       <div className="flex items-center gap-3 mb-4">
         <div className="p-1.5 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg">
           <Store size={20} className="text-white" />
         </div>
-        <h2 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+        <h2 className="text-xl font-bold text-[var(--text-primary)]">
           Shop Details
         </h2>
       </div>
@@ -1281,57 +1522,84 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className={`block text-xs font-semibold ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1.5`}>
+            <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1.5">
               Shop Name
             </label>
             <input
               type="text"
               value={shopDetails.name}
               onChange={(e) => setShopDetails({ ...shopDetails, name: e.target.value })}
-              className={`w-full px-3 py-1.5 text-sm border ${darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              className="w-full px-3 py-1.5 text-sm border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
           <div>
-            <label className={`block text-xs font-semibold ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1.5`}>
+            <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1.5">
               Phone
             </label>
             <input
               type="tel"
               value={shopDetails.phone}
               onChange={(e) => setShopDetails({ ...shopDetails, phone: e.target.value })}
-              className={`w-full px-3 py-1.5 text-sm border ${darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              className="w-full px-3 py-1.5 text-sm border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className={`block text-xs font-semibold ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1.5`}>
+            <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1.5">
               Address
             </label>
             <textarea
               value={shopDetails.address}
               onChange={(e) => setShopDetails({ ...shopDetails, address: e.target.value })}
               rows={2}
-              className={`w-full px-3 py-1.5 text-sm border ${darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none`}
+              className="w-full px-3 py-1.5 text-sm border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
             />
           </div>
           <div>
-            <label className={`block text-xs font-semibold ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1.5`}>
+            <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1.5">
               Email
             </label>
             <input
               type="email"
               value={shopDetails.email}
               onChange={(e) => setShopDetails({ ...shopDetails, email: e.target.value })}
-              className={`w-full px-3 py-1.5 text-sm border ${darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              className="w-full px-3 py-1.5 text-sm border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1.5">
+              Drug License (Form 20 - General)
+            </label>
+            <input
+              type="text"
+              value={drugLicense20}
+              onChange={(e) => setDrugLicense20(e.target.value.toUpperCase())}
+              placeholder="e.g. DL-20B-12345"
+              className="w-full px-3 py-1.5 text-sm border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1.5">
+              Drug License (Form 21 - Scheduled)
+            </label>
+            <input
+              type="text"
+              value={drugLicense21}
+              onChange={(e) => setDrugLicense21(e.target.value.toUpperCase())}
+              placeholder="e.g. DL-21B-12345"
+              className="w-full px-3 py-1.5 text-sm border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
         </div>
 
         <button
           onClick={handleSaveShopDetails}
-          className="w-full px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm font-semibold rounded-lg transition-colors"
+          className="w-full px-4 py-2 glass-btn glass-btn-accent text-sm font-semibold rounded-lg transition-colors"
         >
           Save Shop Details
         </button>
@@ -1363,143 +1631,46 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
   };
 
   const workspaceProfilePanel = (
-    <div className={`${darkMode ? 'bg-gray-800 border-gray-700/50' : 'bg-white border-gray-200'} rounded-xl shadow-sm p-5 border flex flex-col h-[56vh]`}>
-      <div className="flex-shrink-0 flex items-center gap-3 mb-4 border-b dark:border-gray-700 pb-3">
+    <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-sm p-5 border flex flex-col h-[56vh]">
+      <div className="flex-shrink-0 flex items-center gap-3 mb-4 border-b border-[var(--border-glass)] pb-3">
         <div className="p-1.5 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-lg text-white">
           <Store size={20} />
         </div>
         <div>
-          <h2 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+          <h2 className="text-xl font-bold text-[var(--text-primary)]">
             Workspace Profile & Industry Mode
           </h2>
-          <p className="text-[10px] text-gray-500">Configure your LAN operating system layout</p>
+          <p className="text-[10px] text-[var(--text-muted)]">Configure your LAN operating system layout</p>
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto space-y-5 pr-1">
-        <div className={`p-4 rounded-xl border ${darkMode ? 'bg-slate-900/40 border-slate-800' : 'bg-gray-50 border-gray-200'} space-y-3`}>
+        <div className="p-4 rounded-xl border bg-[var(--bg-glass)] border-[var(--border-glass)] text-[var(--text-primary)] space-y-3">
           <div>
-            <label className={`block text-xs font-bold uppercase tracking-wider mb-2 ${darkMode ? 'text-gray-400' : 'text-gray-550'}`}>
-              Select Business Industry Profile
+            <label className="block text-xs font-bold uppercase tracking-wider mb-2 text-[var(--text-muted)]">
+              Business Industry Profile
             </label>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveSector('retail');
-                  handleSaveWorkspaceProfile('retail', multiSectorEnabled);
-                }}
-                className={`py-2 px-3 rounded-lg border font-bold text-xs transition-all flex items-center gap-2 ${
-                  activeSector === 'retail'
-                    ? 'bg-blue-600 border-blue-600 text-white shadow'
-                    : darkMode
-                    ? 'bg-slate-950 border-slate-850 text-slate-350 hover:bg-slate-800'
-                    : 'bg-white border-gray-250 text-gray-750 hover:bg-gray-55'
-                }`}
-              >
-                🛒 Grocery & Supermarket
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveSector('pharmacy');
-                  handleSaveWorkspaceProfile('pharmacy', multiSectorEnabled);
-                }}
-                className={`py-2 px-3 rounded-lg border font-bold text-xs transition-all flex items-center gap-2 ${
-                  activeSector === 'pharmacy'
-                    ? 'bg-blue-600 border-blue-600 text-white shadow'
-                    : darkMode
-                    ? 'bg-slate-950 border-slate-850 text-slate-350 hover:bg-slate-800'
-                    : 'bg-white border-gray-250 text-gray-750 hover:bg-gray-55'
-                }`}
-              >
-                💊 Pharmacy Medicine
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveSector('wholesale');
-                  handleSaveWorkspaceProfile('wholesale', multiSectorEnabled);
-                }}
-                className={`py-2 px-3 rounded-lg border font-bold text-xs transition-all flex items-center gap-2 ${
-                  activeSector === 'wholesale'
-                    ? 'bg-blue-600 border-blue-600 text-white shadow'
-                    : darkMode
-                    ? 'bg-slate-950 border-slate-850 text-slate-350 hover:bg-slate-800'
-                    : 'bg-white border-gray-250 text-gray-750 hover:bg-gray-55'
-                }`}
-              >
-                🏢 Wholesale B2B GST
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveSector('restaurant');
-                  handleSaveWorkspaceProfile('restaurant', multiSectorEnabled);
-                }}
-                className={`py-2 px-3 rounded-lg border font-bold text-xs transition-all flex items-center gap-2 ${
-                  activeSector === 'restaurant'
-                    ? 'bg-blue-600 border-blue-600 text-white shadow'
-                    : darkMode
-                    ? 'bg-slate-950 border-slate-850 text-slate-350 hover:bg-slate-800'
-                    : 'bg-white border-gray-250 text-gray-750 hover:bg-gray-55'
-                }`}
-              >
-                🍽️ Restaurant Dine-In
-              </button>
+            <div className="flex items-center gap-3 p-3 rounded-xl border-2 border-purple-500/30 bg-purple-500/5">
+              <div className="p-2 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-lg text-white text-base flex-shrink-0">
+                💊
+              </div>
+              <div>
+                <p className="font-extrabold text-sm text-purple-400">Pharmacy Medicine</p>
+                <p className="text-[10px] mt-0.5 text-[var(--text-muted)]">Batch tracking, expiry management, Rx locks &amp; GST billing</p>
+              </div>
+              <span className="ml-auto text-[9px] px-2 py-0.5 rounded font-black tracking-wider uppercase bg-purple-500/10 text-purple-400 border border-purple-500/20">Active</span>
             </div>
-          </div>
-        </div>
-
-        <div className={`p-4 rounded-xl border ${darkMode ? 'bg-slate-900/40 border-slate-800' : 'bg-gray-50 border-gray-200'} space-y-3`}>
-          <div className="flex items-center justify-between">
-            <div>
-              <h4 className="font-extrabold text-xs">Enable Multi-Sector Enterprise Mode</h4>
-              <p className="text-[10px] text-gray-500 leading-normal mt-0.5 max-w-sm">Allows cashiers to switch dynamic personalities (Pharmacy, Restaurant, Wholesale) instantly via sidebar select dropdown.</p>
-            </div>
-            <input 
-              type="checkbox"
-              checked={multiSectorEnabled}
-              onChange={(e) => {
-                const checked = e.target.checked;
-                setMultiSectorEnabled(checked);
-                handleSaveWorkspaceProfile(activeSector, checked);
-              }}
-              className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer"
-            />
-          </div>
-        </div>
-
-        <div className={`p-4 rounded-xl border border-dashed border-red-500/25 bg-red-500/[0.01] space-y-3`}>
-          <div className="flex items-center justify-between">
-            <div>
-              <h4 className="font-extrabold text-xs text-red-500">Reset Setup & Launch Onboarding</h4>
-              <p className="text-[10px] text-gray-400 mt-0.5 max-w-sm">Clears onboarding flags to re-trigger the visual setup industry wizard on your next boot/refresh.</p>
-            </div>
-            <button
-              onClick={() => {
-                if (window.confirm("⚠️ Are you sure you want to reset setup? This will re-trigger onboarding selector.")) {
-                  localStorage.removeItem('nexusflowOnboarded');
-                  window.dispatchEvent(new CustomEvent('nexusflow-profile-updated'));
-                  toast.success('Onboarding state reset successfully! Refresh to see it.');
-                  if (onClose) onClose();
-                }
-              }}
-              className="px-3 py-1.5 rounded-lg border border-red-500/20 text-red-500 font-black uppercase text-[10px] hover:bg-red-500/10 active:scale-95 transition-all"
-            >
-              Reset Setup
-            </button>
           </div>
         </div>
 
         {/* ── LAN Chat Toggle ──────────────────────────────────────────── */}
-        <div className={`p-4 rounded-xl border ${darkMode ? 'bg-slate-900/40 border-slate-800/60' : 'bg-gray-50 border-gray-200'}`}>
+        <div className="p-4 rounded-xl border bg-[var(--bg-glass)] border-[var(--border-glass)] text-[var(--text-primary)]">
           <div className="flex items-center justify-between">
             <div>
-              <p className={`font-semibold text-sm ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+              <p className="font-semibold text-sm text-[var(--text-primary)]">
                 🔒 Secure LAN Chat
               </p>
-              <p className={`text-xs mt-0.5 ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+              <p className="text-xs mt-0.5 text-[var(--text-muted)]">
                 Enable encrypted real-time chat between connected terminals
               </p>
             </div>
@@ -1519,11 +1690,11 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                 }}
                 className="sr-only peer"
               />
-              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+              <div className="w-11 h-6 bg-[var(--switch-background)] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-[var(--border-glass)] after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--primary-accent)]"></div>
             </label>
           </div>
           {!chatEnabled && (
-            <p className={`text-[10px] mt-2 px-2 py-1 rounded-lg ${darkMode ? 'bg-amber-950/30 text-amber-400 border border-amber-500/20' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
+            <p className="text-[10px] mt-2 px-2 py-1 rounded-lg bg-[var(--warning)]/10 text-[var(--warning)] border border-[var(--warning)]/20">
               ⚠️ Chat is disabled — the sidebar chat link and E2EE chatbox drawer will be hidden for all terminals.
             </p>
           )}
@@ -1533,23 +1704,23 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
   );
 
   const gstSettingsPanel = (
-    <div className={`${darkMode ? 'bg-gray-800 border-gray-700/50' : 'bg-white border-gray-200'} rounded-xl shadow-sm p-5 border`}>
+    <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-sm p-5 border">
       <div className="flex items-center gap-3 mb-4">
         <div className="p-1.5 bg-gradient-to-br from-orange-500 to-orange-600 rounded-lg">
           <Database size={20} className="text-white" />
         </div>
-        <h2 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+        <h2 className="text-xl font-bold text-[var(--text-primary)]">
           GST & Tax Settings
         </h2>
       </div>
 
       <div className="space-y-4">
-        <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-850/40 rounded-lg border border-gray-150 dark:border-gray-700/40">
+        <div className="flex items-center justify-between p-3 bg-[var(--input-bg)] rounded-lg border border-[var(--border-glass)] text-[var(--text-primary)]">
           <div>
-            <p className={`font-semibold text-sm ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+            <p className="font-semibold text-sm text-[var(--text-primary)]">
               Enable GST
             </p>
-            <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+            <p className="text-xs text-[var(--text-muted)]">
               Apply GST calculations to checkout bills
             </p>
           </div>
@@ -1560,13 +1731,13 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               onChange={(e) => setGstEnabled(e.target.checked)}
               className="sr-only peer"
             />
-            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+            <div className="w-11 h-6 bg-[var(--switch-background)] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-[var(--border-glass)] after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--primary-accent)]"></div>
           </label>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className={`block text-xs font-semibold ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1.5`}>
+            <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1.5">
               GST Rate (%)
             </label>
             <input
@@ -1574,11 +1745,11 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               value={gstRate}
               onChange={(e) => setGstRate(parseFloat(e.target.value) || 0)}
               step="0.01"
-              className={`w-full px-3 py-1.5 text-sm border ${darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              className="w-full px-3 py-1.5 text-sm border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
           <div>
-            <label className={`block text-xs font-semibold ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1.5`}>
+            <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1.5">
               GST Number (GSTIN)
             </label>
             <input
@@ -1587,14 +1758,14 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               onChange={(e) => setGstNumber(e.target.value.toUpperCase())}
               placeholder="e.g., 27AABCU9603R1ZM"
               maxLength={15}
-              className={`w-full px-3 py-1.5 text-sm border ${darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              className="w-full px-3 py-1.5 text-sm border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
         </div>
 
         <button
           onClick={handleSaveGSTSettings}
-          className="w-full px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold rounded-lg transition-colors"
+          className="w-full px-4 py-2 glass-btn glass-btn-accent text-sm font-semibold rounded-lg transition-colors"
         >
           Save GST Settings
         </button>
@@ -1603,23 +1774,23 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
   );
 
   const loyaltySettingsPanel = (
-    <div className={`${darkMode ? 'bg-gray-800 border-gray-700/50' : 'bg-white border-gray-200'} rounded-xl shadow-sm p-5 border`}>
+    <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-sm p-5 border">
       <div className="flex items-center gap-3 mb-4">
         <div className="p-1.5 bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg">
           <Crown size={20} className="text-white" />
         </div>
-        <h2 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+        <h2 className="text-xl font-bold text-[var(--text-primary)]">
           Customer Loyalty Program
         </h2>
       </div>
 
       <div className="space-y-4">
-        <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-850/40 rounded-lg border border-gray-150 dark:border-gray-700/40">
+        <div className="flex items-center justify-between p-3 bg-[var(--input-bg)] rounded-lg border border-[var(--border-glass)] text-[var(--text-primary)]">
           <div>
-            <p className={`font-semibold text-sm ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+            <p className="font-semibold text-sm text-[var(--text-primary)]">
               Enable Loyalty Program
             </p>
-            <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+            <p className="text-xs text-[var(--text-muted)]">
               Reward customers with points
             </p>
           </div>
@@ -1630,13 +1801,13 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               onChange={(e) => setLoyaltyEnabled(e.target.checked)}
               className="sr-only peer"
             />
-            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+            <div className="w-11 h-6 bg-[var(--switch-background)] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-[var(--border-glass)] after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
           </label>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className={`block text-xs font-semibold ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1.5`}>
+            <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1.5">
               Points Per ₹100 Spent
             </label>
             <input
@@ -1644,11 +1815,11 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               value={pointsPerHundred}
               onChange={(e) => setPointsPerHundred(parseInt(e.target.value) || 1)}
               min="1"
-              className={`w-full px-3 py-1.5 text-sm border ${darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              className="w-full px-3 py-1.5 text-sm border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
           <div>
-            <label className={`block text-xs font-semibold ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1.5`}>
+            <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1.5">
               Point Value (₹)
             </label>
             <input
@@ -1657,20 +1828,20 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               onChange={(e) => setPointValue(parseFloat(e.target.value) || 1)}
               step="0.1"
               min="0.1"
-              className={`w-full px-3 py-1.5 text-sm border ${darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              className="w-full px-3 py-1.5 text-sm border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
         </div>
 
-        <div className={`p-3 ${darkMode ? 'bg-gray-700/30' : 'bg-blue-50/50'} rounded-lg border border-blue-100/10`}>
-          <p className={`text-xs ${darkMode ? 'text-gray-300' : 'text-gray-650'}`}>
+        <div className="p-3 bg-[var(--input-bg)] rounded-lg border border-[var(--border-glass)] text-[var(--text-primary)]">
+          <p className="text-xs text-[var(--text-secondary)]">
             <strong>Example:</strong> Spent ₹500 → Earns {pointsPerHundred * 5} points → Redeem ₹{(pointsPerHundred * 5 * pointValue).toFixed(2)} discount.
           </p>
         </div>
 
         <button
           onClick={handleSaveLoyaltySettings}
-          className="w-full px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white text-sm font-semibold rounded-lg transition-colors"
+          className="w-full px-4 py-2 glass-btn glass-btn-accent text-sm font-semibold rounded-lg transition-colors"
         >
           Save Loyalty Settings
         </button>
@@ -1679,19 +1850,19 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
   );
 
   const changePasswordPanel = (
-    <div className={`${darkMode ? 'bg-gray-800 border-gray-700/50' : 'bg-white border-gray-200'} rounded-xl shadow-sm p-5 border`}>
+    <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-sm p-5 border">
       <div className="flex items-center gap-3 mb-4">
         <div className="p-1.5 bg-gradient-to-br from-green-500 to-green-600 rounded-lg">
           <Lock size={20} className="text-white" />
         </div>
-        <h2 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+        <h2 className="text-xl font-bold text-[var(--text-primary)]">
           Change Password
         </h2>
       </div>
 
       <div className="space-y-4">
         <div>
-          <label className={`block text-xs font-semibold ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1.5`}>
+          <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1.5">
             Current Password
           </label>
           <div className="relative">
@@ -1699,17 +1870,17 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               type={showCurrentPassword ? 'text' : 'password'}
               value={currentPassword}
               onChange={(e) => setCurrentPassword(e.target.value)}
-              className={`w-full px-3 py-1.5 text-sm pr-10 border ${darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              className="w-full px-3 py-1.5 text-sm pr-10 border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <button
               type="button"
               onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-              className="absolute inset-y-0 right-0 pr-3 flex items-center"
+              className="absolute inset-y-0 right-0 pr-3 flex items-center text-[var(--text-muted)]"
             >
               {showCurrentPassword ? (
-                <EyeOff size={18} className={darkMode ? 'text-gray-400' : 'text-gray-400'} />
+                <EyeOff size={18} />
               ) : (
-                <Eye size={18} className={darkMode ? 'text-gray-400' : 'text-gray-400'} />
+                <Eye size={18} />
               )}
             </button>
           </div>
@@ -1717,7 +1888,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className={`block text-xs font-semibold ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1.5`}>
+            <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1.5">
               New Password
             </label>
             <div className="relative">
@@ -1725,24 +1896,24 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                 type={showNewPassword ? 'text' : 'password'}
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                className={`w-full px-3 py-1.5 text-sm pr-10 border ${darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                className="w-full px-3 py-1.5 text-sm pr-10 border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
               <button
                 type="button"
                 onClick={() => setShowNewPassword(!showNewPassword)}
-                className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                className="absolute inset-y-0 right-0 pr-3 flex items-center text-[var(--text-muted)]"
               >
                 {showNewPassword ? (
-                  <EyeOff size={18} className={darkMode ? 'text-gray-400' : 'text-gray-400'} />
+                  <EyeOff size={18} />
                 ) : (
-                  <Eye size={18} className={darkMode ? 'text-gray-400' : 'text-gray-400'} />
+                  <Eye size={18} />
                 )}
               </button>
             </div>
           </div>
 
           <div>
-            <label className={`block text-xs font-semibold ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1.5`}>
+            <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1.5">
               Confirm New Password
             </label>
             <div className="relative">
@@ -1750,17 +1921,17 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                 type={showConfirmPassword ? 'text' : 'password'}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className={`w-full px-3 py-1.5 text-sm pr-10 border ${darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                className="w-full px-3 py-1.5 text-sm pr-10 border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
               <button
                 type="button"
                 onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                className="absolute inset-y-0 right-0 pr-3 flex items-center text-[var(--text-muted)]"
               >
                 {showConfirmPassword ? (
-                  <EyeOff size={18} className={darkMode ? 'text-gray-400' : 'text-gray-400'} />
+                  <EyeOff size={18} />
                 ) : (
-                  <Eye size={18} className={darkMode ? 'text-gray-400' : 'text-gray-400'} />
+                  <Eye size={18} />
                 )}
               </button>
             </div>
@@ -1769,7 +1940,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
 
         <button
           onClick={handleChangePassword}
-          className="w-full px-4 py-2 bg-green-500 hover:bg-green-600 text-white text-sm font-semibold rounded-lg transition-colors"
+          className="w-full px-4 py-2 glass-btn glass-btn-accent text-sm font-semibold rounded-lg transition-colors"
         >
           Change Password
         </button>
@@ -1778,19 +1949,19 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
   );
 
   const printerSettingsPanel = (
-    <div className={`${darkMode ? 'bg-gray-800 border-gray-700/50' : 'bg-white border-gray-200'} rounded-xl shadow-sm p-5 border`}>
+    <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-sm p-5 border">
       <div className="flex items-center gap-3 mb-4">
         <div className="p-1.5 bg-gradient-to-br from-teal-500 to-emerald-600 rounded-lg">
           <Printer size={20} className="text-white" />
         </div>
-        <h2 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+        <h2 className="text-xl font-bold text-[var(--text-primary)]">
           Printer & Drawer Settings
         </h2>
       </div>
 
       <div className="space-y-4">
         <div>
-          <label className={`block text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'} mb-2`}>
+          <label className="block text-sm font-medium text-[var(--text-secondary)] mb-2">
             Receipt Printer Name
           </label>
           <input
@@ -1798,19 +1969,19 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
             value={receiptPrinterName}
             onChange={(e) => setReceiptPrinterName(e.target.value)}
             placeholder="e.g. Epson_TM_T88V, Thermal_Printer, or empty for mock"
-            className={`w-full px-3 py-1.5 text-sm border ${darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500`}
+            className="w-full px-3 py-1.5 text-sm border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
-          <p className={`text-[11px] ${darkMode ? 'text-gray-500' : 'text-gray-400'} mt-1`}>
+          <p className="text-[11px] text-[var(--text-muted)] mt-1">
             Name of the local thermal printer configured on this server (for <code>lp -d</code>).
           </p>
         </div>
 
-        <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-850/40 rounded-lg border border-gray-150 dark:border-gray-700/40">
+        <div className="flex items-center justify-between p-3 bg-[var(--input-bg)] rounded-lg border border-[var(--border-glass)] text-[var(--text-primary)]">
           <div>
-            <p className={`font-semibold text-sm ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+            <p className="font-semibold text-sm text-[var(--text-primary)]">
               Auto-Open Cash Drawer
             </p>
-            <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+            <p className="text-xs text-[var(--text-muted)]">
               Pop cash drawer on Cash transactions
             </p>
           </div>
@@ -1821,13 +1992,13 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               onChange={(e) => setAutoOpenDrawer(e.target.checked)}
               className="sr-only peer"
             />
-            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+            <div className="w-11 h-6 bg-[var(--switch-background)] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-[var(--border-glass)] after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
           </label>
         </div>
 
         <button
           onClick={handleSavePrinterSettings}
-          className="w-full px-4 py-2 bg-teal-500 hover:bg-teal-600 text-white text-sm font-semibold rounded-lg transition-colors mt-2"
+          className="w-full px-4 py-2 glass-btn glass-btn-accent text-sm font-semibold rounded-lg transition-colors mt-2"
         >
           Save Printer Settings
         </button>
@@ -1836,19 +2007,19 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
   );
 
   const ownerManagementPanel = (
-    <div className={`${darkMode ? 'bg-gray-800 border-gray-700/50' : 'bg-white border-gray-200'} rounded-xl shadow-sm p-5 border flex flex-col h-[48vh]`}>
+    <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-sm p-5 border flex flex-col h-[48vh]">
       <div className="flex items-center justify-between mb-4 flex-shrink-0">
         <div className="flex items-center gap-3">
           <div className="p-1.5 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-lg">
             <UsersIcon size={20} className="text-white" />
           </div>
-          <h2 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+          <h2 className="text-xl font-bold text-[var(--text-primary)]">
             Owner Management
           </h2>
         </div>
         <button
           onClick={() => setShowAddOwnerModal(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm"
+          className="flex items-center gap-1.5 px-3 py-1.5 glass-btn glass-btn-accent text-sm font-semibold rounded-lg transition-colors"
         >
           <Plus size={16} />
           Add Co-Owner
@@ -1859,37 +2030,33 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
         {owners.map((owner) => (
           <div
             key={owner.id}
-            className={`flex items-center justify-between p-3.5 ${darkMode ? 'bg-gray-750' : 'bg-gray-50'} rounded-lg border border-gray-150 dark:border-gray-700/40`}
+            className="flex items-center justify-between p-3.5 bg-[var(--input-bg)] rounded-lg border border-[var(--border-glass)] text-[var(--text-primary)]"
           >
             <div className="flex items-center gap-3 min-w-0">
               <div className={`p-2 ${owner.role === 'owner' ? 'bg-gradient-to-br from-yellow-500 to-orange-500' : 'bg-gradient-to-br from-indigo-500 to-purple-500'} rounded-lg flex-shrink-0`}>
                 <Crown size={16} className="text-white" />
               </div>
               <div className="min-w-0">
-                <p className={`font-semibold text-sm ${darkMode ? 'text-white' : 'text-gray-850'} truncate`}>
+                <p className="font-semibold text-sm text-[var(--text-primary)] truncate">
                   {owner.name}
                 </p>
-                <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'} truncate`}>
+                <p className="text-xs text-[var(--text-muted)] truncate">
                   @{owner.username} • {owner.email || 'No email'}
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
                 owner.role === 'owner'
-                  ? 'bg-yellow-100 text-yellow-850 dark:bg-yellow-950/30 dark:text-yellow-400'
-                  : 'bg-indigo-100 text-indigo-855 dark:bg-indigo-950/30 dark:text-indigo-400'
+                  ? 'bg-[var(--warning)]/15 text-[var(--warning)] border-[var(--warning)]/30'
+                  : 'bg-[var(--secondary)] text-[var(--secondary-foreground)] border-[var(--border-glass)]'
               }`}>
                 {owner.role === 'owner' ? 'Owner' : 'Co-Owner'}
               </span>
               {owner.role === 'co-owner' && (
                 <button
                   onClick={() => handleRemoveOwner(owner.id)}
-                  className={`p-1.5 rounded-lg transition-colors ${
-                    darkMode
-                      ? 'hover:bg-red-900/30 text-red-400'
-                      : 'hover:bg-red-50 text-red-650'
-                  }`}
+                  className="p-1.5 rounded-lg transition-colors hover:bg-red-50 text-red-500"
                 >
                   <Trash2 size={16} />
                 </button>
@@ -1902,116 +2069,112 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
   );
 
   const dataManagementPanel = (
-    <div className={`${darkMode ? 'bg-gray-800 border-gray-700/50' : 'bg-white border-gray-200'} rounded-xl shadow-sm p-5 border`}>
+    <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-sm p-5 border">
       <div className="flex items-center gap-3 mb-4">
         <div className="p-1.5 bg-gradient-to-br from-red-500 to-red-600 rounded-lg">
           <Database size={20} className="text-white" />
         </div>
-        <h2 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+        <h2 className="text-xl font-bold text-[var(--text-primary)]">
           Data Management
         </h2>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <div className={`p-3.5 border ${darkMode ? 'border-gray-700/50' : 'border-gray-200'} rounded-lg flex flex-col justify-between`}>
+        <div className="p-3.5 border border-[var(--border-glass)] bg-[var(--input-bg)] text-[var(--text-primary)] rounded-lg flex flex-col justify-between">
           <div>
-            <h3 className={`font-bold text-sm ${darkMode ? 'text-white' : 'text-gray-850'}`}>
+            <h3 className="font-bold text-sm text-[var(--text-primary)]">
               Bill History
             </h3>
-            <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-3`}>
+            <p className="text-xs text-[var(--text-muted)] mb-3">
               Clear all saved transaction bills
             </p>
           </div>
           <button
             onClick={() => handleClearData('bills')}
-            className={`w-full px-3 py-1.5 text-xs ${darkMode ? 'bg-red-900/20 hover:bg-red-900/30 text-red-400' : 'bg-red-50 hover:bg-red-100 text-red-600'} font-semibold rounded-lg transition-colors`}
+            className="w-full px-3 py-1.5 text-xs glass-btn glass-btn-danger font-semibold rounded-lg transition-colors"
           >
             Clear Bills
           </button>
         </div>
 
-        <div className={`p-3.5 border ${darkMode ? 'border-gray-700/50' : 'border-gray-200'} rounded-lg flex flex-col justify-between`}>
+        <div className="p-3.5 border border-[var(--border-glass)] bg-[var(--input-bg)] text-[var(--text-primary)] rounded-lg flex flex-col justify-between">
           <div>
-            <h3 className={`font-bold text-sm ${darkMode ? 'text-white' : 'text-gray-850'}`}>
+            <h3 className="font-bold text-sm text-[var(--text-primary)]">
               Product Catalog
             </h3>
-            <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-3`}>
+            <p className="text-xs text-[var(--text-muted)] mb-3">
               Reset back to default catalog
             </p>
           </div>
           <button
             onClick={() => handleClearData('products')}
-            className={`w-full px-3 py-1.5 text-xs ${darkMode ? 'bg-red-900/20 hover:bg-red-900/30 text-red-400' : 'bg-red-50 hover:bg-red-100 text-red-600'} font-semibold rounded-lg transition-colors`}
+            className="w-full px-3 py-1.5 text-xs glass-btn glass-btn-danger font-semibold rounded-lg transition-colors"
           >
             Reset Products
           </button>
         </div>
 
-        <div className={`p-3.5 border ${darkMode ? 'border-gray-700/50' : 'border-gray-200'} rounded-lg flex flex-col justify-between`}>
+        <div className="p-3.5 border border-[var(--border-glass)] bg-[var(--input-bg)] text-[var(--text-primary)] rounded-lg flex flex-col justify-between">
           <div>
-            <h3 className={`font-bold text-sm ${darkMode ? 'text-white' : 'text-gray-850'}`}>
+            <h3 className="font-bold text-sm text-[var(--text-primary)]">
               Session Data
             </h3>
-            <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-3`}>
+            <p className="text-xs text-[var(--text-muted)] mb-3">
               Clear login audits and breaks
             </p>
           </div>
           <button
             onClick={() => handleClearData('sessions')}
-            className={`w-full px-3 py-1.5 text-xs ${darkMode ? 'bg-red-900/20 hover:bg-red-900/30 text-red-400' : 'bg-red-50 hover:bg-red-100 text-red-600'} font-semibold rounded-lg transition-colors`}
+            className="w-full px-3 py-1.5 text-xs glass-btn glass-btn-danger font-semibold rounded-lg transition-colors"
           >
             Clear Sessions
           </button>
         </div>
 
-        <div className={`p-3.5 border ${darkMode ? 'border-gray-700/50' : 'border-gray-200'} rounded-lg flex flex-col justify-between`}>
+        <div className="p-3.5 border border-[var(--border-glass)] bg-[var(--input-bg)] text-[var(--text-primary)] rounded-lg flex flex-col justify-between">
           <div>
-            <h3 className={`font-bold text-sm ${darkMode ? 'text-white' : 'text-gray-850'}`}>
+            <h3 className="font-bold text-sm text-[var(--text-primary)]">
               Customer DB
             </h3>
-            <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-3`}>
+            <p className="text-xs text-[var(--text-muted)] mb-3">
               Reset accounts and trust loyalty
             </p>
           </div>
           <button
             onClick={() => handleClearData('customers')}
-            className={`w-full px-3 py-1.5 text-xs ${darkMode ? 'bg-red-900/20 hover:bg-red-900/30 text-red-400' : 'bg-red-50 hover:bg-red-100 text-red-600'} font-semibold rounded-lg transition-colors`}
+            className="w-full px-3 py-1.5 text-xs glass-btn glass-btn-danger font-semibold rounded-lg transition-colors"
           >
             Clear Customers
           </button>
         </div>
       </div>
 
-      <div className={`mt-5 pt-4 border-t ${darkMode ? 'border-gray-700/50' : 'border-gray-150'} grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3`}>
+      <div className="mt-5 pt-4 border-t border-[var(--border-glass)] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <button
           onClick={downloadProductsCsv}
-          className={`px-4 py-2.5 text-xs font-semibold rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-[0.98] ${
-            darkMode ? 'bg-blue-600 hover:bg-blue-500 text-white animate-pulse' : 'bg-blue-50 hover:bg-blue-100 text-blue-600'
-          }`}
+          className="glass-btn px-4 py-2.5 text-xs font-semibold rounded-xl flex items-center justify-center gap-2"
+          style={{ '--glass-btn-fill': 'rgba(59, 130, 246, 0.14)', '--glass-btn-fill-hover': 'rgba(59, 130, 246, 0.24)', '--glass-btn-edge': 'rgba(59, 130, 246, 0.45)', '--glass-btn-edge-hover': 'rgba(59, 130, 246, 0.65)', '--glass-btn-ink': 'rgb(59, 130, 246)' } as React.CSSProperties}
         >
           <FileSpreadsheet size={16} /> Download Product DB (CSV)
         </button>
         <button
           onClick={downloadCustomersCsv}
-          className={`px-4 py-2.5 text-xs font-semibold rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-[0.98] ${
-            darkMode ? 'bg-purple-600 hover:bg-purple-500 text-white animate-pulse' : 'bg-purple-50 hover:bg-purple-100 text-purple-600'
-          }`}
+          className="glass-btn px-4 py-2.5 text-xs font-semibold rounded-xl flex items-center justify-center gap-2"
+          style={{ '--glass-btn-fill': 'rgba(168, 85, 247, 0.14)', '--glass-btn-fill-hover': 'rgba(168, 85, 247, 0.24)', '--glass-btn-edge': 'rgba(168, 85, 247, 0.45)', '--glass-btn-edge-hover': 'rgba(168, 85, 247, 0.65)', '--glass-btn-ink': 'rgb(168, 85, 247)' } as React.CSSProperties}
         >
           <FileSpreadsheet size={16} /> Download Customer DB (CSV)
         </button>
         <button
           onClick={downloadEmployeesCsv}
-          className={`px-4 py-2.5 text-xs font-semibold rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-[0.98] ${
-            darkMode ? 'bg-emerald-600 hover:bg-emerald-500 text-white animate-pulse' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-600'
-          }`}
+          className="glass-btn px-4 py-2.5 text-xs font-semibold rounded-xl flex items-center justify-center gap-2"
+          style={{ '--glass-btn-fill': 'rgba(16, 185, 129, 0.14)', '--glass-btn-fill-hover': 'rgba(16, 185, 129, 0.24)', '--glass-btn-edge': 'rgba(16, 185, 129, 0.45)', '--glass-btn-edge-hover': 'rgba(16, 185, 129, 0.65)', '--glass-btn-ink': 'rgb(16, 185, 129)' } as React.CSSProperties}
         >
           <FileSpreadsheet size={16} /> Download Employee DB (CSV)
         </button>
         <button
           onClick={downloadOwnersCsv}
-          className={`px-4 py-2.5 text-xs font-semibold rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-[0.98] ${
-            darkMode ? 'bg-amber-600 hover:bg-amber-500 text-white animate-pulse' : 'bg-amber-50 hover:bg-amber-100 text-amber-700'
-          }`}
+          className="glass-btn px-4 py-2.5 text-xs font-semibold rounded-xl flex items-center justify-center gap-2"
+          style={{ '--glass-btn-fill': 'rgba(245, 158, 11, 0.14)', '--glass-btn-fill-hover': 'rgba(245, 158, 11, 0.24)', '--glass-btn-edge': 'rgba(245, 158, 11, 0.45)', '--glass-btn-edge-hover': 'rgba(245, 158, 11, 0.65)', '--glass-btn-ink': 'rgb(245, 158, 11)' } as React.CSSProperties}
         >
           <FileSpreadsheet size={16} /> Download Admin DB (CSV)
         </button>
@@ -2107,15 +2270,15 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
 
   const getLatencyLabel = () => {
     if (networkPingLatency === null) {
-      return { text: 'Disconnected / Offline', color: 'text-red-500 dark:text-red-400' };
+      return { text: 'Disconnected / Offline', color: 'text-[var(--danger)]' };
     }
     if (networkPingLatency < 20) {
-      return { text: `${networkPingLatency}ms (Excellent - High Speed LAN)`, color: 'text-emerald-500 dark:text-emerald-400' };
+      return { text: `${networkPingLatency}ms (Excellent - High Speed LAN)`, color: 'text-[var(--success)]' };
     }
     if (networkPingLatency < 80) {
-      return { text: `${networkPingLatency}ms (Good - Standard LAN Sync)`, color: 'text-blue-500 dark:text-blue-400' };
+      return { text: `${networkPingLatency}ms (Good - Standard LAN Sync)`, color: 'text-[var(--primary-accent)]' };
     }
-    return { text: `${networkPingLatency}ms (Slow Subnet - Check Router Wifi)`, color: 'text-yellow-600 dark:text-yellow-450' };
+    return { text: `${networkPingLatency}ms (Slow Subnet - Check Router Wifi)`, color: 'text-[var(--warning)]' };
   };
 
   const latencyInfo = getLatencyLabel();
@@ -2123,13 +2286,13 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
   const soundDiagnosticsPanel = (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       {/* COLUMN 1: Web Audio Synth Preferences */}
-      <div className={`${darkMode ? 'bg-gray-800 border-gray-700/50' : 'bg-white border-gray-200'} rounded-xl shadow-sm p-5 border flex flex-col justify-between h-[48vh] overflow-y-auto`}>
+      <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-sm p-5 border flex flex-col justify-between h-[48vh] overflow-y-auto">
         <div>
           <div className="flex items-center gap-3 mb-4">
             <div className="p-1.5 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg">
               <Printer size={20} className="text-white" />
             </div>
-            <h2 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+            <h2 className="text-xl font-bold text-[var(--text-primary)]">
               Audio Synthesis Controls
             </h2>
           </div>
@@ -2139,7 +2302,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
             <div className="flex items-center justify-between">
               <div>
                 <span className="text-sm font-bold block">Audio Feedback Engine</span>
-                <span className={`text-[10px] ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Toggle scan confirmation chimes and alerts</span>
+                <span className="text-[10px] text-[var(--text-muted)]">Toggle scan confirmation chimes and alerts</span>
               </div>
               <input
                 type="checkbox"
@@ -2149,37 +2312,41 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               />
             </div>
 
-            {/* Volume Control Slider */}
+            {/* Volume Control Preset Buttons */}
             <div>
-              <div className="flex justify-between items-center mb-1">
-                <label className={`text-xs font-bold ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Scanner Chime Volume</label>
-                <span className="text-xs font-mono font-bold text-blue-500">{soundVolume}%</span>
+              <div className="flex justify-between items-center mb-1.5">
+                <label className="text-xs font-bold text-[var(--text-muted)]">Scanner Chime Volume</label>
+                <span className="text-xs font-mono font-bold text-emerald-400">{soundVolume}%</span>
               </div>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={soundVolume}
-                disabled={!soundEnabled}
-                onChange={(e) => setSoundVolume(parseInt(e.target.value))}
-                className={`w-full h-1.5 rounded-lg appearance-none cursor-pointer ${
-                  soundEnabled ? 'bg-blue-600/30 accent-blue-500' : 'bg-gray-300 dark:bg-gray-700 cursor-not-allowed'
-                }`}
-              />
+              <div className="grid grid-cols-4 gap-1.5">
+                {[25, 50, 75, 100].map((vol) => (
+                  <button
+                    key={vol}
+                    type="button"
+                    disabled={!soundEnabled}
+                    onClick={() => setSoundVolume(vol)}
+                    className={`py-1 rounded text-[11px] font-bold transition-all cursor-pointer ${
+                      soundVolume === vol 
+                        ? 'bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-400' 
+                        : 'bg-[var(--input-bg)] text-[var(--text-primary)] hover:bg-[var(--surface-hover)]'
+                    } ${!soundEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    {vol}%
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Sound Profile Select */}
             <div>
-              <label className={`block text-xs font-bold ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1.5`}>
+              <label className="block text-xs font-bold text-[var(--text-muted)] mb-1.5">
                 Scan Pitch Sound Profile
               </label>
               <select
                 value={soundProfile}
                 disabled={!soundEnabled}
                 onChange={(e) => setSoundProfile(e.target.value as any)}
-                className={`w-full px-3 py-2 border rounded-xl text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                  darkMode ? 'bg-gray-900 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
-                } ${!soundEnabled && 'opacity-50 cursor-not-allowed'}`}
+                className={`w-full px-3 py-2 border rounded-xl text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] ${!soundEnabled && 'opacity-50 cursor-not-allowed'}`}
               >
                 <option value="classic">Classic Sine Chirp (1.2 kHz)</option>
                 <option value="crisp">Crisp Triangle Chime (1.8 kHz)</option>
@@ -2189,7 +2356,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
             </div>
 
             {/* Individual Chime Toggles */}
-            <div className="space-y-3 pt-3 border-t border-dashed dark:border-gray-700/60 border-gray-200">
+            <div className="space-y-3 pt-3 border-t border-dashed border-[var(--border-glass)]">
               <label className="flex items-center justify-between text-xs font-semibold select-none cursor-pointer">
                 <span>Scan success chime</span>
                 <input
@@ -2229,27 +2396,21 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                 <button
                   type="button"
                   onClick={() => testSoundChime('success')}
-                  className={`py-2 rounded-xl border text-xs font-bold transition-all hover:scale-105 active:scale-95 cursor-pointer ${
-                    darkMode ? 'bg-slate-900 border-slate-800 hover:bg-slate-850' : 'bg-white border-gray-200 hover:bg-gray-50 shadow-sm'
-                  }`}
+                  className="py-2 rounded-xl border text-xs font-bold transition-all hover:scale-105 active:scale-[0.97] cursor-pointer bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] shadow-sm"
                 >
                   🔊 Test Success
                 </button>
                 <button
                   type="button"
                   onClick={() => testSoundChime('warning')}
-                  className={`py-2 rounded-xl border text-xs font-bold transition-all hover:scale-105 active:scale-95 cursor-pointer ${
-                    darkMode ? 'bg-slate-900 border-slate-800 hover:bg-slate-850' : 'bg-white border-gray-200 hover:bg-gray-50 shadow-sm'
-                  }`}
+                  className="py-2 rounded-xl border text-xs font-bold transition-all hover:scale-105 active:scale-[0.97] cursor-pointer bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] shadow-sm"
                 >
                   ⚠️ Test Warning
                 </button>
                 <button
                   type="button"
                   onClick={() => testSoundChime('chime')}
-                  className={`py-2 rounded-xl border text-xs font-bold transition-all hover:scale-105 active:scale-95 cursor-pointer ${
-                    darkMode ? 'bg-slate-900 border-slate-800 hover:bg-slate-850' : 'bg-white border-gray-200 hover:bg-gray-50 shadow-sm'
-                  }`}
+                  className="py-2 rounded-xl border text-xs font-bold transition-all hover:scale-105 active:scale-[0.97] cursor-pointer bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] shadow-sm"
                 >
                   🛎️ Test Chime
                 </button>
@@ -2258,10 +2419,10 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
           </div>
         </div>
 
-        <div className="pt-5 border-t dark:border-gray-700/60 mt-4 flex justify-end flex-shrink-0">
+        <div className="pt-5 border-t border-[var(--border-glass)] mt-4 flex justify-end flex-shrink-0">
           <button
             onClick={handleSaveSoundSettings}
-            className="px-5 py-2 rounded-xl text-xs font-bold transition-all bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/10 cursor-pointer transform active:scale-95"
+            className="px-5 py-2 rounded-xl text-xs font-bold transition-all glass-btn glass-btn-accent shadow-blue-500/10 cursor-pointer transform active:scale-[0.97]"
           >
             Save Sound Settings
           </button>
@@ -2269,36 +2430,32 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
       </div>
 
       {/* COLUMN 2: LAN Host Diagnostics HUD */}
-      <div className={`${darkMode ? 'bg-gray-800 border-gray-700/50' : 'bg-white border-gray-200'} rounded-xl shadow-sm p-5 border flex flex-col justify-between h-[48vh] overflow-y-auto`}>
+      <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-sm p-5 border flex flex-col justify-between h-[48vh] overflow-y-auto">
         <div>
           <div className="flex items-center gap-3 mb-4">
             <div className="p-1.5 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg">
               <Shield size={20} className="text-white" />
             </div>
-            <h2 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+            <h2 className="text-xl font-bold text-[var(--text-primary)]">
               LAN Diagnostics HUD
             </h2>
           </div>
 
           <div className="space-y-4">
             {/* Host Network Address Card */}
-            <div className={`p-4 border rounded-xl flex flex-col gap-1.5 ${
-              darkMode ? 'bg-gray-900/60 border-slate-800' : 'bg-slate-50 border-gray-250'
-            }`}>
+            <div className="p-4 border rounded-xl flex flex-col gap-1.5 bg-[var(--bg-glass)] border-[var(--border-glass)] text-[var(--text-primary)]">
               <span className="text-[10px] font-black uppercase opacity-65 tracking-wider">Host Server Local LAN Link</span>
-              <code className="text-sm font-black text-blue-600 dark:text-blue-450 select-all leading-normal break-all">
+              <code className="text-sm font-black text-[var(--primary-accent)] select-all leading-normal break-all">
                 http://{hostIpAddress}:3000
               </code>
-              <p className={`text-[9px] leading-relaxed mt-1 ${darkMode ? 'text-slate-400' : 'text-gray-505'}`}>
+              <p className="text-[9px] leading-relaxed mt-1 text-[var(--text-muted)]">
                 💡 Type this link into any secondary device (mobile, iPad, co-owner laptop) connected to the same local outlet router to start billing instantly—with <strong>zero installation required</strong>!
               </p>
             </div>
 
             {/* Connection Status & Latency logs */}
             <div className="grid grid-cols-2 gap-3.5 pt-2">
-              <div className={`p-3 border rounded-xl flex flex-col gap-0.5 ${
-                darkMode ? 'bg-gray-950/20 border-slate-800/80' : 'bg-white border-gray-200 shadow-sm'
-              }`}>
+              <div className="p-3 border rounded-xl flex flex-col gap-0.5 bg-[var(--bg-glass)] border-[var(--border-glass)] shadow-sm">
                 <span className="text-[9px] font-black uppercase opacity-55 tracking-wider">Socket Status</span>
                 <div className="flex items-center gap-1.5 mt-1">
                   <span className="relative flex h-2 w-2">
@@ -2313,9 +2470,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                 </div>
               </div>
 
-              <div className={`p-3 border rounded-xl flex flex-col gap-0.5 ${
-                darkMode ? 'bg-gray-950/20 border-slate-800/80' : 'bg-white border-gray-200 shadow-sm'
-              }`}>
+              <div className="p-3 border rounded-xl flex flex-col gap-0.5 bg-[var(--bg-glass)] border-[var(--border-glass)] shadow-sm">
                 <span className="text-[9px] font-black uppercase opacity-55 tracking-wider">Host Ping Latency</span>
                 <span className={`text-xs font-extrabold mt-1 truncate ${latencyInfo.color}`}>{latencyInfo.text}</span>
               </div>
@@ -2331,17 +2486,15 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                   owners.map((owner) => (
                     <div
                       key={owner.id}
-                      className={`flex items-center justify-between p-2.5 border rounded-lg text-xs ${
-                        darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200 shadow-sm'
-                      }`}
+                      className="flex items-center justify-between p-2.5 border rounded-lg text-xs bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] shadow-sm"
                     >
                       <div className="flex items-center gap-2">
-                        <div className={`w-2 h-2 rounded-full ${owner.isActive ? 'bg-emerald-500 animate-pulse' : 'bg-gray-400'}`}></div>
+                        <div className={`w-2 h-2 rounded-full ${owner.isActive ? 'bg-[var(--success)] animate-pulse' : 'bg-[var(--text-muted)]'}`}></div>
                         <span className="font-bold">{owner.name}</span>
                         <span className={`px-1.5 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider ${
                           owner.role === 'owner' 
-                            ? 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300' 
-                            : 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300'
+                            ? 'bg-[var(--secondary)] text-[var(--secondary-foreground)]' 
+                            : 'bg-[var(--accent)] text-[var(--accent-foreground)]'
                         }`}>
                           {owner.role}
                         </span>
@@ -2356,7 +2509,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
         </div>
 
         {/* Diagnostic Status Badge */}
-        <div className={`pt-4 border-t dark:border-gray-700/60 mt-4 text-[9px] font-bold uppercase tracking-widest text-center ${
+        <div className={`pt-4 border-t border-[var(--border-glass)] mt-4 text-[9px] font-bold uppercase tracking-widest text-center ${
           wsConnectionStatus === 'Connected' ? 'text-emerald-500' : 'text-red-500'
         }`}>
           • Offline LAN Service Healthy • Local Subnet Sync On
@@ -2366,25 +2519,25 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
   );
 
   const shiftRecordsPanel = (
-    <div className={`${darkMode ? 'bg-gray-800 border-gray-700/50' : 'bg-white border-gray-200'} rounded-xl shadow-sm p-5 border flex flex-col h-[48vh]`}>
+    <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-sm p-5 border flex flex-col h-[48vh]">
       <div className="flex items-center gap-3 mb-4 flex-shrink-0">
         <div className="p-1.5 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg">
           <Clock size={20} className="text-white" />
         </div>
         <div>
-          <h2 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+          <h2 className="text-xl font-bold text-[var(--text-primary)]">
             Shifts & Z-Reports Audit
           </h2>
-          <p className={`text-xs ${darkMode ? 'text-gray-450' : 'text-gray-500'} mt-0.5`}>
+          <p className="text-xs text-[var(--text-muted)] mt-0.5">
             Audit registers, expected cash, and count discrepancies at shift close.
           </p>
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto border border-gray-150 dark:border-gray-700/40 rounded-lg">
+      <div className="flex-1 overflow-auto border border-[var(--border-glass)] rounded-lg">
         <table className="w-full text-left border-collapse min-w-[900px]">
           <thead className="sticky top-0 z-10">
-            <tr className={`${darkMode ? 'bg-gray-800 text-gray-300 border-b border-gray-700' : 'bg-gray-100 text-gray-600 border-b border-gray-200'} text-[10px] font-bold uppercase tracking-wider`}>
+            <tr className="bg-[var(--input-bg)] text-[var(--text-primary)] border-b border-[var(--border-glass)] text-[10px] font-bold uppercase tracking-wider">
               <th className="py-2.5 px-3">Cashier</th>
               <th className="py-2.5 px-3">Shift Period</th>
               <th className="py-2.5 px-3">Status</th>
@@ -2396,7 +2549,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               <th className="py-2.5 px-3 pl-4">Audit Notes</th>
             </tr>
           </thead>
-          <tbody className={`divide-y ${darkMode ? 'divide-gray-700/60 text-gray-200' : 'divide-gray-150 text-gray-800'} text-xs`}>
+          <tbody className="divide-y divide-[var(--border-glass)] text-[var(--text-primary)] text-xs">
             {shiftsHistory.length === 0 ? (
               <tr>
                 <td colSpan={9} className="py-8 text-center opacity-60">
@@ -2411,10 +2564,10 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                 const diff = isClosed ? (shift.discrepancy_cash || 0) : 0;
                 
                 return (
-                  <tr key={shift.id} className={`${darkMode ? 'hover:bg-gray-700/30' : 'hover:bg-gray-50/50'} transition-all`}>
+                  <tr key={shift.id} className="hover:bg-[var(--surface-hover)] transition-all">
                     <td className="py-2.5 px-3 font-semibold">
                       {shift.user_name}
-                      <span className={`block text-[9px] ${darkMode ? 'text-gray-500' : 'text-gray-400'} font-normal mt-0.5`}>
+                      <span className="block text-[9px] text-[var(--text-muted)] font-normal mt-0.5">
                         ID: {shift.id.replace('shift_', '')}
                       </span>
                     </td>
@@ -2433,10 +2586,10 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                     <td className="py-2.5 px-3">
                       <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold ${
                         isClosed
-                          ? 'bg-gray-100 text-gray-850 dark:bg-gray-900/40 dark:text-gray-400'
+                          ? 'bg-[var(--surface-elevated)] text-[var(--text-muted)] border border-[var(--border-glass)]'
                           : shift.on_break
-                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-400 animate-pulse'
-                            : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400'
+                            ? 'bg-[var(--warning)]/15 text-[var(--warning)] border border-[var(--warning)]/30 animate-pulse'
+                            : 'bg-[var(--success)]/15 text-[var(--success)] border border-[var(--success)]/30'
                       }`}>
                         {isClosed ? 'Closed' : shift.on_break ? 'On Break' : 'Active'}
                       </span>
@@ -2496,57 +2649,57 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
 
   const addOwnerModalMarkup = (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className={`${darkMode ? 'bg-gray-800' : 'bg-white'} rounded-xl shadow-xl max-w-md w-full p-6`}>
-        <h3 className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'} mb-6`}>
+      <div className="bg-[var(--bg-glass)] border border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-xl max-w-md w-full p-6">
+        <h3 className="text-2xl font-bold text-[var(--text-primary)] mb-6">
           Add Co-Owner
         </h3>
 
         <div className="space-y-4">
           <div>
-            <label className={`block text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'} mb-2`}>
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-2">
               Name *
             </label>
             <input
               type="text"
               value={newOwnerName}
               onChange={(e) => setNewOwnerName(e.target.value)}
-              className={`w-full px-4 py-2 border ${darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              className="w-full px-4 py-2 border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
 
           <div>
-            <label className={`block text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'} mb-2`}>
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-2">
               Username *
             </label>
             <input
               type="text"
               value={newOwnerUsername}
               onChange={(e) => setNewOwnerUsername(e.target.value)}
-              className={`w-full px-4 py-2 border ${darkMode ? 'bg-gray-700 border-gray-650 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              className="w-full px-4 py-2 border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
 
           <div>
-            <label className={`block text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'} mb-2`}>
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-2">
               Email
             </label>
             <input
               type="email"
               value={newOwnerEmail}
               onChange={(e) => setNewOwnerEmail(e.target.value)}
-              className={`w-full px-4 py-2 border ${darkMode ? 'bg-gray-700 border-gray-650 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              className="w-full px-4 py-2 border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
 
           <div>
-            <label className={`block text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'} mb-2`}>
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-2">
               Password *
             </label>
             <input
               type="password"
               value={newOwnerPassword}
               onChange={(e) => setNewOwnerPassword(e.target.value)}
-              className={`w-full px-4 py-2 border ${darkMode ? 'bg-gray-700 border-gray-650 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              className="w-full px-4 py-2 border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
         </div>
@@ -2554,13 +2707,13 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
         <div className="flex gap-3 mt-6">
           <button
             onClick={() => setShowAddOwnerModal(false)}
-            className={`flex-1 px-4 py-2 ${darkMode ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-800'} rounded-lg transition-colors`}
+            className="flex-1 px-4 py-2 bg-[var(--input-bg)] hover:bg-[var(--surface-hover)] text-[var(--text-primary)] rounded-lg transition-colors border border-[var(--border-glass)]"
           >
             Cancel
           </button>
           <button
             onClick={handleAddCoOwner}
-            className="flex-1 px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg transition-colors"
+            className="flex-1 px-4 py-2 glass-btn glass-btn-accent rounded-lg transition-colors"
           >
             Add Co-Owner
           </button>
@@ -2569,18 +2722,6 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
     </div>
   );
 
-  // Product categories list for filtering
-  const productCategories = useMemo(() => {
-    const cats = new Set(productsList.map(p => p.category || 'General'));
-    return ['All', ...Array.from(cats)];
-  }, [productsList]);
-
-  // List of standard categories to present as default selectable options
-  const selectableCategories = useMemo(() => {
-    const dbCats = productsList.map(p => p.category || 'General');
-    const allCats = new Set([...STANDARD_CATEGORIES, ...dbCats]);
-    return Array.from(allCats).sort();
-  }, [productsList]);
 
   // Filter products list
   const filteredProducts = useMemo(() => {
@@ -2599,12 +2740,12 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
   }, [productsList, productSearchQuery, productCategoryFilter]);
 
   const productsManagementPanel = (
-    <div className={`${darkMode ? 'bg-gray-800 border-gray-700/50' : 'bg-white border-gray-200'} rounded-xl shadow-sm p-5 border flex flex-col h-[56vh]`}>
+    <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-sm p-5 border flex flex-col h-[56vh]">
       {/* Header Toolbar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 flex-shrink-0">
         <div>
-          <h3 className={`font-bold text-lg ${darkMode ? 'text-white' : 'text-gray-900'}`}>Product Inventory</h3>
-          <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Manage store items, pricing, GST rates, and stock alerts</p>
+          <h3 className="font-bold text-lg text-[var(--text-primary)]">Product Inventory</h3>
+          <p className="text-xs text-[var(--text-muted)]">Manage store items, pricing, GST rates, and stock alerts</p>
         </div>
         <div className="flex gap-2">
           {/* Mobile-only Camera Barcode Scanner to quickly add items */}
@@ -2613,7 +2754,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               setIsScanToAddMode(true);
               startSettingsCameraScan();
             }}
-            className="px-4 py-2 bg-purple-600 hover:bg-purple-750 text-white text-sm font-semibold rounded-xl flex items-center gap-2 shadow-sm transition-all hover:scale-105 md:hidden"
+            className={`px-4 py-2 glass-btn glass-btn-accent text-sm font-semibold rounded-xl flex items-center gap-2 transition-all hover:scale-105 ${isAndroid ? 'flex' : 'md:hidden'}`}
             title="Scan code using phone camera to add"
           >
             <Camera size={16} /> Scan to Add
@@ -2644,14 +2785,20 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                 status: 'Active',
                 barcodeType: 'EAN-13',
                 moq: '1',
-                distributorPrice: '0'
-              });
+                distributorPrice: '0',
+                genericName: '',
+                manufacturer: '',
+                dosageForm: '',
+                strength: '',
+                supplierDetails: '',
+                prescriptionSchedule: ''
+              } as any);
               setIsAddingCustomCategory(false);
               setIsAddingCustomUom(false);
               setIsScanToAddMode(false);
               setShowAddEditProductModal(true);
             }}
-            className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm font-semibold rounded-xl flex items-center gap-2 shadow-sm transition-all hover:scale-105"
+            className="px-4 py-2 glass-btn glass-btn-accent text-sm font-semibold rounded-xl flex items-center gap-2 transition-all hover:scale-105"
           >
             <Plus size={16} /> Add Product
           </button>
@@ -2661,13 +2808,13 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
       {/* Filter and Search controls */}
       <div className="flex flex-col md:flex-row gap-3 mb-4 flex-shrink-0">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-405" size={16} />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" size={16} />
           <input
             type="text"
             placeholder="Search by name, SKU or ID..."
             value={productSearchQuery}
             onChange={(e) => setProductSearchQuery(e.target.value)}
-            className={`w-full pl-9 pr-4 py-2 text-sm border ${darkMode ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500`}
+            className="w-full pl-9 pr-4 py-2 text-sm border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
         <div className="flex items-center gap-1.5 overflow-x-auto py-1 max-w-full no-scrollbar">
@@ -2678,9 +2825,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap border transition-all ${
                 productCategoryFilter === cat
                   ? 'bg-blue-500 text-white border-blue-500 shadow-sm'
-                  : darkMode
-                    ? 'bg-gray-700 hover:bg-gray-600 border-gray-600 text-gray-300'
-                    : 'bg-gray-100 hover:bg-gray-200 border-gray-200 text-gray-600'
+                  : 'bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
               }`}
             >
               {cat}
@@ -2690,9 +2835,9 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
       </div>
 
       {/* Table grid */}
-      <div className="flex-1 overflow-y-auto min-h-0 border rounded-xl border-gray-200 dark:border-gray-700">
+      <div className="flex-1 overflow-y-auto min-h-0 border rounded-xl border-[var(--border-glass)]">
         <table className="w-full border-collapse">
-          <thead className={`sticky top-0 z-10 ${darkMode ? 'bg-gray-900 text-gray-300' : 'bg-gray-50 text-gray-700'} text-xs font-semibold border-b border-gray-200 dark:border-gray-700`}>
+          <thead className="sticky top-0 z-10 bg-[var(--input-bg)] text-[var(--text-primary)] text-xs font-semibold border-b border-[var(--border-glass)]">
             <tr>
               <th className="px-4 py-3 text-left">Product / SKU</th>
               <th className="px-4 py-3 text-left">Category</th>
@@ -2702,27 +2847,36 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               <th className="px-4 py-3 text-center">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-sm">
+          <tbody className="divide-y divide-[var(--border-glass)] text-[var(--text-primary)] text-sm">
             {filteredProducts.map(prod => {
               const isLowStock = prod.stock <= (prod.low_stock_threshold ?? 10);
               return (
-                <tr key={prod.id} className={`${darkMode ? 'hover:bg-gray-700/40 text-gray-200' : 'hover:bg-gray-50 text-gray-700'} transition-colors`}>
+                <tr key={prod.id} className="hover:bg-[var(--surface-hover)] transition-colors">
                   <td className="px-4 py-3">
-                    <div className="font-semibold text-gray-900 dark:text-white">{prod.name}</div>
-                    <div className="text-xs text-gray-405 font-mono flex items-center gap-2">
-                      <span>SKU: {prod.sku || prod.id}</span>
-                      {prod.hsn_code && <span className="opacity-80">| HSN: {prod.hsn_code}</span>}
+                    <div className="font-semibold text-[var(--text-primary)]">{prod.name}</div>
+                    <div className="text-xs text-[var(--text-muted)] font-mono flex flex-col gap-0.5">
+                      <div className="flex items-center gap-2">
+                        <span>SKU: {prod.sku || prod.id}</span>
+                        {prod.hsn_code && <span className="opacity-80">| HSN: {prod.hsn_code}</span>}
+                      </div>
+                      {activeSector === 'pharmacy' && (prod.generic_name || prod.manufacturer) && (
+                        <div className="text-[10px] text-purple-400 font-sans italic">
+                          {prod.generic_name && <span>Gen: {prod.generic_name}</span>}
+                          {prod.strength && <span> ({prod.strength})</span>}
+                          {prod.manufacturer && <span> • Mfg: {prod.manufacturer}</span>}
+                        </div>
+                      )}
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${darkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-600'}`}>
+                    <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-[var(--input-bg)] text-[var(--text-primary)] border border-[var(--border-glass)]">
                       {prod.category || 'General'}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right font-semibold">
                     ₹{prod.price.toFixed(2)}
                   </td>
-                  <td className="px-4 py-3 text-right font-medium text-gray-500 dark:text-gray-400">
+                  <td className="px-4 py-3 text-right font-medium text-[var(--text-muted)]">
                     {prod.gst_rate}%
                   </td>
                   <td className="px-4 py-3 text-right">
@@ -2731,7 +2885,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                         {prod.stock}
                       </span>
                       {isLowStock && (
-                        <span className="px-1.5 py-0.5 text-[9px] font-bold bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-full">
+                        <span className="px-1.5 py-0.5 text-[9px] font-bold bg-red-500/10 text-red-500 rounded-full">
                           LOW
                         </span>
                       )}
@@ -2751,21 +2905,39 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                             gstRate: prod.gst_rate.toString(),
                             stock: prod.stock.toString(),
                             lowStockThreshold: (prod.low_stock_threshold ?? 10).toString(),
-                            hsnCode: prod.hsn_code || ''
+                            hsnCode: prod.hsn_code || '',
+                            brand: prod.brand || '',
+                            uom: prod.uom || 'PCS',
+                            purchasePrice: (prod.purchase_price || 0).toString(),
+                            wholesalePrice: (prod.wholesale_price || 0).toString(),
+                            mrp: (prod.mrp || 0).toString(),
+                            discountPercent: (prod.discount_percent || 0).toString(),
+                            batchNumber: prod.batch_number || '',
+                            expiryDate: prod.expiry_date || '',
+                            status: prod.status || 'Active',
+                            barcodeType: prod.barcode_type || 'EAN-13',
+                            moq: (prod.moq || 1).toString(),
+                            distributorPrice: (prod.distributor_price || 0).toString(),
+                            genericName: prod.generic_name || '',
+                            manufacturer: prod.manufacturer || '',
+                            dosageForm: prod.dosage_form || '',
+                            strength: prod.strength || '',
+                            supplierDetails: prod.supplier_details || '',
+                            prescriptionSchedule: prod.prescription_schedule || 'None'
                           });
                           setIsAddingCustomCategory(false);
                           setIsAddingCustomUom(false);
                           setIsScanToAddMode(false);
                           setShowAddEditProductModal(true);
                         }}
-                        className={`p-1.5 rounded-lg transition-colors ${darkMode ? 'hover:bg-gray-700 text-blue-400' : 'hover:bg-gray-150 text-blue-600'}`}
+                        className="p-1.5 rounded-lg transition-colors hover:bg-[var(--surface-hover)] text-blue-500"
                         title="Edit Product"
                       >
                         <Edit2 size={14} />
                       </button>
                       <button
                         onClick={() => handleDeleteProduct(prod.id, prod.name)}
-                        className={`p-1.5 rounded-lg transition-colors ${darkMode ? 'hover:bg-gray-700 text-red-400' : 'hover:bg-gray-150 text-red-600'}`}
+                        className="p-1.5 rounded-lg transition-colors hover:bg-[var(--surface-hover)] text-red-500"
                         title="Delete Product"
                       >
                         <Trash2 size={14} />
@@ -2777,10 +2949,20 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
             })}
           </tbody>
         </table>
-        {filteredProducts.length === 0 && (
-          <div className="text-center py-10 text-gray-500">
+        {isLoadingProducts ? (
+          <div className="px-4 py-3 space-y-2.5">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-9 w-full rounded-md" />
+            ))}
+          </div>
+        ) : filteredProducts.length === 0 && (
+          <div className="text-center py-10 text-[var(--text-muted)]">
             <Package size={36} className="mx-auto mb-2 opacity-40" />
-            <p className="text-xs">No products found in this selection.</p>
+            <p className="text-xs">
+              {productsList.length === 0
+                ? 'No products yet. Use "Add Product" to build your catalog.'
+                : 'No products match this search or category.'}
+            </p>
           </div>
         )}
       </div>
@@ -2788,13 +2970,14 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
   );
 
   const addEditProductModal = showAddEditProductModal && (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[60] flex items-center justify-center p-4 animate-fade-in">
-      <div className={`w-full max-w-2xl ${darkMode ? 'bg-gray-900 border-gray-800 text-white' : 'bg-white border-gray-250 text-gray-850'} shadow-2xl rounded-3xl border flex flex-col p-6 animate-scale-in`}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-xl backdrop-saturate-200 z-[60] flex items-center justify-center p-4 animate-fade-in">
+      <div onPointerMove={updatePointerGlare} className="group relative w-full max-w-2xl bg-[var(--bg-glass)] text-[var(--text-primary)] backdrop-blur-xl backdrop-saturate-200 border border-[var(--border-glass)] shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6),inset_0_-1px_1px_rgba(0,0,0,0.08),var(--shadow-glass)] rounded-3xl flex flex-col p-6 animate-scale-in overflow-hidden">
+        <SpecularGlareOverlay />
         <div className="flex justify-between items-center mb-4">
-          <h3 className="text-xl font-bold">{editingProduct ? '✏️ Edit Product' : '➕ Add New Product'}</h3>
+          <h3 className="text-xl font-bold text-[var(--text-primary)]">{editingProduct ? '✏️ Edit Product' : '➕ Add New Product'}</h3>
           <button 
             onClick={() => setShowAddEditProductModal(false)}
-            className={`p-1 rounded-xl transition-all ${darkMode ? 'hover:bg-gray-800 text-gray-400' : 'hover:bg-gray-100 text-gray-500'}`}
+            className="p-1 rounded-xl transition-all text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)]"
           >
             <X size={18} />
           </button>
@@ -2802,13 +2985,13 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
 
         <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
           {/* Section 1: Basic Details & Barcode */}
-          <div className={`p-4 rounded-2xl border space-y-3.5 ${darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-gray-50 border-gray-200'}`}>
+          <div className="p-4 rounded-2xl border space-y-3.5 bg-[var(--bg-glass)] border-[var(--border-glass)] text-[var(--text-primary)]">
             <h4 className="text-[10px] font-black uppercase text-blue-500 tracking-wider flex items-center gap-1.5">
               <span>🏷️</span> Basic Details & Barcode
             </h4>
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className={`block text-[10px] font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1`}>
+                <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
                   Product ID *
                 </label>
                 <input
@@ -2816,15 +2999,11 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                   disabled={!!editingProduct}
                   value={productFormData.id}
                   onChange={(e) => setProductFormData({ ...productFormData, id: e.target.value })}
-                  className={`w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                    editingProduct 
-                      ? darkMode ? 'bg-gray-800 border-gray-700 text-gray-500' : 'bg-gray-100 border-gray-200 text-gray-400'
-                      : darkMode ? 'bg-gray-700 border-gray-650 text-white' : 'bg-white border-gray-300 text-gray-900'
-                  }`}
+                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                 />
               </div>
               <div>
-                <label className={`block text-[10px] font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-505'} mb-1`}>
+                <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
                   SKU / Barcode *
                 </label>
                 <div className="flex gap-1.5">
@@ -2833,16 +3012,12 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                     value={productFormData.sku}
                     onChange={(e) => setProductFormData({ ...productFormData, sku: e.target.value })}
                     placeholder="Barcode No"
-                    className={`flex-1 px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                      darkMode ? 'bg-gray-700 border-gray-655 text-white' : 'bg-white border-gray-300 text-gray-900'
-                    }`}
+                    className="flex-1 px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                   />
                   <button
                     type="button"
                     onClick={startSettingsCameraScan}
-                    className={`px-2.5 rounded-lg border flex items-center justify-center transition-all md:hidden hover:scale-105 active:scale-95 ${
-                      darkMode ? 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-purple-400' : 'bg-gray-100 hover:bg-gray-200 border-gray-250 text-purple-600'
-                    }`}
+                    className={`px-2.5 rounded-lg border flex items-center justify-center transition-all ${isAndroid ? 'flex' : 'md:hidden'} hover:scale-105 active:scale-[0.97] bg-[var(--input-bg)] border-[var(--border-glass)] text-purple-500`}
                     title="Scan Barcode using phone camera"
                   >
                     <Camera size={14} />
@@ -2850,15 +3025,13 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                 </div>
               </div>
               <div>
-                <label className={`block text-[10px] font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1`}>
+                <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
                   Barcode Type
                 </label>
                 <select
                   value={productFormData.barcodeType}
                   onChange={(e) => setProductFormData({ ...productFormData, barcodeType: e.target.value })}
-                  className={`w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                    darkMode ? 'bg-gray-700 border-gray-650 text-white' : 'bg-white border-gray-300 text-gray-900'
-                  }`}
+                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                 >
                   <option value="EAN-13">EAN-13</option>
                   <option value="UPC">UPC</option>
@@ -2870,7 +3043,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
 
             <div className="grid grid-cols-3 gap-3">
               <div className="col-span-2">
-                <label className={`block text-[10px] font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1`}>
+                <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
                   Product Name *
                 </label>
                 <input
@@ -2878,13 +3051,11 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                   value={productFormData.name}
                   onChange={(e) => setProductFormData({ ...productFormData, name: e.target.value })}
                   placeholder="Product Description"
-                  className={`w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                    darkMode ? 'bg-gray-700 border-gray-655 text-white' : 'bg-white border-gray-300 text-gray-900'
-                  }`}
+                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                 />
               </div>
               <div>
-                <label className={`block text-[10px] font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1`}>
+                <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
                   Brand Name
                 </label>
                 <input
@@ -2892,16 +3063,14 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                   value={productFormData.brand}
                   onChange={(e) => setProductFormData({ ...productFormData, brand: e.target.value })}
                   placeholder="e.g. Nestlé"
-                  className={`w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                    darkMode ? 'bg-gray-700 border-gray-655 text-white' : 'bg-white border-gray-300 text-gray-900'
-                  }`}
+                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className={`block text-[10px] font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1`}>
+                <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
                   Category
                 </label>
                 {!isAddingCustomCategory ? (
@@ -2915,9 +3084,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                         setProductFormData({ ...productFormData, category: e.target.value });
                       }
                     }}
-                    className={`w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                      darkMode ? 'bg-gray-700 border-gray-650 text-white' : 'bg-white border-gray-300 text-gray-900'
-                    }`}
+                    className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                   >
                     {selectableCategories.map(cat => (
                       <option key={cat} value={cat}>{cat}</option>
@@ -2932,9 +3099,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                       onChange={(e) => setProductFormData({ ...productFormData, category: e.target.value })}
                       placeholder="New category name"
                       autoFocus
-                      className={`flex-1 px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                        darkMode ? 'bg-gray-700 border-gray-650 text-white' : 'bg-white border-gray-300 text-gray-900'
-                      }`}
+                      className="flex-1 px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                     />
                     <button
                       type="button"
@@ -2943,9 +3108,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                         const prevCat = selectableCategories[0] || 'General';
                         setProductFormData({ ...productFormData, category: prevCat });
                       }}
-                      className={`px-3 py-2 text-xs font-semibold rounded-lg border transition-colors ${
-                        darkMode ? 'bg-gray-800 hover:bg-gray-700 border-gray-700 text-gray-350' : 'bg-gray-100 hover:bg-gray-200 border-gray-200 text-gray-600'
-                      }`}
+                      className="px-3 py-2 text-xs font-semibold rounded-lg border transition-colors bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                     >
                       Cancel
                     </button>
@@ -2954,7 +3117,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               </div>
 
               <div>
-                <label className={`block text-[10px] font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1`}>
+                <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
                   Unit of Measurement (UOM) *
                 </label>
                 {!isAddingCustomUom ? (
@@ -2968,9 +3131,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                         setProductFormData({ ...productFormData, uom: e.target.value });
                       }
                     }}
-                    className={`w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                      darkMode ? 'bg-gray-700 border-gray-655 text-white' : 'bg-white border-gray-300 text-gray-900'
-                    }`}
+                    className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                   >
                     <option value="PCS">PCS (Pieces)</option>
                     <option value="KG">KG (Kilograms)</option>
@@ -2990,9 +3151,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                       onChange={(e) => setProductFormData({ ...productFormData, uom: e.target.value })}
                       placeholder="e.g. BOTTLE, PAIR..."
                       autoFocus
-                      className={`flex-1 px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                        darkMode ? 'bg-gray-700 border-gray-655 text-white' : 'bg-white border-gray-300 text-gray-900'
-                      }`}
+                      className="flex-1 px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                     />
                     <button
                       type="button"
@@ -3000,9 +3159,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                         setIsAddingCustomUom(false);
                         setProductFormData({ ...productFormData, uom: 'PCS' });
                       }}
-                      className={`px-3 py-2 text-xs font-semibold rounded-lg border transition-colors ${
-                        darkMode ? 'bg-gray-800 hover:bg-gray-700 border-gray-700 text-gray-355' : 'bg-gray-100 hover:bg-gray-200 border-gray-200 text-gray-600'
-                      }`}
+                      className="px-3 py-2 text-xs font-semibold rounded-lg border transition-colors bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                     >
                       Cancel
                     </button>
@@ -3013,14 +3170,14 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
           </div>
 
           {/* Section 2: Pricing & GST Compliance */}
-          <div className={`p-4 rounded-2xl border space-y-3.5 ${darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-gray-50 border-gray-200'}`}>
+          <div className="p-4 rounded-2xl border space-y-3.5 bg-[var(--bg-glass)] border-[var(--border-glass)] text-[var(--text-primary)]">
             <h4 className="text-[10px] font-black uppercase text-emerald-500 tracking-wider flex items-center gap-1.5">
               <span>💳</span> Pricing & GST Compliance
             </h4>
             
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className={`block text-[10px] font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1`}>
+                <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
                   Selling Price (₹) *
                 </label>
                 <input
@@ -3030,13 +3187,11 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                   value={productFormData.price}
                   onChange={(e) => setProductFormData({ ...productFormData, price: e.target.value })}
                   placeholder="0.00"
-                  className={`w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                    darkMode ? 'bg-gray-700 border-gray-650 text-white' : 'bg-white border-gray-300 text-gray-900'
-                  }`}
+                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                 />
               </div>
               <div>
-                <label className={`block text-[10px] font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1`}>
+                <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
                   Wholesale Price (₹)
                 </label>
                 <input
@@ -3046,13 +3201,11 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                   value={productFormData.wholesalePrice}
                   onChange={(e) => setProductFormData({ ...productFormData, wholesalePrice: e.target.value })}
                   placeholder="0.00"
-                  className={`w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                    darkMode ? 'bg-gray-700 border-gray-655 text-white' : 'bg-white border-gray-300 text-gray-900'
-                  }`}
+                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                 />
               </div>
               <div>
-                <label className={`block text-[10px] font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1`}>
+                <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
                   Max Retail Price (MRP ₹)
                 </label>
                 <input
@@ -3062,16 +3215,14 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                   value={productFormData.mrp}
                   onChange={(e) => setProductFormData({ ...productFormData, mrp: e.target.value })}
                   placeholder="0.00"
-                  className={`w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                    darkMode ? 'bg-gray-700 border-gray-655 text-white' : 'bg-white border-gray-300 text-gray-900'
-                  }`}
+                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className={`block text-[10px] font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1`}>
+                <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
                   Purchase Price (₹)
                 </label>
                 <input
@@ -3081,13 +3232,11 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                   value={productFormData.purchasePrice}
                   onChange={(e) => setProductFormData({ ...productFormData, purchasePrice: e.target.value })}
                   placeholder="0.00"
-                  className={`w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                    darkMode ? 'bg-gray-700 border-gray-650 text-white' : 'bg-white border-gray-300 text-gray-900'
-                  }`}
+                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                 />
               </div>
               <div>
-                <label className={`block text-[10px] font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1`}>
+                <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
                   Discount %
                 </label>
                 <input
@@ -3097,13 +3246,11 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                   value={productFormData.discountPercent}
                   onChange={(e) => setProductFormData({ ...productFormData, discountPercent: e.target.value })}
                   placeholder="0"
-                  className={`w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                    darkMode ? 'bg-gray-700 border-gray-650 text-white' : 'bg-white border-gray-300 text-gray-900'
-                  }`}
+                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                 />
               </div>
               <div>
-                <label className={`block text-[10px] font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1`}>
+                <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
                   Distributor Price (₹)
                 </label>
                 <input
@@ -3113,24 +3260,20 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                   value={productFormData.distributorPrice}
                   onChange={(e) => setProductFormData({ ...productFormData, distributorPrice: e.target.value })}
                   placeholder="0.00"
-                  className={`w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                    darkMode ? 'bg-gray-700 border-gray-650 text-white' : 'bg-white border-gray-300 text-gray-900'
-                  }`}
+                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className={`block text-[10px] font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1`}>
+                <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
                   GST Rate *
                 </label>
                 <select
                   value={productFormData.gstRate}
                   onChange={(e) => setProductFormData({ ...productFormData, gstRate: e.target.value })}
-                  className={`w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                    darkMode ? 'bg-gray-700 border-gray-650 text-white' : 'bg-white border-gray-300 text-gray-900'
-                  }`}
+                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                 >
                   <option value="0">0% (GST Exempt)</option>
                   <option value="5">5% (GST Slab)</option>
@@ -3141,7 +3284,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               </div>
 
               <div>
-                <label className={`block text-[10px] font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1`}>
+                <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
                   HSN Code (Optional)
                 </label>
                 <input
@@ -3150,23 +3293,21 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                   onChange={(e) => setProductFormData({ ...productFormData, hsnCode: e.target.value })}
                   placeholder="4, 6 or 8 digits"
                   maxLength={8}
-                  className={`w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                    darkMode ? 'bg-gray-700 border-gray-650 text-white' : 'bg-white border-gray-300 text-gray-900'
-                  }`}
+                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                 />
               </div>
             </div>
           </div>
 
           {/* Section 3: Stock & Batch Control */}
-          <div className={`p-4 rounded-2xl border space-y-3.5 ${darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-gray-50 border-gray-200'}`}>
+          <div className="p-4 rounded-2xl border space-y-3.5 bg-[var(--bg-glass)] border-[var(--border-glass)] text-[var(--text-primary)]">
             <h4 className="text-[10px] font-black uppercase text-amber-500 tracking-wider flex items-center gap-1.5">
               <span>📅</span> Stock & Batch Control
             </h4>
             
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className={`block text-[10px] font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1`}>
+                <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
                   Current Stock
                 </label>
                 <input
@@ -3174,13 +3315,11 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                   min="0"
                   value={productFormData.stock}
                   onChange={(e) => setProductFormData({ ...productFormData, stock: e.target.value })}
-                  className={`w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                    darkMode ? 'bg-gray-700 border-gray-650 text-white' : 'bg-white border-gray-300 text-gray-900'
-                  }`}
+                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                 />
               </div>
               <div>
-                <label className={`block text-[10px] font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1`}>
+                <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
                   Reorder Alert
                 </label>
                 <input
@@ -3188,13 +3327,11 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                   min="0"
                   value={productFormData.lowStockThreshold}
                   onChange={(e) => setProductFormData({ ...productFormData, lowStockThreshold: e.target.value })}
-                  className={`w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                    darkMode ? 'bg-gray-700 border-gray-650 text-white' : 'bg-white border-gray-300 text-gray-900'
-                  }`}
+                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                 />
               </div>
               <div>
-                <label className={`block text-[10px] font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1`}>
+                <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
                   Wholesale MOQ
                 </label>
                 <input
@@ -3202,16 +3339,14 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                   min="1"
                   value={productFormData.moq}
                   onChange={(e) => setProductFormData({ ...productFormData, moq: e.target.value })}
-                  className={`w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                    darkMode ? 'bg-gray-700 border-gray-650 text-white' : 'bg-white border-gray-300 text-gray-900'
-                  }`}
+                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className={`block text-[10px] font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1`}>
+                <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
                   Expiry Batch
                 </label>
                 <input
@@ -3219,34 +3354,28 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                   value={productFormData.batchNumber}
                   onChange={(e) => setProductFormData({ ...productFormData, batchNumber: e.target.value })}
                   placeholder="e.g. B204"
-                  className={`w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                    darkMode ? 'bg-gray-700 border-gray-655 text-white' : 'bg-white border-gray-300 text-gray-900'
-                  }`}
+                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                 />
               </div>
               <div>
-                <label className={`block text-[10px] font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1`}>
+                <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
                   Expiry Date
                 </label>
                 <input
                   type="date"
                   value={productFormData.expiryDate}
                   onChange={(e) => setProductFormData({ ...productFormData, expiryDate: e.target.value })}
-                  className={`w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                    darkMode ? 'bg-gray-700 border-gray-655 text-white' : 'bg-white border-gray-300 text-gray-900'
-                  }`}
+                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                 />
               </div>
               <div>
-                <label className={`block text-[10px] font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-500'} mb-1`}>
+                <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
                   Product Status
                 </label>
                 <select
                   value={productFormData.status}
                   onChange={(e) => setProductFormData({ ...productFormData, status: e.target.value })}
-                  className={`w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                    darkMode ? 'bg-gray-700 border-gray-655 text-white' : 'bg-white border-gray-300 text-gray-900'
-                  }`}
+                  className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                 >
                   <option value="Active">Active</option>
                   <option value="Inactive">Inactive</option>
@@ -3256,20 +3385,118 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               </div>
             </div>
           </div>
+
+          {/* Section 4: Medicine Details (Pharmacy Only) */}
+          {activeSector === 'pharmacy' && (
+            <div className="p-4 rounded-2xl border space-y-3.5 bg-[var(--bg-glass)] border-[var(--border-glass)] text-[var(--text-primary)]">
+              <h4 className="text-[10px] font-black uppercase text-purple-500 tracking-wider flex items-center gap-1.5">
+                <span>💊</span> Medicine Master Details
+              </h4>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
+                    Generic Name
+                  </label>
+                  <input
+                    type="text"
+                    value={productFormData.genericName}
+                    onChange={(e) => setProductFormData({ ...productFormData, genericName: e.target.value })}
+                    placeholder="e.g. Paracetamol"
+                    className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
+                    Manufacturer
+                  </label>
+                  <input
+                    type="text"
+                    value={productFormData.manufacturer}
+                    onChange={(e) => setProductFormData({ ...productFormData, manufacturer: e.target.value })}
+                    placeholder="e.g. Cipla Ltd"
+                    className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
+                    Dosage Form
+                  </label>
+                  <select
+                    value={productFormData.dosageForm}
+                    onChange={(e) => setProductFormData({ ...productFormData, dosageForm: e.target.value })}
+                    className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
+                  >
+                    <option value="">Select Form</option>
+                    <option value="Tablet">Tablet</option>
+                    <option value="Capsule">Capsule</option>
+                    <option value="Syrup">Syrup</option>
+                    <option value="Injection">Injection</option>
+                    <option value="Ointment">Ointment</option>
+                    <option value="Drops">Drops</option>
+                    <option value="Inhaler">Inhaler</option>
+                    <option value="Powder">Powder</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
+                    Strength
+                  </label>
+                  <input
+                    type="text"
+                    value={productFormData.strength}
+                    onChange={(e) => setProductFormData({ ...productFormData, strength: e.target.value })}
+                    placeholder="e.g. 500mg, 10ml"
+                    className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
+                    Supplier Details
+                  </label>
+                  <input
+                    type="text"
+                    value={productFormData.supplierDetails}
+                    onChange={(e) => setProductFormData({ ...productFormData, supplierDetails: e.target.value })}
+                    placeholder="e.g. Acme Pharma Distrib."
+                    className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-[var(--text-muted)] mb-1">
+                    Prescription Schedule (India)
+                  </label>
+                  <select
+                    value={productFormData.prescriptionSchedule}
+                    onChange={(e) => setProductFormData({ ...productFormData, prescriptionSchedule: e.target.value })}
+                    className="w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
+                  >
+                    <option value="None">None (OTC / General)</option>
+                    <option value="H">Schedule H (Prescription)</option>
+                    <option value="H1">Schedule H1 (Strict Rx Registry)</option>
+                    <option value="X">Schedule X (Narcotic/Psychotropic)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
-        <div className="flex gap-3 mt-6 border-t pt-4 dark:border-gray-800">
+        <div className="flex gap-3 mt-6 border-t pt-4 border-[var(--border-glass)]">
           <button
             onClick={() => setShowAddEditProductModal(false)}
-            className={`flex-1 px-4 py-2.5 text-sm font-semibold rounded-xl transition-all ${
-              darkMode ? 'bg-gray-800 hover:bg-gray-700 text-white' : 'bg-gray-150 hover:bg-gray-200 text-gray-800'
-            }`}
+            className="flex-1 px-4 py-2.5 text-sm font-semibold rounded-xl transition-all bg-[var(--input-bg)] hover:bg-[var(--surface-hover)] text-[var(--text-primary)] border border-[var(--border-glass)]"
           >
             Cancel
           </button>
           <button
             onClick={handleSaveProduct}
-            className="flex-1 px-4 py-2.5 text-sm font-semibold bg-blue-500 hover:bg-blue-600 text-white rounded-xl shadow-sm transition-all"
+            className="flex-1 px-4 py-2.5 text-sm font-semibold glass-btn glass-btn-accent rounded-xl transition-all"
           >
             Save Product
           </button>
@@ -3279,71 +3506,53 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
   );
 
   const restockManagementPanel = (
-    <div className={`${darkMode ? 'bg-gray-800 border-gray-700/50' : 'bg-white border-gray-200'} rounded-xl shadow-sm p-5 border flex flex-col h-[56vh]`}>
+    <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-sm p-5 border flex flex-col h-[56vh]">
       {/* Header Info */}
-      <div className="flex-shrink-0 mb-4 border-b dark:border-gray-700 pb-3 flex justify-between items-center">
+      <div className="flex-shrink-0 mb-4 border-b border-[var(--border-glass)] pb-3 flex justify-between items-center">
         <div>
-          <h3 className={`font-bold text-lg ${darkMode ? 'text-white' : 'text-gray-900'}`}>Replenishment & PO Generator</h3>
-          <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Scan stock alerts, customize procurement rates, and export purchase orders.</p>
+          <h3 className="font-bold text-lg text-[var(--text-primary)]">Replenishment & PO Generator</h3>
+          <p className="text-xs text-[var(--text-muted)]">Scan stock alerts, customize procurement rates, and export purchase orders.</p>
         </div>
       </div>
 
       {/* Inputs Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 flex-shrink-0">
-        <div className={`p-4 rounded-xl border ${
-          darkMode ? 'bg-gray-900/40 border-gray-700/60' : 'bg-gray-50 border-gray-200'
-        } grid grid-cols-1 sm:grid-cols-2 gap-3`}>
+        <div className="p-4 rounded-xl border bg-[var(--input-bg)] border-[var(--border-glass)] grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1 ${
-              darkMode ? 'text-gray-400' : 'text-gray-500'
-            }`}>Supplier Name</label>
+            <label className="block text-[10px] font-bold uppercase tracking-wider mb-1 text-[var(--text-muted)]">Supplier Name</label>
             <input
               type="text"
               value={supplierName}
               onChange={(e) => setSupplierName(e.target.value)}
               placeholder="Supplier name..."
-              className={`w-full px-2.5 py-1.5 text-xs rounded-lg border ${
-                darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
-              } focus:outline-none focus:ring-1 focus:ring-blue-500`}
+              className="w-full px-2.5 py-1.5 text-xs rounded-lg border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
           <div>
-            <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1 ${
-              darkMode ? 'text-gray-400' : 'text-gray-500'
-            }`}>Contact Email/Phone</label>
+            <label className="block text-[10px] font-bold uppercase tracking-wider mb-1 text-[var(--text-muted)]">Contact Email/Phone</label>
             <input
               type="text"
               value={supplierContact}
               onChange={(e) => setSupplierContact(e.target.value)}
               placeholder="Supplier contact..."
-              className={`w-full px-2.5 py-1.5 text-xs rounded-lg border ${
-                darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
-              } focus:outline-none focus:ring-1 focus:ring-blue-500`}
+              className="w-full px-2.5 py-1.5 text-xs rounded-lg border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
         </div>
 
-        <div className={`p-4 rounded-xl border ${
-          darkMode ? 'bg-gray-900/40 border-gray-700/60' : 'bg-gray-50 border-gray-200'
-        } flex justify-between items-center gap-4`}>
+        <div className="p-4 rounded-xl border bg-[var(--input-bg)] border-[var(--border-glass)] flex justify-between items-center gap-4">
           <div>
-            <label className={`block text-[10px] font-bold uppercase tracking-wider mb-1 ${
-              darkMode ? 'text-gray-400' : 'text-gray-500'
-            }`}>PO Reference Number</label>
+            <label className="block text-[10px] font-bold uppercase tracking-wider mb-1 text-[var(--text-muted)]">PO Reference Number</label>
             <div className="flex items-center gap-2">
               <input
                 type="text"
                 value={poNumber}
                 onChange={(e) => setPoNumber(e.target.value)}
-                className={`w-32 px-2.5 py-1.5 text-xs rounded-lg border font-mono font-bold ${
-                  darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
-                } focus:outline-none focus:ring-1 focus:ring-blue-500`}
+                className="w-32 px-2.5 py-1.5 text-xs rounded-lg border font-mono font-bold bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
               <button
                 onClick={() => setPoNumber(`PO-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`)}
-                className={`p-1.5 rounded-lg border text-[11px] font-semibold transition-all ${
-                  darkMode ? 'bg-gray-800 border-gray-700 hover:bg-gray-700 text-white' : 'bg-white border-gray-300 hover:bg-gray-100 text-gray-700'
-                }`}
+                className="p-1.5 rounded-lg border text-[11px] font-semibold transition-all bg-[var(--input-bg)] border-[var(--border-glass)] hover:bg-[var(--surface-hover)] text-[var(--text-primary)]"
                 title="Regenerate Reference"
               >
                 Reset
@@ -3352,13 +3561,11 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
           </div>
           
           <div className="text-right">
-            <span className={`block text-[9px] font-bold uppercase tracking-wider ${
-              darkMode ? 'text-gray-400' : 'text-gray-500'
-            }`}>Total PO Cost</span>
-            <span className={`text-lg font-extrabold text-blue-500`}>
+            <span className="block text-[9px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Total PO Cost</span>
+            <span className="text-lg font-extrabold text-blue-500">
               ₹{restockItems.reduce((sum, item) => sum + (item.selected ? item.totalCost : 0), 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
-            <span className={`block text-[9px] ${darkMode ? 'text-gray-500' : 'text-gray-400'} mt-0.5`}>
+            <span className="block text-[9px] text-[var(--text-muted)] mt-0.5">
               {restockItems.filter(item => item.selected).length} items · {restockItems.reduce((sum, item) => sum + (item.selected ? item.quantity : 0), 0)} units
             </span>
           </div>
@@ -3366,9 +3573,9 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
       </div>
 
       {/* Table Slate */}
-      <div className="flex-1 overflow-y-auto rounded-xl border border-gray-150/10 min-h-0 mb-4">
+      <div className="flex-1 overflow-y-auto rounded-xl border border-[var(--border-glass)] min-h-0 mb-4">
         <table className="w-full text-left border-collapse">
-          <thead className={`sticky top-0 z-10 ${darkMode ? 'bg-gray-900 text-gray-300' : 'bg-gray-50 text-gray-600'} text-[10px] font-bold uppercase tracking-wider`}>
+          <thead className="sticky top-0 z-10 bg-[var(--input-bg)] text-[var(--text-muted)] text-[10px] font-bold uppercase tracking-wider border-b border-[var(--border-glass)]">
             <tr>
               <th className="px-3 py-2.5 w-10 text-center">
                 <input
@@ -3393,10 +3600,10 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               <th className="px-4 py-2.5 text-right w-28">Est. Total</th>
             </tr>
           </thead>
-          <tbody className={`divide-y text-xs ${darkMode ? 'divide-slate-800/80 text-gray-200' : 'divide-gray-100 text-gray-700'}`}>
+          <tbody className="divide-y text-xs divide-[var(--border-glass)] text-[var(--text-primary)]">
             {restockItems.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-gray-400">
+                <td colSpan={7} className="px-4 py-10 text-center text-[var(--text-muted)]">
                   No products registered in system database.
                 </td>
               </tr>
@@ -3404,8 +3611,8 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               restockItems.map((item) => (
                 <tr 
                   key={item.id} 
-                  className={`hover:bg-gray-50/40 dark:hover:bg-slate-900/10 transition-colors ${
-                    item.isLowStock && item.selected ? 'bg-orange-500/5 dark:bg-orange-500/[0.03]' : ''
+                  className={`hover:bg-[var(--surface-hover)] transition-colors ${
+                    item.isLowStock && item.selected ? 'bg-orange-500/5' : ''
                   }`}
                 >
                   <td className="px-3 py-2.5 text-center">
@@ -3430,16 +3637,16 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                         </span>
                       )}
                     </p>
-                    <p className={`text-[10px] ${darkMode ? 'text-gray-500' : 'text-gray-400'} mt-0.5`}>
+                    <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
                       SKU: {item.sku || 'N/A'} · HSN: {item.hsn_code || 'N/A'}
                     </p>
                   </td>
                   <td className="px-3 py-2.5 text-center font-mono">
-                    <span className={`font-bold ${item.isLowStock ? 'text-orange-500 font-extrabold' : 'text-gray-400'}`}>
+                    <span className={`font-bold ${item.isLowStock ? 'text-orange-500 font-extrabold' : 'text-[var(--text-muted)]'}`}>
                       {item.currentStock}
                     </span>
                     <span className="text-[10px] opacity-40 mx-0.5">/</span>
-                    <span className="text-gray-400 opacity-60 text-[11px]">{item.threshold}</span>
+                    <span className="text-[var(--text-muted)] opacity-60 text-[11px]">{item.threshold}</span>
                   </td>
                   <td className="px-3 py-2.5 text-right">
                     <input
@@ -3453,9 +3660,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                           [item.id]: { ...poCustomizations[item.id], quantity: val }
                         });
                       }}
-                      className={`w-20 px-2 py-1 text-xs text-right border font-semibold font-mono rounded ${
-                        darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
-                      } focus:outline-none focus:ring-1 focus:ring-blue-500`}
+                      className="w-20 px-2 py-1 text-xs text-right border font-semibold font-mono rounded bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
                   </td>
                   <td className="px-3 py-2.5 text-right relative">
@@ -3472,12 +3677,10 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                           [item.id]: { ...poCustomizations[item.id], wholesalePrice: val }
                         });
                       }}
-                      className={`w-24 px-2 py-1 pl-4 text-xs text-right border font-semibold font-mono rounded ${
-                        darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'
-                      } focus:outline-none focus:ring-1 focus:ring-blue-500`}
+                      className="w-24 px-2 py-1 pl-4 text-xs text-right border font-semibold font-mono rounded bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
                   </td>
-                  <td className="px-3 py-2.5 text-center font-bold text-gray-500">{item.gstRate}%</td>
+                  <td className="px-3 py-2.5 text-center font-bold text-[var(--text-muted)]">{item.gstRate}%</td>
                   <td className="px-4 py-2.5 text-right font-mono font-bold text-blue-500">
                     ₹{item.totalCost.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
@@ -3489,8 +3692,8 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
       </div>
 
       {/* Procurement Actions bottom bar */}
-      <div className="flex-shrink-0 flex items-center justify-between border-t dark:border-gray-700 pt-3">
-        <span className={`text-[10px] leading-relaxed ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+      <div className="flex-shrink-0 flex items-center justify-between border-t border-[var(--border-glass)] pt-3">
+        <span className="text-[10px] leading-relaxed text-[var(--text-muted)]">
           <span className="font-semibold">Procurement Logic:</span> Ideal levels default to 3x your stock alert limit. Wholesale prices default to a standard 30% retailer margin (70% of standard price). Tax subdivisions match item-wise GST rate allocations automatically.
         </span>
         <button
@@ -3498,8 +3701,8 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
           disabled={restockItems.filter(item => item.selected).length === 0}
           className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-lg select-none cursor-pointer ${
             restockItems.filter(item => item.selected).length === 0
-              ? 'opacity-40 cursor-not-allowed bg-gray-300 dark:bg-gray-800 text-gray-500'
-              : 'bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white shadow-blue-500/10 transform active:scale-95'
+              ? 'opacity-40 cursor-not-allowed bg-[var(--input-bg)] text-[var(--text-muted)]'
+              : 'bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white shadow-blue-500/10 transform active:scale-[0.97]'
           }`}
         >
           <FileSpreadsheet size={15} />
@@ -3510,17 +3713,17 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
   );
 
   const inventoryLedgerPanel = (
-    <div className={`${darkMode ? 'bg-gray-800 border-gray-700/50' : 'bg-white border-gray-200'} rounded-xl shadow-sm p-5 border flex flex-col h-[56vh]`}>
-      <div className="flex-shrink-0 flex justify-between items-center mb-4 border-b dark:border-gray-700 pb-3">
+    <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-sm p-5 border flex flex-col h-[56vh]">
+      <div className="flex-shrink-0 flex justify-between items-center mb-4 border-b border-[var(--border-glass)] pb-3">
         <div className="flex items-center gap-3">
           <div className="p-1.5 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-lg">
             <Database size={20} className="text-white" />
           </div>
           <div>
-            <h2 className={`text-lg font-bold ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+            <h2 className="text-lg font-bold text-[var(--text-primary)]">
               Multi-Warehouse Stock Ledger
             </h2>
-            <p className="text-[10px] text-gray-505">Chronological stock entries & transfers</p>
+            <p className="text-[10px] text-[var(--text-muted)]">Chronological stock entries & transfers</p>
           </div>
         </div>
         <div className="flex gap-2">
@@ -3549,23 +3752,23 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
       {/* Warehouses Info Row */}
       <div className="grid grid-cols-2 gap-3 mb-4 flex-shrink-0">
         {warehouses.map((wh) => (
-          <div key={wh.id} className={`p-3 rounded-xl border ${darkMode ? 'bg-gray-900/50 border-gray-800' : 'bg-gray-50 border-gray-150'}`}>
+          <div key={wh.id} className="p-3 rounded-xl border bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]">
             <div className="flex justify-between items-center mb-1">
               <span className="font-extrabold text-xs text-blue-500">{wh.code}</span>
-              <span className="text-[9px] text-gray-400 font-mono">ID: {wh.id}</span>
+              <span className="text-[9px] text-[var(--text-muted)] font-mono">ID: {wh.id}</span>
             </div>
             <h4 className="font-bold text-xs">{wh.name}</h4>
-            <p className="text-[10px] text-gray-500 mt-1 leading-normal truncate">{wh.address || 'No Address registered'}</p>
+            <p className="text-[10px] text-[var(--text-muted)] mt-1 leading-normal truncate">{wh.address || 'No Address registered'}</p>
           </div>
         ))}
       </div>
 
       {/* Ledger Table */}
-      <h3 className="text-[10px] font-black uppercase tracking-wider text-gray-400 mb-2 flex-shrink-0">Consolidated Stock Variation Logs</h3>
-      <div className="flex-1 overflow-y-auto rounded-xl border dark:border-gray-800 min-h-0 mb-2">
+      <h3 className="text-[10px] font-black uppercase tracking-wider text-[var(--text-muted)] mb-2 flex-shrink-0">Consolidated Stock Variation Logs</h3>
+      <div className="flex-1 overflow-y-auto rounded-xl border border-[var(--border-glass)] min-h-0 mb-2">
         <table className="w-full text-left border-collapse">
-          <thead className={`sticky top-0 z-10 ${darkMode ? 'bg-gray-900 text-gray-300' : 'bg-gray-50 text-gray-600'} text-[10px] font-bold uppercase tracking-wider`}>
-            <tr className="border-b dark:border-gray-800">
+          <thead className="sticky top-0 z-10 bg-[var(--input-bg)] text-[var(--text-muted)] text-[10px] font-bold uppercase tracking-wider border-b border-[var(--border-glass)]">
+            <tr className="border-b border-[var(--border-glass)]">
               <th className="px-3 py-2 w-32">Timestamp</th>
               <th className="px-3 py-2">Product SKU / Name</th>
               <th className="px-3 py-2">Warehouse</th>
@@ -3574,10 +3777,10 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               <th className="px-3 py-2">Notes</th>
             </tr>
           </thead>
-          <tbody className={`divide-y ${darkMode ? 'divide-gray-800' : 'divide-gray-100'} text-xs`}>
+          <tbody className="divide-y divide-[var(--border-glass)] text-xs text-[var(--text-primary)]">
             {inventoryLedger.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-3 py-8 text-center text-gray-500 font-medium italic">
+                <td colSpan={6} className="px-3 py-8 text-center text-[var(--text-muted)] font-medium italic">
                   No stock ledger entries registered yet.
                 </td>
               </tr>
@@ -3589,8 +3792,8 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                 const isPositive = log.change_qty > 0;
                 
                 return (
-                  <tr key={log.id} className="hover:bg-slate-500/5">
-                    <td className="px-3 py-2 font-mono text-[10px] text-gray-400">{date}</td>
+                  <tr key={log.id} className="hover:bg-[var(--surface-hover)]">
+                    <td className="px-3 py-2 font-mono text-[10px] text-[var(--text-muted)]">{date}</td>
                     <td className="px-3 py-2">
                       <span className="font-mono font-bold text-blue-500 block text-[10px]">{log.product_sku}</span>
                       <span className="font-semibold block truncate max-w-[150px]">{log.product_name}</span>
@@ -3609,7 +3812,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                         {log.type}
                       </span>
                     </td>
-                    <td className="px-3 py-2 text-gray-500 font-medium truncate max-w-[130px]" title={log.notes}>{log.notes}</td>
+                    <td className="px-3 py-2 text-[var(--text-muted)] font-medium truncate max-w-[130px]" title={log.notes}>{log.notes}</td>
                   </tr>
                 );
               })
@@ -3621,17 +3824,17 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
   );
 
   const pharmacyBatchesPanel = (
-    <div className={`${darkMode ? 'bg-gray-800 border-gray-700/50' : 'bg-white border-gray-200'} rounded-xl shadow-sm p-5 border flex flex-col h-[56vh]`}>
-      <div className="flex-shrink-0 flex justify-between items-center mb-4 border-b dark:border-gray-700 pb-3">
+    <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-sm p-5 border flex flex-col h-[56vh]">
+      <div className="flex-shrink-0 flex justify-between items-center mb-4 border-b border-[var(--border-glass)] pb-3">
         <div className="flex items-center gap-3">
           <div className="p-1.5 bg-gradient-to-br from-pink-500 to-purple-600 rounded-lg">
             <Package size={20} className="text-white" />
           </div>
           <div>
-            <h2 className={`text-lg font-bold ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+            <h2 className="text-lg font-bold text-[var(--text-primary)]">
               Pharmacy Batch & Expiries
             </h2>
-            <p className="text-[10px] text-gray-505">Track and inward drug batches and verify compliance dates</p>
+            <p className="text-[10px] text-[var(--text-muted)]">Track and inward drug batches and verify compliance dates</p>
           </div>
         </div>
         <button
@@ -3673,10 +3876,10 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
       </div>
 
       {/* Batches Table */}
-      <div className="flex-1 overflow-y-auto rounded-xl border dark:border-gray-800 min-h-0 mb-1">
+      <div className="flex-1 overflow-y-auto rounded-xl border border-[var(--border-glass)] min-h-0 mb-1">
         <table className="w-full text-left border-collapse">
-          <thead className={`sticky top-0 z-10 ${darkMode ? 'bg-gray-900 text-gray-300' : 'bg-gray-50 text-gray-600'} text-[10px] font-bold uppercase tracking-wider`}>
-            <tr className="border-b dark:border-gray-800">
+          <thead className="sticky top-0 z-10 bg-[var(--input-bg)] text-[var(--text-muted)] text-[10px] font-bold uppercase tracking-wider border-b border-[var(--border-glass)]">
+            <tr className="border-b border-[var(--border-glass)]">
               <th className="px-3 py-2">Medicine (SKU)</th>
               <th className="px-3 py-2 text-center w-24">Batch Number</th>
               <th className="px-3 py-2 text-center w-24">Expiry Date</th>
@@ -3685,10 +3888,10 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               <th className="px-3 py-2 text-center w-16">Actions</th>
             </tr>
           </thead>
-          <tbody className={`divide-y ${darkMode ? 'divide-gray-800' : 'divide-gray-100'} text-xs`}>
+          <tbody className="divide-y divide-[var(--border-glass)] text-xs text-[var(--text-primary)]">
             {batches.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-3 py-8 text-center text-gray-500 font-medium italic">
+                <td colSpan={6} className="px-3 py-8 text-center text-[var(--text-muted)] font-medium italic">
                   No medicine batches inwarded. Click Inward Drug Batch to add.
                 </td>
               </tr>
@@ -3700,12 +3903,12 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                 const isNearExpiry = diffDays >= 0 && diffDays <= 90;
                 
                 return (
-                  <tr key={b.id} className="hover:bg-slate-500/5">
+                  <tr key={b.id} className="hover:bg-[var(--surface-hover)]">
                     <td className="px-3 py-2">
-                      <span className="font-extrabold text-slate-800 dark:text-slate-100 block">{b.product_name}</span>
-                      <span className="font-mono text-[9px] text-gray-400 block">SKU: {b.product_sku}</span>
+                      <span className="font-extrabold text-[var(--text-primary)] block">{b.product_name}</span>
+                      <span className="font-mono text-[9px] text-[var(--text-muted)] block">SKU: {b.product_sku}</span>
                     </td>
-                    <td className="px-3 py-2 text-center font-mono font-bold text-slate-650">{b.batch_number}</td>
+                    <td className="px-3 py-2 text-center font-mono font-bold text-blue-500">{b.batch_number}</td>
                     <td className="px-3 py-2 text-center">
                       <span className={`px-2 py-0.5 rounded font-mono font-bold text-[10px] ${
                         isExpired ? 'bg-red-500/10 text-red-500' :
@@ -3715,10 +3918,10 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                         {b.expiry_date}
                       </span>
                     </td>
-                    <td className="px-2 py-2 text-center font-mono font-black text-slate-850 dark:text-white">{b.stock_quantity}</td>
+                    <td className="px-2 py-2 text-center font-mono font-black text-[var(--text-primary)]">{b.stock_quantity}</td>
                     <td className="px-3 py-2 text-center">
                       <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase ${
-                        b.prescription_required === 1 ? 'bg-red-500/10 text-red-500' : 'bg-gray-500/10 text-gray-550'
+                        b.prescription_required === 1 ? 'bg-red-500/10 text-red-500' : 'bg-gray-500/10 text-gray-400'
                       }`}>
                         {b.prescription_required === 1 ? 'Rx' : 'OTC'}
                       </span>
@@ -3742,13 +3945,14 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
   );
 
   const addWarehouseModalMarkup = showAddWarehouseModal && (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[60] flex items-center justify-center p-4">
-      <div className={`w-full max-w-md ${darkMode ? 'bg-gray-900 border-gray-800 text-white' : 'bg-white border-gray-200 text-gray-800'} rounded-2xl p-6 border shadow-2xl animate-scale-in text-left`}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-xl backdrop-saturate-200 z-[60] flex items-center justify-center p-4">
+      <div onPointerMove={updatePointerGlare} className="group relative w-full max-w-md bg-[var(--bg-glass)] text-[var(--text-primary)] backdrop-blur-xl backdrop-saturate-200 border border-[var(--border-glass)] shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6),inset_0_-1px_1px_rgba(0,0,0,0.08),var(--shadow-glass)] rounded-2xl p-6 animate-scale-in text-left overflow-hidden">
+        <SpecularGlareOverlay />
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-base font-bold flex items-center gap-2">
             <span>🏢</span> Add Warehouse Location
           </h3>
-          <button onClick={() => setShowAddWarehouseModal(false)} className="text-gray-400 hover:text-white cursor-pointer"><X size={18} /></button>
+          <button onClick={() => setShowAddWarehouseModal(false)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"><X size={18} /></button>
         </div>
         <div className="space-y-4 text-xs font-semibold">
           <div>
@@ -3758,7 +3962,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               placeholder="WH-SOUTH"
               value={newWarehouseForm.code}
               onChange={(e) => setNewWarehouseForm({ ...newWarehouseForm, code: e.target.value.toUpperCase() })}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 ${darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300'}`}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
             />
           </div>
           <div>
@@ -3768,7 +3972,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               placeholder="Southern Supply Bin"
               value={newWarehouseForm.name}
               onChange={(e) => setNewWarehouseForm({ ...newWarehouseForm, name: e.target.value })}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 ${darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300'}`}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
             />
           </div>
           <div>
@@ -3778,12 +3982,12 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               rows={2}
               value={newWarehouseForm.address}
               onChange={(e) => setNewWarehouseForm({ ...newWarehouseForm, address: e.target.value })}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 ${darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300'}`}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
             />
           </div>
           <button
             onClick={handleCreateWarehouse}
-            className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-lg shadow-blue-600/10 cursor-pointer uppercase transition-all"
+            className="w-full py-2.5 glass-btn glass-btn-accent text-xs font-bold rounded-xl shadow-blue-600/10 cursor-pointer uppercase transition-all"
           >
             Save Location
           </button>
@@ -3793,21 +3997,22 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
   );
 
   const addTransferModalMarkup = showTransferModal && (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[60] flex items-center justify-center p-4">
-      <div className={`w-full max-w-md ${darkMode ? 'bg-gray-900 border-gray-800 text-white' : 'bg-white border-gray-200 text-gray-800'} rounded-2xl p-6 border shadow-2xl animate-scale-in text-left`}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-xl backdrop-saturate-200 z-[60] flex items-center justify-center p-4">
+      <div onPointerMove={updatePointerGlare} className="group relative w-full max-w-md bg-[var(--bg-glass)] text-[var(--text-primary)] backdrop-blur-xl backdrop-saturate-200 border border-[var(--border-glass)] shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6),inset_0_-1px_1px_rgba(0,0,0,0.08),var(--shadow-glass)] rounded-2xl p-6 animate-scale-in text-left overflow-hidden">
+        <SpecularGlareOverlay />
         <div className="flex justify-between items-center mb-4">
-          <h3 className="text-base font-bold flex items-center gap-2">
+          <h3 className="text-base font-bold flex items-center gap-2 text-[var(--text-primary)]">
             <span>🔄</span> Internal Stock Transfer
           </h3>
-          <button onClick={() => setShowTransferModal(false)} className="text-gray-400 hover:text-white cursor-pointer"><X size={18} /></button>
+          <button onClick={() => setShowTransferModal(false)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"><X size={18} /></button>
         </div>
         <div className="space-y-4 text-xs font-semibold">
           <div>
-            <label className="block mb-1 opacity-70">Select Product to Move</label>
+            <label className="block mb-1 text-[var(--text-muted)]">Select Product to Move</label>
             <select
               value={transferForm.product_id}
               onChange={(e) => setTransferForm({ ...transferForm, product_id: e.target.value })}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 ${darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
             >
               <option value="">-- Choose Product --</option>
               {productsList.map(p => (
@@ -3817,11 +4022,11 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block mb-1 opacity-70">Source Location</label>
+              <label className="block mb-1 text-[var(--text-muted)]">Source Location</label>
               <select
                 value={transferForm.from_warehouse_id}
                 onChange={(e) => setTransferForm({ ...transferForm, from_warehouse_id: e.target.value })}
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 ${darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
+                className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
               >
                 <option value="">-- Source WH --</option>
                 {warehouses.map(w => (
@@ -3830,11 +4035,11 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               </select>
             </div>
             <div>
-              <label className="block mb-1 opacity-70">Destination Location</label>
+              <label className="block mb-1 text-[var(--text-muted)]">Destination Location</label>
               <select
                 value={transferForm.to_warehouse_id}
                 onChange={(e) => setTransferForm({ ...transferForm, to_warehouse_id: e.target.value })}
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 ${darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
+                className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
               >
                 <option value="">-- Dest WH --</option>
                 {warehouses.map(w => (
@@ -3844,28 +4049,28 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
             </div>
           </div>
           <div>
-            <label className="block mb-1 opacity-70">Transfer Quantity</label>
+            <label className="block mb-1 text-[var(--text-muted)]">Transfer Quantity</label>
             <input
               type="number"
               placeholder="10"
               value={transferForm.quantity}
               onChange={(e) => setTransferForm({ ...transferForm, quantity: e.target.value })}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 ${darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300'}`}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
             />
           </div>
           <div>
-            <label className="block mb-1 opacity-70">Transaction Notes</label>
+            <label className="block mb-1 text-[var(--text-muted)]">Transaction Notes</label>
             <input
               type="text"
               placeholder="Consolidation of general depot stock"
               value={transferForm.notes}
               onChange={(e) => setTransferForm({ ...transferForm, notes: e.target.value })}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 ${darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300'}`}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
             />
           </div>
           <button
             onClick={handleTransferStock}
-            className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-lg shadow-indigo-600/10 cursor-pointer uppercase transition-all"
+            className="w-full py-2.5 glass-btn glass-btn-accent text-xs font-bold rounded-xl shadow-indigo-600/10 cursor-pointer uppercase transition-all"
           >
             Execute Transfer
           </button>
@@ -3875,21 +4080,22 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
   );
 
   const addAdjustModalMarkup = showAdjustModal && (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[60] flex items-center justify-center p-4">
-      <div className={`w-full max-w-md ${darkMode ? 'bg-gray-900 border-gray-800 text-white' : 'bg-white border-gray-200 text-gray-800'} rounded-2xl p-6 border shadow-2xl animate-scale-in text-left`}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-xl backdrop-saturate-200 z-[60] flex items-center justify-center p-4">
+      <div onPointerMove={updatePointerGlare} className="group relative w-full max-w-md bg-[var(--bg-glass)] text-[var(--text-primary)] backdrop-blur-xl backdrop-saturate-200 border border-[var(--border-glass)] shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6),inset_0_-1px_1px_rgba(0,0,0,0.08),var(--shadow-glass)] rounded-2xl p-6 animate-scale-in text-left overflow-hidden">
+        <SpecularGlareOverlay />
         <div className="flex justify-between items-center mb-4">
-          <h3 className="text-base font-bold flex items-center gap-2">
+          <h3 className="text-base font-bold flex items-center gap-2 text-[var(--text-primary)]">
             <span>⚖️</span> Log Stock Audit / Damage Write-Off
           </h3>
-          <button onClick={() => setShowAdjustModal(false)} className="text-gray-400 hover:text-white cursor-pointer"><X size={18} /></button>
+          <button onClick={() => setShowAdjustModal(false)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"><X size={18} /></button>
         </div>
         <div className="space-y-4 text-xs font-semibold">
           <div>
-            <label className="block mb-1 opacity-70">Select Product to Audit</label>
+            <label className="block mb-1 text-[var(--text-muted)]">Select Product to Audit</label>
             <select
               value={adjustForm.product_id}
               onChange={(e) => setAdjustForm({ ...adjustForm, product_id: e.target.value })}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 ${darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
             >
               <option value="">-- Choose Product --</option>
               {productsList.map(p => (
@@ -3898,11 +4104,11 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
             </select>
           </div>
           <div>
-            <label className="block mb-1 opacity-70">Target Warehouse Location</label>
+            <label className="block mb-1 text-[var(--text-muted)]">Target Warehouse Location</label>
             <select
               value={adjustForm.warehouse_id}
               onChange={(e) => setAdjustForm({ ...adjustForm, warehouse_id: e.target.value })}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 ${darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
             >
               <option value="">-- Choose WH --</option>
               {warehouses.map(w => (
@@ -3912,21 +4118,21 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block mb-1 opacity-70">Variation Qty</label>
+              <label className="block mb-1 text-[var(--text-muted)]">Variation Qty</label>
               <input
                 type="number"
                 placeholder="5"
                 value={adjustForm.change_qty}
                 onChange={(e) => setAdjustForm({ ...adjustForm, change_qty: e.target.value })}
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 ${darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300'}`}
+                className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
               />
             </div>
             <div>
-              <label className="block mb-1 opacity-70">Adjustment Type</label>
+              <label className="block mb-1 text-[var(--text-muted)]">Adjustment Type</label>
               <select
                 value={adjustForm.type}
                 onChange={(e) => setAdjustForm({ ...adjustForm, type: e.target.value as any })}
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 ${darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
+                className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
               >
                 <option value="damaged">Damage / Write-Off (Reduces stock)</option>
                 <option value="audit">Inventory Audit (Adds/Subtracts stock)</option>
@@ -3934,18 +4140,18 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
             </div>
           </div>
           <div>
-            <label className="block mb-1 opacity-70">Adjustment Note / Incident Details</label>
+            <label className="block mb-1 text-[var(--text-muted)]">Adjustment Note / Incident Details</label>
             <input
               type="text"
               placeholder="Water leakage or discrepancy resolved during audit"
               value={adjustForm.notes}
               onChange={(e) => setAdjustForm({ ...adjustForm, notes: e.target.value })}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 ${darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300'}`}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
             />
           </div>
           <button
             onClick={handleAdjustStock}
-            className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shadow-lg shadow-amber-600/10 cursor-pointer uppercase transition-all"
+            className="w-full py-2.5 glass-btn glass-btn-accent text-xs font-bold rounded-xl shadow-amber-600/10 cursor-pointer uppercase transition-all"
           >
             Apply Adjustment
           </button>
@@ -3955,21 +4161,22 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
   );
 
   const addBatchModalMarkup = showAddBatchModal && (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[60] flex items-center justify-center p-4">
-      <div className={`w-full max-w-md ${darkMode ? 'bg-gray-900 border-gray-800 text-white' : 'bg-white border-gray-200 text-gray-800'} rounded-2xl p-6 border shadow-2xl animate-scale-in text-left`}>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-xl backdrop-saturate-200 z-[60] flex items-center justify-center p-4">
+      <div onPointerMove={updatePointerGlare} className="group relative w-full max-w-md bg-[var(--bg-glass)] text-[var(--text-primary)] backdrop-blur-xl backdrop-saturate-200 border border-[var(--border-glass)] shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6),inset_0_-1px_1px_rgba(0,0,0,0.08),var(--shadow-glass)] rounded-2xl p-6 animate-scale-in text-left overflow-hidden">
+        <SpecularGlareOverlay />
         <div className="flex justify-between items-center mb-4">
-          <h3 className="text-base font-bold flex items-center gap-2">
+          <h3 className="text-base font-bold flex items-center gap-2 text-[var(--text-primary)]">
             <span>🧪</span> Inward Pharmaceutical Medicine Batch
           </h3>
-          <button onClick={() => setShowAddBatchModal(false)} className="text-gray-400 hover:text-white cursor-pointer"><X size={18} /></button>
+          <button onClick={() => setShowAddBatchModal(false)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"><X size={18} /></button>
         </div>
         <div className="space-y-4 text-xs font-semibold">
           <div>
-            <label className="block mb-1 opacity-70">Select Medicine Item</label>
+            <label className="block mb-1 text-[var(--text-muted)]">Select Medicine Item</label>
             <select
               value={newBatchForm.product_id}
               onChange={(e) => setNewBatchForm({ ...newBatchForm, product_id: e.target.value })}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 ${darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
             >
               <option value="">-- Choose Medicine --</option>
               {productsList.filter(p => p.category === 'Pharmacy').map(p => (
@@ -3979,54 +4186,54 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block mb-1 opacity-70">Batch Number</label>
+              <label className="block mb-1 text-[var(--text-muted)]">Batch Number</label>
               <input
                 type="text"
                 placeholder="AMX-2026"
                 value={newBatchForm.batch_number}
                 onChange={(e) => setNewBatchForm({ ...newBatchForm, batch_number: e.target.value.toUpperCase() })}
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 ${darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300'}`}
+                className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
               />
             </div>
             <div>
-              <label className="block mb-1 opacity-70">Inward Quantity</label>
+              <label className="block mb-1 text-[var(--text-muted)]">Inward Quantity</label>
               <input
                 type="number"
                 placeholder="100"
                 value={newBatchForm.stock_quantity}
                 onChange={(e) => setNewBatchForm({ ...newBatchForm, stock_quantity: e.target.value })}
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 ${darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300'}`}
+                className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
               />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block mb-1 opacity-70">Expiry Date (YYYY-MM-DD)</label>
+              <label className="block mb-1 text-[var(--text-muted)]">Expiry Date (YYYY-MM-DD)</label>
               <input
                 type="date"
                 value={newBatchForm.expiry_date}
                 onChange={(e) => setNewBatchForm({ ...newBatchForm, expiry_date: e.target.value })}
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 ${darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
+                className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
               />
             </div>
             <div>
-              <label className="block mb-1 opacity-70">Mfg Date (YYYY-MM-DD)</label>
+              <label className="block mb-1 text-[var(--text-muted)]">Mfg Date (YYYY-MM-DD)</label>
               <input
                 type="date"
                 value={newBatchForm.manufacturing_date}
                 onChange={(e) => setNewBatchForm({ ...newBatchForm, manufacturing_date: e.target.value })}
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 ${darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
+                className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
               />
             </div>
           </div>
           <div>
-            <label className="block mb-1 opacity-70">Drug License Number / Batch ID</label>
+            <label className="block mb-1 text-[var(--text-muted)]">Drug License Number / Batch ID</label>
             <input
               type="text"
               placeholder="DL-27-12345"
               value={newBatchForm.drug_license}
               onChange={(e) => setNewBatchForm({ ...newBatchForm, drug_license: e.target.value })}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 ${darkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300'}`}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-blue-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
             />
           </div>
           <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -4040,7 +4247,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
           </label>
           <button
             onClick={handleCreateBatch}
-            className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl shadow-lg shadow-purple-600/10 cursor-pointer uppercase transition-all"
+            className="w-full py-2.5 glass-btn glass-btn-accent text-xs font-bold rounded-xl shadow-purple-600/10 cursor-pointer uppercase transition-all"
           >
             Inward Stock
           </button>
@@ -4050,51 +4257,51 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
   );
 
   const restaurantTablesPanel = (
-    <div className={`${darkMode ? 'bg-gray-800 border-gray-700/50' : 'bg-white border-gray-200'} rounded-xl shadow-sm p-5 border flex flex-col h-[56vh]`}>
-      <div className="flex-shrink-0 flex items-center gap-3 mb-4 border-b dark:border-gray-700 pb-3">
-        <div className="p-1.5 bg-gradient-to-br from-rose-500 to-pink-650 rounded-lg text-white">
+    <div className="glass-panel border-[var(--border-glass)] text-[var(--text-primary)] rounded-xl shadow-sm p-5 border flex flex-col h-[56vh]">
+      <div className="flex-shrink-0 flex items-center gap-3 mb-4 border-b border-[var(--border-glass)] pb-3">
+        <div className="p-1.5 bg-gradient-to-br from-rose-500 to-pink-600 rounded-lg text-white">
           <Store size={20} />
         </div>
         <div>
-          <h2 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+          <h2 className="text-xl font-bold text-[var(--text-primary)]">
             Dining Tables Layout Settings
           </h2>
-          <p className="text-[10px] text-gray-500">Configure floorplan grid, seating capacities, and add/bulk-generate tables</p>
+          <p className="text-[10px] text-[var(--text-muted)]">Configure floorplan grid, seating capacities, and add/bulk-generate tables</p>
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto space-y-5 pr-1 pb-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Custom Adder */}
-          <div className={`p-4 rounded-xl border ${darkMode ? 'bg-slate-900/40 border-slate-800' : 'bg-gray-50 border-gray-200'} space-y-3`}>
-            <h3 className={`text-xs font-bold uppercase tracking-wider ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+          <div className="p-4 rounded-xl border bg-[var(--bg-glass)] border-[var(--border-glass)] text-[var(--text-primary)] space-y-3">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
               ➕ Add Single Dining Table
             </h3>
             <div className="space-y-2.5">
               <div>
-                <label className="block text-[10px] font-bold text-gray-400 mb-1 font-mono">TABLE NAME / CODE</label>
+                <label className="block text-[10px] font-bold text-[var(--text-muted)] mb-1 font-mono">TABLE NAME / CODE</label>
                 <input
                   type="text"
                   placeholder="e.g. Table 11 or Patio 1"
                   value={newTableName}
                   onChange={(e) => setNewTableName(e.target.value)}
-                  className={`w-full px-3 py-1.5 text-xs border rounded-lg focus:ring-1 focus:ring-rose-500 focus:border-rose-500 ${darkMode ? 'bg-gray-800 border-gray-750 text-white' : 'bg-white border-gray-300'}`}
+                  className="w-full px-3 py-1.5 text-xs border rounded-lg focus:ring-1 focus:ring-rose-500 focus:border-rose-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                 />
               </div>
               <div>
-                <label className="block text-[10px] font-bold text-gray-400 mb-1 font-mono">SEATING CAPACITY</label>
+                <label className="block text-[10px] font-bold text-[var(--text-muted)] mb-1 font-mono">SEATING CAPACITY</label>
                 <input
                   type="number"
                   min="1"
                   value={newTableSeats}
                   onChange={(e) => setNewTableSeats(parseInt(e.target.value) || 2)}
-                  className={`w-full px-3 py-1.5 text-xs border rounded-lg focus:ring-1 focus:ring-rose-500 focus:border-rose-500 ${darkMode ? 'bg-gray-800 border-gray-750 text-white' : 'bg-white border-gray-300'}`}
+                  className="w-full px-3 py-1.5 text-xs border rounded-lg focus:ring-1 focus:ring-rose-500 focus:border-rose-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                 />
               </div>
               <button
                 type="button"
                 onClick={handleAddTable}
-                className="w-full py-2 bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white font-extrabold rounded-lg text-xs uppercase cursor-pointer select-none active:scale-95 transition-all shadow-md shadow-rose-950/10"
+                className="w-full py-2 bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white font-extrabold rounded-lg text-xs uppercase cursor-pointer select-none active:scale-[0.97] transition-all shadow-md shadow-rose-950/10"
               >
                 Add Table To Floorplan
               </button>
@@ -4102,36 +4309,36 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
           </div>
 
           {/* Bulk Generator */}
-          <div className={`p-4 rounded-xl border ${darkMode ? 'bg-slate-900/40 border-slate-800' : 'bg-gray-50 border-gray-200'} space-y-3`}>
-            <h3 className={`text-xs font-bold uppercase tracking-wider ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+          <div className="p-4 rounded-xl border bg-[var(--bg-glass)] border-[var(--border-glass)] text-[var(--text-primary)] space-y-3">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
               ⚡ Bulk Floorplan Generator
             </h3>
             <div className="space-y-2.5">
               <div>
-                <label className="block text-[10px] font-bold text-gray-400 mb-1 font-mono">TOTAL TABLES TO GENERATE</label>
+                <label className="block text-[10px] font-bold text-[var(--text-muted)] mb-1 font-mono">TOTAL TABLES TO GENERATE</label>
                 <input
                   type="number"
                   min="1"
                   max="50"
                   value={bulkTableCount}
                   onChange={(e) => setBulkTableCount(parseInt(e.target.value) || 12)}
-                  className={`w-full px-3 py-1.5 text-xs border rounded-lg focus:ring-1 focus:ring-rose-500 focus:border-rose-500 ${darkMode ? 'bg-gray-800 border-gray-750 text-white' : 'bg-white border-gray-300'}`}
+                  className="w-full px-3 py-1.5 text-xs border rounded-lg focus:ring-1 focus:ring-rose-500 focus:border-rose-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                 />
               </div>
               <div>
-                <label className="block text-[10px] font-bold text-gray-400 mb-1 font-mono">STANDARD SEATS PER TABLE</label>
+                <label className="block text-[10px] font-bold text-[var(--text-muted)] mb-1 font-mono">STANDARD SEATS PER TABLE</label>
                 <input
                   type="number"
                   min="1"
                   value={bulkTableSeats}
                   onChange={(e) => setBulkTableSeats(parseInt(e.target.value) || 4)}
-                  className={`w-full px-3 py-1.5 text-xs border rounded-lg focus:ring-1 focus:ring-rose-500 focus:border-rose-500 ${darkMode ? 'bg-gray-800 border-gray-750 text-white' : 'bg-white border-gray-300'}`}
+                  className="w-full px-3 py-1.5 text-xs border rounded-lg focus:ring-1 focus:ring-rose-500 focus:border-rose-500 bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                 />
               </div>
               <button
                 type="button"
                 onClick={handleBulkGenerate}
-                className="w-full py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-extrabold rounded-lg text-xs uppercase cursor-pointer select-none active:scale-95 transition-all"
+                className="w-full py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-extrabold rounded-lg text-xs uppercase cursor-pointer select-none active:scale-[0.97] transition-all"
               >
                 Bulk Generate Layout
               </button>
@@ -4140,16 +4347,16 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
         </div>
 
         {/* Current Table Layout */}
-        <div className={`p-4 rounded-xl border ${darkMode ? 'bg-slate-900/40 border-slate-800' : 'bg-gray-50 border-gray-200'} space-y-3`}>
+        <div className="p-4 rounded-xl border bg-[var(--bg-glass)] border-[var(--border-glass)] text-[var(--text-primary)] space-y-3">
           <div className="flex justify-between items-center">
-            <h3 className={`text-xs font-bold uppercase tracking-wider ${darkMode ? 'text-gray-400' : 'text-gray-650'}`}>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
               🪑 Configured Dining Tables ({localTables.length})
             </h3>
-            <span className="text-[9px] text-gray-400 select-none font-mono font-bold">PERSISTED LOCAL LAYOUT</span>
+            <span className="text-[9px] text-[var(--text-muted)] select-none font-mono font-bold">PERSISTED LOCAL LAYOUT</span>
           </div>
 
           {localTables.length === 0 ? (
-            <div className="py-8 text-center text-xs text-gray-500 font-medium">
+            <div className="py-8 text-center text-xs text-[var(--text-muted)] font-medium">
               No tables configured. Use the Bulk Generator or Single Table Adder above to initialize your layout!
             </div>
           ) : (
@@ -4157,12 +4364,10 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               {localTables.map((table) => (
                 <div
                   key={table.id}
-                  className={`p-3 rounded-xl border flex flex-col justify-between gap-2.5 transition-all ${
-                    darkMode ? 'bg-slate-950/60 border-slate-850/80 shadow shadow-slate-950/20' : 'bg-white border-gray-200 shadow-sm'
-                  }`}
+                  className="p-3 rounded-xl border flex flex-col justify-between gap-2.5 transition-all bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)] shadow-sm"
                 >
                   <div className="flex justify-between items-start">
-                    <span className={`font-bold text-xs ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+                    <span className="font-bold text-xs text-[var(--text-primary)]">
                       {table.name}
                     </span>
                     <button
@@ -4174,16 +4379,14 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
                     </button>
                   </div>
 
-                  <div className="flex items-center gap-1.5 border-t dark:border-slate-850 pt-2">
-                    <span className="text-[9px] font-bold text-gray-450 uppercase whitespace-nowrap font-mono">SEATS:</span>
+                  <div className="flex items-center gap-1.5 border-t border-[var(--border-glass)] pt-2">
+                    <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase whitespace-nowrap font-mono">SEATS:</span>
                     <input
                       type="number"
                       min="1"
                       value={table.seats}
                       onChange={(e) => handleUpdateTableSeats(table.id, parseInt(e.target.value) || 2)}
-                      className={`w-full px-1.5 py-0.5 text-[10px] font-black border rounded focus:ring-1 focus:ring-rose-500 focus:outline-none ${
-                        darkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-gray-50 border-gray-250 text-gray-800'
-                      }`}
+                      className="w-full px-1.5 py-0.5 text-[10px] font-black border rounded focus:ring-1 focus:ring-rose-500 focus:outline-none bg-[var(--input-bg)] border-[var(--border-glass)] text-[var(--text-primary)]"
                     />
                   </div>
                 </div>
@@ -4195,9 +4398,228 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
     </div>
   );
 
+  // UI Theme Settings Panel
+  const uiThemePanel = (
+    <div className="space-y-6 text-left animate-fade-in">
+      <div className="p-5 rounded-2xl border glass-panel border-[var(--border-glass)] text-[var(--text-primary)] shadow-sm space-y-6">
+        <div>
+          <h3 className="text-base font-extrabold flex items-center gap-2 text-[var(--text-primary)]">
+            <Palette className="text-emerald-500" size={20} />
+            <span>UI Theme: Liquid Glass & Preference Controls</span>
+          </h3>
+          <p className="text-xs text-[var(--text-muted)] mt-1">
+            Choose system or explicit Light/Dark mode and adjust panel opacity while keeping text contrast automatic.
+          </p>
+        </div>
+
+        {/* 0. Theme Preference Mode: System / Light / Dark Selector */}
+        <div className="space-y-3 p-4 rounded-xl border border-[var(--border-glass)] bg-[var(--bg-glass)] text-[var(--text-primary)]">
+          <div className="flex justify-between items-center">
+            <label className="text-xs font-bold uppercase tracking-wider flex items-center gap-2 text-[var(--text-primary)]">
+              <Monitor size={16} />
+              <span>Theme Mode (System / Light / Dark)</span>
+            </label>
+            <span className="text-xs font-mono font-extrabold px-3 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase">
+              Active: {theme} {theme === 'system' ? `(${resolvedTheme})` : ''}
+            </span>
+          </div>
+          <p className="text-[11px] text-[var(--text-muted)]">
+            Select explicit Light or Dark mode, or automatically synchronize with your operating system preference.
+          </p>
+          <div className="grid grid-cols-3 gap-3 pt-1">
+            {[
+              { id: 'system', label: 'System', icon: Monitor, desc: 'Auto OS preference' },
+              { id: 'light', label: 'Light', icon: Sun, desc: 'Bright mode' },
+              { id: 'dark', label: 'Dark', icon: Moon, desc: 'Glass dark mode' },
+            ].map((option) => {
+              const IconComponent = option.icon;
+              const isSelected = theme === option.id;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => setTheme(option.id as ThemeMode)}
+                  className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all cursor-pointer ${
+                    isSelected
+                      ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30 shadow-md'
+                      : 'border-[var(--border-glass)] bg-[var(--input-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                  }`}
+                >
+                  <IconComponent size={20} className={isSelected ? 'text-emerald-500' : ''} />
+                  <span className={`text-xs font-bold mt-1.5 ${isSelected ? 'text-[var(--text-primary)]' : ''}`}>
+                    {option.label}
+                  </span>
+                  <span className="text-[10px] text-[var(--text-muted)] font-normal">
+                    {option.desc}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 1. Curated Preset Color Themes (Optimized for Light & Dark Contrast per color-selection-light-dark-themes.md skill) */}
+        <div className="space-y-3 p-4 rounded-xl border border-[var(--border-glass)] bg-[var(--bg-glass)] text-[var(--text-primary)]">
+          <div className="flex justify-between items-center">
+            <label className="text-xs font-bold uppercase tracking-wider flex items-center gap-2 text-[var(--text-primary)]">
+              <Palette size={16} />
+              <span>1. Curated Preset Color Themes (Light & Dark Tuned)</span>
+            </label>
+            {activePresetId && (
+              <span className="text-xs font-mono font-extrabold px-3 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase">
+                Active: {COLOR_THEME_PRESETS.find(p => p.id === activePresetId)?.name || activePresetId}
+              </span>
+            )}
+          </div>
+          <p className="text-[11px] text-[var(--text-muted)]">
+            Built using HSL lightness tuning (40–55% Light, 55–70% Dark) ensuring WCAG AA contrast across both light and dark themes.
+          </p>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 pt-1">
+            {COLOR_THEME_PRESETS.map((preset) => {
+              const isSelected = activePresetId === preset.id;
+              const displayColor = darkMode ? preset.accentDark : preset.accentLight;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => selectPresetTheme(preset.id)}
+                  className={`flex flex-col text-left p-3 rounded-xl border transition-all cursor-pointer ${
+                    isSelected
+                      ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30 shadow-md'
+                      : 'border-[var(--border-glass)] bg-[var(--input-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <span
+                      className="w-4 h-4 rounded-full shadow-sm shrink-0 border border-white/20"
+                      style={{ backgroundColor: displayColor }}
+                    />
+                    <span className={`text-xs font-bold ${isSelected ? 'text-[var(--text-primary)]' : ''}`}>
+                      {preset.name}
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-[var(--text-muted)] font-normal leading-tight line-clamp-2">
+                    {preset.description}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 2. SINGLE APPLICATION SLIDER: Liquid Glass Transparency & Opacity */}
+        <div className="space-y-3 p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5">
+          <div className="flex justify-between items-center">
+            <label className="text-xs font-bold uppercase tracking-wider flex items-center gap-2 text-emerald-500">
+              <Sliders size={16} />
+              <span>2. Liquid Glass Opacity Slider (Single Application Slider)</span>
+            </label>
+            <span className="text-xs font-mono font-extrabold px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+              {Math.round(elementOpacity * 100)}% Opacity
+            </span>
+          </div>
+          <p className="text-[11px] text-[var(--text-muted)]">
+            The only slider in the application. It adjusts panel and card transparency globally; text keeps the readable light/dark theme colors.
+          </p>
+          <div className="flex items-center gap-4 pt-2">
+            <span className="text-[10px] font-bold text-[var(--text-muted)]">More glass</span>
+            <input
+              type="range"
+              min={GLASS_OPACITY_MIN}
+              max={GLASS_OPACITY_MAX}
+              step="0.01"
+              value={elementOpacity}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                setElementOpacity(val);
+                setButtonOpacity(val);
+              }}
+              className="flex-1 accent-[var(--primary-accent)] cursor-pointer h-2.5 rounded-lg bg-[var(--surface-elevated)]"
+            />
+            <span className="text-[10px] font-bold text-[var(--text-muted)]">100% (Solid)</span>
+          </div>
+        </div>
+
+        {/* Real-time Live Interactive Preview Box */}
+        <div className="pt-4 border-t border-[var(--border-glass)]">
+          <label className="block text-xs font-bold uppercase tracking-wider mb-2 text-[var(--text-primary)]">
+            Live Theme Preview
+          </label>
+          <div 
+            className="p-4 rounded-2xl border border-[var(--border-glass)] transition-all space-y-3"
+            style={{ 
+              backgroundColor: darkMode
+                ? `rgba(28, 29, 34, ${elementOpacity})`
+                : `rgba(255, 255, 255, ${elementOpacity})`
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-extrabold tracking-tight flex items-center gap-1.5 text-[var(--text-primary)]">
+                <Sparkles size={14} className="text-emerald-500" /> Sample Panel Text (1234567890)
+              </span>
+              <span 
+                className="text-[10px] font-bold px-2.5 py-1 rounded-full text-white shadow-sm"
+                style={{ backgroundColor: accentColor }}
+              >
+                Liquid Glass Active (Surface Only)
+              </span>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="px-4 py-2 rounded-xl text-xs font-bold text-white shadow-md transition-all cursor-pointer"
+                style={{ backgroundColor: accentColor }}
+              >
+                Sample Action Button (₹1,250.00)
+              </button>
+
+              <button
+                type="button"
+                className="px-4 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer border-[var(--border-glass)] bg-[var(--input-bg)] text-[var(--text-primary)]"
+              >
+                Cancel 100% Solid Text
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Theme Actions: Reset & Save */}
+        <div className="pt-4 flex flex-wrap justify-between items-center gap-3 border-t border-[var(--border-glass)]">
+          <button
+            type="button"
+            onClick={() => {
+              resetThemeDefaults();
+              localStorage.removeItem('themeTextColor');
+              document.documentElement.style.removeProperty('--custom-text-color');
+              toast.success('UI theme reset to readable defaults.');
+            }}
+            className="px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer bg-[var(--input-bg)] text-[var(--text-primary)] hover:bg-[var(--surface-hover)]"
+          >
+            <RotateCcw size={14} />
+            <span>Reset Colors to Defaults</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              window.dispatchEvent(new Event('nexusflow-theme-applied'));
+              toast.success('Theme applied across the entire application.');
+            }}
+            className="liquid-glass-button px-5 py-2.5 rounded-xl text-xs font-bold text-white shadow-lg flex items-center gap-2 transition-all cursor-pointer hover:scale-105 active:scale-[0.97]"
+          >
+            <Sparkles size={15} />
+            <span>✨ Apply Theme to Application</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   const renderActiveTabContent = () => {
     switch (activeDrawerTab) {
       case 'shop': return shopDetailsPanel;
+      case 'theme': return uiThemePanel;
       case 'workspace': return workspaceProfilePanel;
       case 'gst': return gstSettingsPanel;
       case 'loyalty': return loyaltySettingsPanel;
@@ -4220,6 +4642,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
   if (isModal) {
     const rawTabs = [
       { id: 'shop', label: 'Shop Details', icon: <Store size={18} /> },
+      { id: 'theme', label: 'UI Theme & Custom Colors', icon: <Palette size={18} /> },
       { id: 'workspace', label: 'Workspace Profile', icon: <Settings size={18} /> },
       { id: 'gst', label: 'GST & Tax Settings', icon: <Database size={18} /> },
       { id: 'loyalty', label: 'Loyalty Program', icon: <Crown size={18} /> },
@@ -4238,7 +4661,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
 
     const tabs = rawTabs.filter(tab => {
       if (multiSectorEnabled) return true;
-      if (tab.id === 'shop' || tab.id === 'workspace' || tab.id === 'password' || tab.id === 'owners' || tab.id === 'database' || tab.id === 'diagnostics') {
+      if (tab.id === 'shop' || tab.id === 'theme' || tab.id === 'workspace' || tab.id === 'password' || tab.id === 'owners' || tab.id === 'database' || tab.id === 'diagnostics') {
         return true;
       }
       
@@ -4266,35 +4689,56 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
     });
 
     return (
-      <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-50 flex items-center justify-center p-4 md:p-6 animate-fade-in">
-        <div className={`w-full max-w-6xl h-[85vh] ${darkMode ? 'bg-gray-900 border-gray-800 text-white' : 'bg-white border-gray-200 text-gray-800'} shadow-2xl rounded-2xl flex flex-col z-50 overflow-hidden border border-gray-100 dark:border-gray-800 animate-scale-in`}>
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-xl backdrop-saturate-200 z-50 flex flex-col p-0 animate-fade-in">
+        <div 
+          onPointerMove={updatePointerGlare}
+          className="group relative w-full h-full rounded-none bg-[var(--bg-glass)] text-[var(--text-primary)] backdrop-blur-2xl backdrop-saturate-200 border-0 shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6),inset_0_-1px_1px_rgba(0,0,0,0.08),var(--shadow-glass)] flex flex-col z-50 overflow-hidden"
+        >
+          <SpecularGlareOverlay />
+
           {/* Header */}
-          <div className={`p-5 border-b ${darkMode ? 'border-gray-800' : 'border-gray-100'} flex justify-between items-center bg-opacity-70 backdrop-blur-md flex-shrink-0`}>
+          <div className="p-4 md:p-5 border-b border-[var(--border-glass)] bg-[var(--input-bg)] flex justify-between items-center shrink-0 shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6)] relative z-10">
             <div>
-              <h2 className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>System Settings</h2>
-              <p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-505'} mt-1`}>Configure parameters for your offline LAN NexusFlow (Owner Mode)</p>
+              <h2 className="text-xl md:text-2xl font-bold text-[var(--text-primary)]">System Settings</h2>
+              <p className="text-xs text-[var(--text-secondary)] mt-0.5">Configure parameters for your offline LAN NexusFlow (Owner Mode)</p>
             </div>
             <button 
               onClick={onClose}
-              className={`p-2 rounded-xl transition-all ${darkMode ? 'hover:bg-gray-800 text-gray-400 hover:text-white' : 'hover:bg-gray-100 text-gray-550 hover:text-gray-900'}`}
+              className="p-2 rounded-xl transition-all cursor-pointer text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] active:scale-[0.97]"
             >
-              <X size={20} />
+              <X size={22} />
             </button>
           </div>
 
-          <div className="flex-1 flex overflow-hidden">
-            {/* Sidebar */}
-            <div className={`w-64 border-r ${darkMode ? 'bg-gray-950/40 border-gray-800' : 'bg-gray-50 border-gray-100'} p-4 space-y-1 flex flex-col overflow-y-auto flex-shrink-0`}>
+          {/* Mobile Horizontal Tabs Header */}
+          <div className="md:hidden flex overflow-x-auto border-b border-[var(--border-glass)] glass-panel p-2 space-x-2 no-scrollbar shrink-0 relative z-10">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveDrawerTab(tab.id as any)}
+                className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold whitespace-nowrap cursor-pointer transition-all active:scale-[0.97] ${
+                  activeDrawerTab === tab.id
+                    ? 'glass-btn glass-btn-selected'
+                    : 'text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]'
+                }`}
+              >
+                {tab.icon}
+                <span>{tab.label}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="flex-1 flex overflow-hidden relative z-10">
+            {/* Desktop Sidebar */}
+            <div className="hidden md:flex w-64 border-r border-[var(--border-glass)] glass-panel p-4 space-y-1 flex-col overflow-y-auto shrink-0">
               {tabs.map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveDrawerTab(tab.id as any)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all cursor-pointer active:scale-[0.97] ${
                     activeDrawerTab === tab.id
-                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20'
-                      : darkMode
-                        ? 'text-gray-400 hover:bg-gray-800/60 hover:text-white'
-                        : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                      ? 'glass-btn glass-btn-selected'
+                      : 'text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]'
                   }`}
                 >
                   {tab.icon}
@@ -4303,9 +4747,9 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
               ))}
             </div>
 
-            {/* Content */}
-            <div className="flex-1 overflow-hidden p-6 md:p-8">
-              <div className="max-w-3xl mx-auto h-full flex flex-col justify-center">
+            {/* Content Area */}
+            <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-[var(--background)]">
+              <div className="max-w-4xl mx-auto space-y-6">
                 {renderActiveTabContent()}
               </div>
             </div>
@@ -4320,35 +4764,41 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
           {addBatchModalMarkup}
           
           {showSettingsCameraScanner && (
-            <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[70] flex flex-col items-center justify-center p-4">
-              <div className="relative w-full max-w-sm bg-slate-900 border border-slate-850 rounded-2xl p-5 text-white shadow-2xl flex flex-col items-center">
-                <h4 className="font-bold text-sm tracking-tight text-center mb-4 flex items-center gap-2">
-                  <span>📷</span> Position Barcode In Camera Window
-                </h4>
-                
-                <div className="relative w-full aspect-square rounded-xl overflow-hidden bg-black border-2 border-purple-500/30 flex items-center justify-center mb-4">
-                  <video
-                    ref={settingsVideoRef}
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-xl backdrop-saturate-200 z-[70] flex flex-col items-center justify-center p-4">
+              <div 
+                onPointerMove={updatePointerGlare}
+                className="group relative w-full max-w-sm bg-[var(--card-bg)] border border-[var(--border-glass)] rounded-2xl p-5 text-[var(--text-primary)] shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.6),var(--shadow-glass)] flex flex-col items-center overflow-hidden"
+              >
+                <SpecularGlareOverlay />
+                <div className="relative z-10 w-full flex flex-col items-center">
+                  <h4 className="font-bold text-sm tracking-tight text-center mb-4 flex items-center gap-2 text-[var(--text-primary)]">
+                    <span>📷</span> Position Barcode In Camera Window
+                  </h4>
+                  
+                  <div className="relative w-full aspect-square rounded-xl overflow-hidden bg-black border-2 border-[var(--border-glass)] flex items-center justify-center mb-4">
+                    <video
+                      ref={settingsVideoRef}
                     playsInline
                     muted
                     className="w-full h-full object-cover"
                   />
-                  <div className="absolute inset-x-4 top-1/2 -translate-y-1/2 h-0.5 bg-red-500/80 shadow-[0_0_8px_rgba(239,68,68,0.8)] animate-pulse" />
+                  <div className="absolute inset-x-4 top-1/2 -translate-y-1/2 h-0.5 bg-rose-500/80 shadow-[0_0_8px_rgba(244,63,94,0.8)] animate-pulse" />
                 </div>
 
                 {settingsCameraError && (
-                  <p className="text-xs text-red-400 text-center font-medium mb-4">{settingsCameraError}</p>
+                  <p className="text-xs text-rose-500 text-center font-medium mb-4">{settingsCameraError}</p>
                 )}
 
                 <button
                   type="button"
                   onClick={stopSettingsCameraScan}
-                  className="w-full py-2 bg-red-500 hover:bg-red-650 text-white text-xs font-bold rounded-xl shadow-md transition-all active:scale-95"
+                  className="w-full py-2 glass-btn glass-btn-danger text-xs font-bold rounded-xl transition-all active:scale-[0.97]"
                 >
                   Cancel Scan
                 </button>
               </div>
             </div>
+          </div>
           )}
         </div>
       </div>
@@ -4357,12 +4807,12 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
 
   // Full-page return statement (fallback)
   return (
-    <div className={`p-8 ${darkMode ? 'bg-gray-900' : 'bg-gray-50'} min-h-screen`}>
+    <div className="p-8 bg-[var(--background)] text-[var(--text-primary)] min-h-screen">
       <div className="mb-8">
-        <h1 className={`text-4xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'} mb-2`}>
+        <h1 className="text-4xl font-bold text-[var(--text-primary)] mb-2">
           System Settings
         </h1>
-        <p className={`${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+        <p className="text-[var(--text-secondary)]">
           Configure your NexusFlow system (Owner/Co-Owner Access Only)
         </p>
       </div>
@@ -4385,6 +4835,7 @@ export function POSSettings({ onClose, isModal = false }: POSSettingsProps) {
       {addTransferModalMarkup}
       {addAdjustModalMarkup}
       {addBatchModalMarkup}
+      {confirmDialog}
     </div>
   );
 }
