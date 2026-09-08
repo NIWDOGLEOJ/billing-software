@@ -1949,11 +1949,13 @@ export function CashierBillingAdvanced() {
 
     try {
       const generatedId = `prod_${Date.now()}`;
+      const parsedPrice = parseFloat(price);
       const payload = {
         id: generatedId,
         sku: quickAddBarcode,
         name,
-        price: parseFloat(price),
+        price: parsedPrice,
+        mrp: parsedPrice,
         category,
         gst_rate: gstRate,
         stock: parseInt(stock) || 0,

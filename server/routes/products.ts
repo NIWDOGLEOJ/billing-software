@@ -88,7 +88,7 @@ router.post('/', authenticateToken, requirePermission('access_inventory'), async
         brand, uom, purchase_price, wholesale_price, mrp, discount_percent, 
         batch_number, expiry_date, status, barcode_type, moq, distributor_price, image_url
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       sku,
@@ -103,7 +103,7 @@ router.post('/', authenticateToken, requirePermission('access_inventory'), async
       uom || 'PCS',
       Number(purchase_price || 0),
       Number(wholesale_price || 0),
-      Number(mrp || 0),
+      Number(mrp !== undefined && mrp !== null && mrp !== '' ? mrp : (price || 0)),
       Number(discount_percent || 0),
       batch_number || '',
       expiry_date || '',
@@ -141,9 +141,9 @@ router.post('/bulk', authenticateToken, requirePermission('access_inventory'), (
       INSERT INTO products (
         id, sku, name, price, category, gst_rate, stock, low_stock_threshold, hsn_code,
         brand, uom, purchase_price, wholesale_price, mrp, discount_percent,
-        batch_number, expiry_date, status, barcode_type, moq, distributor_price
+        batch_number, expiry_date, status, barcode_type, moq, distributor_price, image_url
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(sku) DO UPDATE SET
         name = excluded.name,
         price = excluded.price,
@@ -158,7 +158,8 @@ router.post('/bulk', authenticateToken, requirePermission('access_inventory'), (
         wholesale_price = excluded.wholesale_price,
         mrp = excluded.mrp,
         discount_percent = excluded.discount_percent,
-        status = excluded.status
+        status = excluded.status,
+        image_url = CASE WHEN excluded.image_url != '' THEN excluded.image_url ELSE products.image_url END
     `);
 
     const transaction = db.transaction((items: any[]) => {
@@ -187,11 +188,12 @@ router.post('/bulk', authenticateToken, requirePermission('access_inventory'), (
         const barcode_type = p.barcode_type || 'EAN-13';
         const moq = Number(p.moq || 1);
         const distributor_price = Number(p.distributor_price || 0);
+        const image_url = p.image_url || p.image || '';
 
         upsertStmt.run(
           id, sku, name, price, category, gst_rate, stock, low_stock, hsn,
           brand, uom, purchase_price, wholesale_price, mrp, discount_percent,
-          batch_number, expiry_date, status, barcode_type, moq, distributor_price
+          batch_number, expiry_date, status, barcode_type, moq, distributor_price, image_url
         );
         count++;
       }
