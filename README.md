@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/Express-5-000000?logo=express" alt="Express 5"/>
   <img src="https://img.shields.io/badge/SQLite-WAL-003B57?logo=sqlite" alt="SQLite"/>
   <img src="https://img.shields.io/badge/Tailwind-4-06B6D4?logo=tailwindcss" alt="Tailwind CSS 4"/>
-  <img src="https://img.shields.io/badge/tests-179%20passed-brightgreen" alt="179 tests"/>
+  <img src="https://img.shields.io/badge/tests-188%20passed-brightgreen" alt="188 tests"/>
 </p>
 
 ---
@@ -645,7 +645,7 @@ NexusFlow's `vite.config.ts` already includes `*.trycloudflare.com` in `allowedH
 
 ## 🧪 Test Suite
 
-**179 tests across 8 test suites** powered by [Vitest](https://vitest.dev/):
+**188 tests across 9 test suites** powered by [Vitest](https://vitest.dev/):
 
 ```bash
 pnpm test          # run once

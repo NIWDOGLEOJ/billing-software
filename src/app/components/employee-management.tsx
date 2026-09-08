@@ -797,7 +797,6 @@ export function EmployeeManagement() {
               </div>
             </div>
           </div>
-        </div>
         )}
       </div>
 
