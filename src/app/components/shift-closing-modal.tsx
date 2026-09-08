@@ -679,3 +679,5 @@ export function ShiftClosingModal({ onClose }: ShiftClosingModalProps) {
     </div>
   );
 }
+
+

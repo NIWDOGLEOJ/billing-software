@@ -3792,6 +3792,7 @@ export function CashierBillingAdvanced() {
                 </button>
               </div>
             </form>
+            </div>
           </motion.div>
         </div>
       )}

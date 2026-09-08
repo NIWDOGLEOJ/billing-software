@@ -797,6 +797,7 @@ export function EmployeeManagement() {
               </div>
             </div>
           </div>
+        </div>
         )}
       </div>
 
@@ -1280,3 +1281,4 @@ export function EmployeeManagement() {
     </div>
   );
 }
+

@@ -83,6 +83,17 @@ export function LoginPage() {
     }
   };
 
+  const fieldClasses = (invalid: boolean) =>
+    [
+      'w-full pl-10 py-3 rounded-lg border transition-all duration-300',
+      'bg-[var(--input-bg)] text-[var(--text-primary)]',
+      'placeholder:text-[var(--text-muted)]',
+      'focus:outline-none focus:ring-2',
+      invalid
+        ? 'border-[var(--danger)] focus:border-[var(--danger)] focus:ring-[var(--danger)]/20'
+        : 'border-[var(--input-border)] focus:border-[var(--primary-accent)] focus:ring-[var(--primary-accent)]/20',
+    ].join(' ');
+
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)] flex flex-col justify-between font-sans">
       {/* Top Header Bar */}

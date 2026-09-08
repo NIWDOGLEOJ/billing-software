@@ -168,3 +168,5 @@ export function ShiftStartModal({ onClose, forceOpen = false }: ShiftStartModalP
     </div>
   );
 }
+
+

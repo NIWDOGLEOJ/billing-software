@@ -56,6 +56,20 @@ app.use((req, _res, next) => {
   requestContext.run({ clientId }, () => next());
 });
 
+/**
+ * Per-request context, so broadcast() can tell which client caused a change
+ * without every route having to thread `req` through to it.
+ *
+ * AsyncLocalStorage (rather than a module-level variable) is what makes this
+ * correct when a handler awaits: each request keeps its own store.
+ */
+const requestContext = new AsyncLocalStorage<{ clientId?: string }>();
+
+app.use((req, _res, next) => {
+  const clientId = req.get('x-client-id') || undefined;
+  requestContext.run({ clientId }, () => next());
+});
+
 // Set up WebSocket broadcast helper on app instance
 const clients = new Set<WebSocket>();
 

@@ -88,7 +88,7 @@ router.post('/', authenticateToken, requirePermission('access_inventory'), async
         brand, uom, purchase_price, wholesale_price, mrp, discount_percent, 
         batch_number, expiry_date, status, barcode_type, moq, distributor_price, image_url
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       sku,
