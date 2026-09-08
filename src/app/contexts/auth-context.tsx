@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { api, setToken, clearToken } from '../utils/api';
+import { isMobileDevice } from '../lib/device';
 
 export type Permission =
   | 'access_billing'
@@ -199,8 +200,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }, 1500);
       }
 
-      // 🖥️ Kiosk mode key restrictions (if user is logged in and not developer/owner/co-owner)
-      if (user && user.role !== 'owner' && user.role !== 'co-owner') {
+      // 🖥️ Kiosk mode key restrictions (strictly for desktop counter terminals)
+      if (!isMobileDevice() && user && user.role !== 'owner' && user.role !== 'co-owner') {
         // Prevent system/browser-level full screen exit via F11
         if (e.key === 'F11') {
           e.preventDefault();
@@ -254,9 +255,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return true;
           }
 
-          // Allow specific billing function keys (F1, F2, F3, F4, F5, F6)
+          // Allow specific billing function keys (F1 through F10)
           // Exclude F11 and F12 as they were already handled and blocked above
-          const allowedFuncKeys = ['F1', 'F2', 'F3', 'F4', 'F5', 'F6'];
+          const allowedFuncKeys = ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10'];
           if (allowedFuncKeys.includes(ev.key)) {
             return true;
           }
@@ -267,6 +268,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (allowedCtrlCombos.includes(ev.key.toLowerCase())) {
               return true;
             }
+          }
+
+          // Allow Alt+U for UPI payment shortcut
+          if (ev.altKey && ev.key.toLowerCase() === 'u') {
+            return true;
           }
 
           return false;
@@ -280,9 +286,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    // 2. Dynamic Blur when tab focus is lost (Snipping tools / Screen capture triggers focus loss)
+    // 2. Dynamic Blur when tab focus is lost (Desktop capture protection only; mobile keyboards trigger focus changes)
     const handleBlur = () => {
-      if (user && user.username !== 'developer') {
+      if (!isMobileDevice() && user && user.username !== 'developer') {
         document.body.classList.add('blurred-screen');
       }
     };
@@ -337,32 +343,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(interval);
   }, [currentSession]);
 
-  // Synchronous Unload / Tab Close Session termination (using keepalive fetch)
-  useEffect(() => {
-    if (!currentSession) return;
-
-    const handleUnload = () => {
-      const token = localStorage.getItem('authToken');
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
-      fetch('/api/auth/logout', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ sessionId: currentSession.id }),
-        keepalive: true
-      }).catch(e => console.error('Keepalive unload logout failed:', e));
-    };
-
-    window.addEventListener('beforeunload', handleUnload);
-    window.addEventListener('pagehide', handleUnload);
-    return () => {
-      window.removeEventListener('beforeunload', handleUnload);
-      window.removeEventListener('pagehide', handleUnload);
-    };
-  }, [currentSession]);
+  // NOTE: there used to be a `beforeunload`/`pagehide` handler here that POSTed
+  // to /auth/logout with a keepalive fetch, to close the attendance session when
+  // the till app was closed.
+  //
+  // Both of those events also fire on an ordinary page refresh, so pressing F5 —
+  // or the browser restoring the tab — terminated the session server-side. The
+  // next API call then 401'd, which wiped localStorage and bounced the cashier
+  // to the login screen, mid-bill.
+  //
+  // The session still closes on a real tab close: the 30s heartbeat above stops,
+  // and cleanupStaleSessions() on the server closes anything idle for more than
+  // two minutes. That path is also *more* accurate for attendance, because it
+  // records logout_time as the last heartbeat rather than the unload moment.
 
   const login = async (
     username: string,
@@ -370,7 +363,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     rememberDevice = false,
   ): Promise<{ success: boolean; error?: string }> => {
     try {
-      const isMobile = window.innerWidth < 768 || /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+      const isMobile = isMobileDevice();
       const res = await api.post<{ token: string; user: any }>('/auth/login', { 
         username, 
         password,
@@ -511,15 +504,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const hasPermission = (permission: Permission): boolean => {
+  // These two are read helpers that consumers put straight into useEffect and
+  // useCallback dependency arrays. As plain functions they got a fresh identity
+  // on every provider render, so analytics re-fetched /bills and /shifts — and
+  // employee-management re-fetched the whole staff list — every time any auth
+  // state changed anywhere. Keeping their identity stable stops that.
+  const hasPermission = useCallback((permission: Permission): boolean => {
     if (!user) return false;
     if (user.role === 'owner' || user.role === 'co-owner') return true;
     return user.permissions.includes(permission);
-  };
+  }, [user]);
 
-  const isOwner = (): boolean => {
+  const isOwner = useCallback((): boolean => {
     return user?.role === 'owner' || user?.role === 'co-owner';
-  };
+  }, [user?.role]);
 
   const startBreak = async () => {
     if (!user || isOnBreak) return;

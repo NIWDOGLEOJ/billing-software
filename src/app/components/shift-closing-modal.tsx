@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useAuth, ShiftRecord } from '../contexts/auth-context';
-import { useTheme } from '../contexts/theme-context';
-import { Wallet, ShieldAlert, Award, FileText, CheckCircle, ArrowRight, X } from 'lucide-react';
+import { X, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../utils/api';
+import { MONO, NUM, EYEBROW, FIELD, CHIP, inr } from '../lib/design-system';
 
 interface ShiftClosingModalProps {
   onClose: () => void;
@@ -11,7 +11,18 @@ interface ShiftClosingModalProps {
 
 export function ShiftClosingModal({ onClose }: ShiftClosingModalProps) {
   const { activeShift, endShift } = useAuth();
-  const { darkMode } = useTheme();
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   // Actual cashier inputs
   const [actualCash, setActualCash] = useState('');
@@ -51,13 +62,14 @@ export function ShiftClosingModal({ onClose }: ShiftClosingModalProps) {
       setActualCash(String(calculatedCashTotal));
     }
   }, [calculatedCashTotal, showDenomCalc]);
-  
+
   // Real-time calculated system totals (fetched from server)
   const [systemTotals, setSystemTotals] = useState({
     cashSales: 0,
     upiSales: 0,
     cardSales: 0,
     expectedCash: 0,
+    billCount: 0,
   });
 
   const [loading, setLoading] = useState(false);
@@ -66,19 +78,19 @@ export function ShiftClosingModal({ onClose }: ShiftClosingModalProps) {
   useEffect(() => {
     if (!activeShift) return;
 
-    // Fetch up-to-date sales sums from backend to show live system expectations
     const fetchActiveShiftSales = async () => {
       try {
         const bills = await api.get<any[]>('/bills');
-        // Filter bills checked out by this cashier during this shift window
-        const shiftBills = bills.filter(b => b.generatedBy === activeShift.user_id && b.date >= activeShift.start_time);
-        
+        const shiftBills = bills.filter(
+          (b) => b.cashier_id === activeShift.user_id && b.date >= activeShift.start_time
+        );
+
         let cash = 0;
         let upi = 0;
         let card = 0;
 
         for (const bill of shiftBills) {
-          const mode = (bill.paymentMode || 'cash').toLowerCase();
+          const mode = (bill.payment_mode || bill.paymentMode || 'cash').toLowerCase();
           if (mode === 'cash') cash += bill.total;
           else if (mode === 'upi') upi += bill.total;
           else if (mode === 'card') card += bill.total;
@@ -89,6 +101,7 @@ export function ShiftClosingModal({ onClose }: ShiftClosingModalProps) {
           upiSales: upi,
           cardSales: card,
           expectedCash: activeShift.initial_cash + cash,
+          billCount: shiftBills.length,
         });
 
         // Set default inputs to expected to speed up cashier flow
@@ -113,6 +126,16 @@ export function ShiftClosingModal({ onClose }: ShiftClosingModalProps) {
   const upiDiscrepancy = actualUpiNum - systemTotals.upiSales;
   const cardDiscrepancy = actualCardNum - systemTotals.cardSales;
 
+  // Elapsed duration string
+  const shiftDuration = (() => {
+    const start = new Date(activeShift.start_time).getTime();
+    const now = Date.now();
+    const diffMins = Math.max(0, Math.floor((now - start) / 60000));
+    const hours = Math.floor(diffMins / 60);
+    const mins = diffMins % 60;
+    return `${hours}h ${mins}m`;
+  })();
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -120,7 +143,7 @@ export function ShiftClosingModal({ onClose }: ShiftClosingModalProps) {
     try {
       const closed = await endShift(actualCashNum, actualUpiNum, actualCardNum, notes);
       setZReport(closed);
-      toast.success('💼 Shift Z-Report generated and drawer closed');
+      toast.success('Shift Z-Report generated and drawer closed');
     } catch (err: any) {
       toast.error(err.message || 'Failed to reconcile and close shift');
     } finally {
@@ -131,69 +154,144 @@ export function ShiftClosingModal({ onClose }: ShiftClosingModalProps) {
   // Render completed Z-Report summary
   if (zReport) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4">
-        <div className={`w-full max-w-lg rounded-2xl border ${
-          darkMode ? 'bg-gray-900 border-gray-800 text-white' : 'bg-white border-gray-200 text-gray-800'
-        } shadow-2xl overflow-hidden`}>
-          <div className="bg-gradient-to-r from-teal-600 to-emerald-700 p-6 text-white text-center">
-            <CheckCircle size={48} className="mx-auto mb-2 text-emerald-100" />
-            <h2 className="text-2xl font-bold tracking-tight">Shift Z-Report Completed</h2>
-            <p className="text-emerald-100/80 text-xs mt-1">Drawer has been reconciled and logged successfully</p>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 font-sans">
+        <div
+          className="w-full max-w-lg rounded-xl overflow-hidden shadow-2xl flex flex-col"
+          style={{
+            background: 'var(--panel)',
+            border: '1px solid var(--border)',
+            color: 'var(--ink)',
+          }}
+        >
+          <div
+            className="px-6 py-5 flex items-center gap-3.5"
+            style={{ borderBottom: '1px solid var(--rule2)' }}
+          >
+            <CheckCircle size={24} style={{ color: 'var(--ok)' }} className="shrink-0" />
+            <div>
+              <div style={EYEBROW}>Shift Z-Report · Completed</div>
+              <h2 className="text-base font-bold text-[var(--ink)] mt-0.5">
+                Drawer Reconciled Successfully
+              </h2>
+            </div>
           </div>
 
-          <div className="p-6 space-y-6">
-            <div className="space-y-4">
-              <h3 className="text-sm font-semibold tracking-wide uppercase opacity-75">Shift Breakdown</h3>
-              
-              <div className={`p-4 rounded-xl border ${darkMode ? 'bg-gray-800/40 border-gray-800' : 'bg-gray-50 border-gray-100'} space-y-2.5 text-sm`}>
-                <div className="flex justify-between">
-                  <span className="opacity-75">Cashier Name</span>
-                  <span className="font-semibold">{zReport.user_name}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="opacity-75">Shift Started</span>
-                  <span>{new Date(zReport.start_time).toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="opacity-75">Shift Ended</span>
-                  <span>{zReport.end_time ? new Date(zReport.end_time).toLocaleString() : 'N/A'}</span>
-                </div>
-                <div className="flex justify-between border-t border-dashed pt-2.5 mt-2.5">
-                  <span className="opacity-75">Initial Cash Float</span>
-                  <span className="font-semibold">₹{Number(zReport.initial_cash).toFixed(2)}</span>
-                </div>
+          <div className="p-6 space-y-5">
+            <div
+              className="p-4 rounded-lg space-y-2.5 text-xs"
+              style={{
+                background: 'var(--sub)',
+                border: '1px solid var(--rule2)',
+              }}
+            >
+              <div className="flex justify-between">
+                <span style={{ color: 'var(--ink3)' }}>Cashier</span>
+                <span className="font-semibold text-[var(--ink)]">{zReport.user_name}</span>
               </div>
+              <div className="flex justify-between">
+                <span style={{ color: 'var(--ink3)' }}>Shift Started</span>
+                <span style={NUM} className="text-[var(--ink)]">
+                  {new Date(zReport.start_time).toLocaleString('en-IN', {
+                    dateStyle: 'medium',
+                    timeStyle: 'short',
+                  })}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span style={{ color: 'var(--ink3)' }}>Shift Ended</span>
+                <span style={NUM} className="text-[var(--ink)]">
+                  {zReport.end_time
+                    ? new Date(zReport.end_time).toLocaleString('en-IN', {
+                        dateStyle: 'medium',
+                        timeStyle: 'short',
+                      })
+                    : 'N/A'}
+                </span>
+              </div>
+              <div
+                className="flex justify-between pt-2.5"
+                style={{ borderTop: '1px dashed var(--rule2)' }}
+              >
+                <span style={{ color: 'var(--ink3)' }}>Initial Cash Float</span>
+                <span style={NUM} className="font-bold text-[var(--ink)]">
+                  {inr(zReport.initial_cash)}
+                </span>
+              </div>
+            </div>
 
-              <div className="grid grid-cols-3 gap-3 text-center">
-                <div className={`p-3.5 rounded-xl border ${darkMode ? 'bg-gray-800/20 border-gray-800' : 'bg-gray-50/50 border-gray-100'}`}>
-                  <span className="text-[10px] uppercase tracking-wider opacity-75 block mb-1">Cash Balance</span>
-                  <span className="text-sm font-bold block">₹{Number(zReport.actual_cash).toFixed(0)}</span>
-                  <span className={`text-[10px] font-semibold block mt-0.5 ${
-                    zReport.discrepancy_cash === 0 ? 'text-emerald-500' : zReport.discrepancy_cash > 0 ? 'text-teal-500' : 'text-rose-500'
-                  }`}>
-                    {zReport.discrepancy_cash === 0 ? 'Match' : `${zReport.discrepancy_cash > 0 ? '+' : ''}${zReport.discrepancy_cash}`}
+            <div className="grid grid-cols-3 gap-3 text-center">
+              <div
+                className="p-3.5 rounded-lg"
+                style={{
+                  background: 'var(--sub)',
+                  border: '1px solid var(--rule2)',
+                }}
+              >
+                <span style={EYEBROW} className="block mb-1">
+                  Cash Balance
+                </span>
+                <span style={NUM} className="text-sm font-bold text-[var(--ink)] block">
+                  {inr(zReport.actual_cash)}
+                </span>
+                <span
+                  style={NUM}
+                  className="text-[10px] font-bold block mt-1"
+                  css-color={zReport.discrepancy_cash === 0 ? 'var(--ok)' : 'var(--danger)'}
+                >
+                  <span
+                    style={{
+                      color: zReport.discrepancy_cash === 0 ? 'var(--ok)' : 'var(--danger)',
+                    }}
+                  >
+                    {zReport.discrepancy_cash === 0
+                      ? 'Match'
+                      : (zReport.discrepancy_cash > 0 ? '+' : '') + inr(zReport.discrepancy_cash)}
                   </span>
-                </div>
-                <div className={`p-3.5 rounded-xl border ${darkMode ? 'bg-gray-800/20 border-gray-800' : 'bg-gray-50/50 border-gray-100'}`}>
-                  <span className="text-[10px] uppercase tracking-wider opacity-75 block mb-1">UPI Sales</span>
-                  <span className="text-sm font-bold block">₹{Number(zReport.actual_upi).toFixed(0)}</span>
-                </div>
-                <div className={`p-3.5 rounded-xl border ${darkMode ? 'bg-gray-800/20 border-gray-800' : 'bg-gray-50/50 border-gray-100'}`}>
-                  <span className="text-[10px] uppercase tracking-wider opacity-75 block mb-1">Card Sales</span>
-                  <span className="text-sm font-bold block">₹{Number(zReport.actual_card).toFixed(0)}</span>
-                </div>
+                </span>
+              </div>
+              <div
+                className="p-3.5 rounded-lg"
+                style={{
+                  background: 'var(--sub)',
+                  border: '1px solid var(--rule2)',
+                }}
+              >
+                <span style={EYEBROW} className="block mb-1">
+                  UPI Sales
+                </span>
+                <span style={NUM} className="text-sm font-bold text-[var(--ink)] block">
+                  {inr(zReport.actual_upi)}
+                </span>
+              </div>
+              <div
+                className="p-3.5 rounded-lg"
+                style={{
+                  background: 'var(--sub)',
+                  border: '1px solid var(--rule2)',
+                }}
+              >
+                <span style={EYEBROW} className="block mb-1">
+                  Card Sales
+                </span>
+                <span style={NUM} className="text-sm font-bold text-[var(--ink)] block">
+                  {inr(zReport.actual_card)}
+                </span>
               </div>
             </div>
 
             <button
               onClick={() => {
                 onClose();
-                window.location.reload(); // trigger fully clean logout/reload cycle
+                window.location.reload();
               }}
-              className="w-full bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white font-bold py-3.5 px-6 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-teal-600/20 transition-all cursor-pointer"
+              className="w-full h-11 rounded-lg font-bold text-xs cursor-pointer transition-opacity flex items-center justify-center gap-2 hover:opacity-90"
+              style={{
+                background: 'var(--ink)',
+                color: 'var(--panel)',
+                border: 0,
+              }}
             >
-              Finish Shift & Log Out
-              <ArrowRight size={20} />
+              Finish Shift &amp; Log Out
             </button>
           </div>
         </div>
@@ -202,211 +300,380 @@ export function ShiftClosingModal({ onClose }: ShiftClosingModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
-      <div className={`w-full max-w-2xl rounded-2xl border ${
-        darkMode ? 'bg-gray-900/95 border-gray-800 text-white' : 'bg-white/95 border-gray-200 text-gray-800'
-      } shadow-2xl overflow-hidden`}>
-        
+    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 sm:p-7 overflow-y-auto bg-black/60 backdrop-blur-sm font-sans">
+      <div
+        className="w-full max-w-[860px] my-auto rounded-xl overflow-hidden shadow-2xl flex flex-col"
+        style={{
+          background: 'var(--panel)',
+          border: '1px solid var(--border)',
+          color: 'var(--ink)',
+        }}
+      >
         {/* Header */}
-        <div className="p-6 border-b border-gray-800 flex justify-between items-center bg-gradient-to-r from-gray-800 to-gray-950 text-white">
-          <div className="flex items-center gap-3">
-            <Wallet size={24} className="text-emerald-500" />
-            <div>
-              <h2 className="text-lg font-bold">Shift Z-Report Reconciliation</h2>
-              <p className="text-[11px] text-gray-400">Reconcile current cash drawer balance before shift closure</p>
-            </div>
+        <div
+          className="px-6 py-4 flex items-center justify-between"
+          style={{ borderBottom: '1px solid var(--rule2)' }}
+        >
+          <div>
+            <div style={EYEBROW}>Shift close · Till 2</div>
+            <h2 className="text-lg font-bold text-[var(--ink)] mt-0.5">Reconcile the drawer</h2>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-all cursor-pointer"
+            className="w-9 h-9 rounded-md border flex items-center justify-center cursor-pointer transition-colors"
+            style={{
+              background: 'var(--sub)',
+              borderColor: 'var(--border2)',
+              color: 'var(--ink3)',
+            }}
           >
-            <X size={20} />
+            <X size={18} />
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          <div className="grid grid-cols-2 gap-6">
-            
-            {/* LEFT SIDE: System Expected */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* LEFT COLUMN: System Expected */}
             <div className="space-y-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wider opacity-75 border-b border-gray-800 pb-2">System Expected</h3>
-              <div className="space-y-3.5">
-                <div className="flex justify-between text-sm">
-                  <span className="opacity-70">Drawer Cash Float:</span>
-                  <span className="font-semibold">₹{Number(activeShift.initial_cash).toFixed(2)}</span>
+              <div
+                style={EYEBROW}
+                className="pb-2.5"
+                css-border-bottom="1px solid var(--rule2)"
+              >
+                <span style={{ borderBottom: '1px solid var(--rule2)', display: 'block', paddingBottom: 8 }}>
+                  System expected
+                </span>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <div className="flex justify-between items-baseline">
+                  <span style={{ color: 'var(--ink2)' }}>Drawer cash float:</span>
+                  <span style={NUM} className="font-semibold text-[var(--ink)]">
+                    {inr(activeShift.initial_cash)}
+                  </span>
                 </div>
-                <div className="flex justify-between text-sm">
-                  <span className="opacity-70">Cash Sales:</span>
-                  <span className="font-semibold">₹{Number(systemTotals.cashSales).toFixed(2)}</span>
+                <div className="flex justify-between items-baseline">
+                  <span style={{ color: 'var(--ink2)' }}>Cash sales:</span>
+                  <span style={NUM} className="font-semibold text-[var(--ink)]">
+                    {inr(systemTotals.cashSales)}
+                  </span>
                 </div>
-                <div className="flex justify-between text-sm border-t border-dashed border-gray-800 pt-3">
-                  <span className="font-bold text-emerald-500">Total Cash Expected:</span>
-                  <span className="font-bold text-emerald-500">₹{Number(systemTotals.expectedCash).toFixed(2)}</span>
+                <div
+                  className="flex justify-between items-baseline pt-2.5"
+                  style={{ borderTop: '1px dashed var(--rule2)' }}
+                >
+                  <span className="font-bold text-[var(--ink)]">Total cash expected:</span>
+                  <span style={NUM} className="font-bold text-sm text-[var(--ink)]">
+                    {inr(systemTotals.expectedCash)}
+                  </span>
                 </div>
-                <div className="flex justify-between text-sm pt-1">
-                  <span className="opacity-70">UPI Sales Expected:</span>
-                  <span className="font-semibold">₹{Number(systemTotals.upiSales).toFixed(2)}</span>
+                <div className="flex justify-between items-baseline pt-1">
+                  <span style={{ color: 'var(--ink2)' }}>UPI sales expected:</span>
+                  <span style={NUM} className="font-semibold text-[var(--ink)]">
+                    {inr(systemTotals.upiSales)}
+                  </span>
                 </div>
-                <div className="flex justify-between text-sm">
-                  <span className="opacity-70">Card Sales Expected:</span>
-                  <span className="font-semibold">₹{Number(systemTotals.cardSales).toFixed(2)}</span>
+                <div className="flex justify-between items-baseline">
+                  <span style={{ color: 'var(--ink2)' }}>Card sales expected:</span>
+                  <span style={NUM} className="font-semibold text-[var(--ink)]">
+                    {inr(systemTotals.cardSales)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Shift log info card */}
+              <div
+                className="p-3.5 rounded-lg space-y-2 mt-4"
+                style={{
+                  background: 'var(--sub)',
+                  border: '1px solid var(--rule2)',
+                }}
+              >
+                <div style={EYEBROW}>Shift log</div>
+                <div
+                  style={{ fontFamily: MONO }}
+                  className="text-xs text-[var(--ink2)] leading-relaxed"
+                >
+                  <div>
+                    Opened {new Date(activeShift.start_time).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })} · {shiftDuration}
+                  </div>
+                  <div>Cashier: {activeShift.user_name}</div>
+                  <div>{systemTotals.billCount} bills completed this shift</div>
                 </div>
               </div>
             </div>
 
-            {/* RIGHT SIDE: Cashier Counts */}
-            <div className="space-y-4 border-l border-gray-800 pl-6">
-              <h3 className="text-xs font-semibold uppercase tracking-wider opacity-75 border-b border-gray-800 pb-2">Actual Counts</h3>
-              <div className="space-y-4">
-                <div className="space-y-1">
+            {/* RIGHT COLUMN: Cashier Counts */}
+            <div
+              className="space-y-4 md:pl-6 md:border-l"
+              style={{ borderColor: 'var(--rule2)' }}
+            >
+              <div style={EYEBROW}>
+                <span style={{ borderBottom: '1px solid var(--rule2)', display: 'block', paddingBottom: 8 }}>
+                  Counted by cashier
+                </span>
+              </div>
+
+              {/* Physical Cash */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-center">
+                  <label className="text-xs font-semibold text-[var(--ink2)]">
+                    Physical cash in drawer
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowDenomCalc(!showDenomCalc)}
+                    className="px-2 py-1 rounded text-[11px] font-semibold cursor-pointer transition-colors"
+                    style={
+                      showDenomCalc
+                        ? {
+                            background: 'var(--accent-soft)',
+                            border: '1px solid var(--accent-line)',
+                            color: 'var(--accent-hi)',
+                          }
+                        : {
+                            background: 'var(--sub)',
+                            border: '1px solid var(--border2)',
+                            color: 'var(--ink2)',
+                          }
+                    }
+                  >
+                    {showDenomCalc ? 'Hide calculator' : 'Denomination counter'}
+                  </button>
+                </div>
+
+                <input
+                  type="number"
+                  value={actualCash}
+                  onChange={(e) => setActualCash(e.target.value)}
+                  disabled={showDenomCalc}
+                  placeholder="Enter physical cash total"
+                  required
+                  min="0"
+                  step="any"
+                  style={{
+                    ...FIELD,
+                    ...NUM,
+                    width: '100%',
+                    height: 48,
+                    padding: '0 14px',
+                    fontSize: 18,
+                    fontWeight: 700,
+                  }}
+                />
+                {showDenomCalc && (
+                  <p
+                    style={{ fontFamily: MONO }}
+                    className="text-[11px] text-[var(--ink3)] mt-1"
+                  >
+                    Locked to denomination count for audit integrity.
+                  </p>
+                )}
+              </div>
+
+              {/* Denomination Counter Card */}
+              {showDenomCalc && (
+                <div
+                  className="p-3.5 rounded-lg space-y-3"
+                  style={{
+                    background: 'var(--sub)',
+                    border: '1px solid var(--rule2)',
+                  }}
+                >
                   <div className="flex justify-between items-center">
-                    <label className="text-[11px] font-medium tracking-wide uppercase opacity-75">Physical Cash in Drawer (₹)</label>
+                    <span style={EYEBROW}>Denominations</span>
                     <button
                       type="button"
-                      onClick={() => setShowDenomCalc(!showDenomCalc)}
-                      className={`text-[9px] font-bold px-2 py-0.5 rounded border transition-all cursor-pointer ${
-                        showDenomCalc
-                          ? 'bg-purple-550/15 border-purple-500/35 text-purple-600 dark:text-purple-400 shadow-sm'
-                          : darkMode ? 'bg-gray-800 border-gray-700 text-gray-400 hover:text-white' : 'bg-gray-50 border-gray-300 text-gray-600 hover:bg-gray-100'
-                      }`}
+                      onClick={() => {
+                        setDenoms({
+                          2000: '',
+                          500: '',
+                          200: '',
+                          100: '',
+                          50: '',
+                          20: '',
+                          10: '',
+                          5: '',
+                          2: '',
+                          1: '',
+                        });
+                        setActualCash('0');
+                      }}
+                      className="text-xs font-semibold cursor-pointer"
+                      style={{ color: 'var(--danger)' }}
                     >
-                      {showDenomCalc ? 'Hide Calculator' : 'Use Denomination Counter'}
+                      Clear
                     </button>
                   </div>
 
-                  {showDenomCalc && (
-                    <div className={`p-4 rounded-xl border mb-3 ${darkMode ? 'bg-purple-950/15 border-purple-900/30' : 'bg-purple-500/[0.03] border-purple-250/60 shadow-inner shadow-purple-500/5'} animate-scale-in`}>
-                      <div className="flex justify-between items-center border-b dark:border-gray-850 pb-2 mb-3">
-                        <span className="text-[9px] font-extrabold uppercase tracking-wide text-purple-600 dark:text-purple-400">Denomination Counter</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDenoms({ 2000: '', 500: '', 200: '', 100: '', 50: '', 20: '', 10: '', 5: '', 2: '', 1: '' });
-                            setActualCash('');
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                    {[2000, 500, 200, 100, 50, 20, 10, 5, 2, 1].map((val) => (
+                      <div key={val} className="flex items-center gap-2 text-xs">
+                        <span style={NUM} className="font-bold text-[var(--ink2)] w-11">
+                          ₹{val}
+                        </span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={denoms[val]}
+                          onChange={(e) => {
+                            const valStr = e.target.value;
+                            setDenoms((prev) => ({ ...prev, [val]: valStr }));
                           }}
-                          className="text-[9px] text-red-500 hover:text-red-650 font-extrabold cursor-pointer"
+                          placeholder="0"
+                          style={{
+                            ...FIELD,
+                            ...NUM,
+                            width: 44,
+                            height: 28,
+                            textAlign: 'center',
+                            fontSize: 12,
+                            fontWeight: 600,
+                          }}
+                        />
+                        <span
+                          style={NUM}
+                          className="text-[11px] text-[var(--ink3)] ml-auto"
                         >
-                          Clear Counts
-                        </button>
-                      </div>
-                      
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-                        {[2000, 500, 200, 100, 50, 20, 10, 5, 2, 1].map((val) => (
-                          <div key={val} className="flex items-center justify-between text-[11px] gap-1">
-                            <span className="font-bold opacity-80 min-w-[34px]">₹{val} ×</span>
-                            <input
-                              type="number"
-                              min="0"
-                              value={denoms[val]}
-                              onChange={(e) => {
-                                const valStr = e.target.value;
-                                setDenoms(prev => ({ ...prev, [val]: valStr }));
-                              }}
-                              placeholder="0"
-                              className={`w-12 py-0.5 text-center font-bold border rounded text-[10px] ${
-                                darkMode ? 'bg-gray-850 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-800'
-                              } focus:ring-1 focus:ring-purple-500`}
-                            />
-                            <span className="font-mono text-[9px] opacity-60 w-12 text-right">
-                              ₹{val * (parseInt(denoms[val]) || 0)}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className="mt-3 pt-3 border-t dark:border-gray-850 flex justify-between items-center text-[11px]">
-                        <span className="font-bold">Total Calculated Sum:</span>
-                        <span className="font-black text-purple-600 dark:text-purple-400 text-xs">
-                          ₹{calculatedCashTotal.toLocaleString('en-IN')}
+                          {inr(val * (parseInt(denoms[val]) || 0))}
                         </span>
                       </div>
-                    </div>
-                  )}
+                    ))}
+                  </div>
 
-                  <input
-                    type="number"
-                    value={actualCash}
-                    onChange={(e) => setActualCash(e.target.value)}
-                    className={`w-full px-3 py-2 text-sm font-bold border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500/20 ${
-                      darkMode ? 'bg-gray-800/50 border-gray-700 focus:border-emerald-500' : 'bg-gray-50 border-gray-200 focus:border-emerald-600'
-                    }`}
-                    required
-                    disabled={showDenomCalc}
-                    placeholder="Enter physical cash total"
-                  />
-                  {showDenomCalc && (
-                    <p className="text-[9px] text-purple-500 font-bold mt-1.5 animate-pulse">
-                      ⚠️ Manual text input is disabled while the Denomination Counter is active.
-                    </p>
-                  )}
+                  <div
+                    className="pt-2.5 flex justify-between items-center text-xs"
+                    style={{ borderTop: '1px solid var(--rule2)' }}
+                  >
+                    <span className="font-semibold text-[var(--ink2)]">Calculated sum:</span>
+                    <span style={NUM} className="font-bold text-sm text-[var(--accent)]">
+                      {inr(calculatedCashTotal)}
+                    </span>
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium tracking-wide uppercase opacity-75">Total UPI Received (₹)</label>
+              )}
+
+              {/* UPI & Card Inputs */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--ink2)] mb-1.5">
+                    Total UPI received
+                  </label>
                   <input
                     type="number"
                     value={actualUpi}
                     onChange={(e) => setActualUpi(e.target.value)}
-                    className={`w-full px-3 py-2 text-sm font-bold border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500/20 ${
-                      darkMode ? 'bg-gray-800/50 border-gray-700 focus:border-emerald-500' : 'bg-gray-50 border-gray-200 focus:border-emerald-600'
-                    }`}
                     required
+                    min="0"
+                    step="any"
+                    style={{
+                      ...FIELD,
+                      ...NUM,
+                      width: '100%',
+                      height: 42,
+                      padding: '0 12px',
+                      fontSize: 14,
+                      fontWeight: 600,
+                    }}
                   />
                 </div>
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium tracking-wide uppercase opacity-75">Total Card Slips (₹)</label>
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--ink2)] mb-1.5">
+                    Total card slips
+                  </label>
                   <input
                     type="number"
                     value={actualCard}
                     onChange={(e) => setActualCard(e.target.value)}
-                    className={`w-full px-3 py-2 text-sm font-bold border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500/20 ${
-                      darkMode ? 'bg-gray-800/50 border-gray-700 focus:border-emerald-500' : 'bg-gray-50 border-gray-200 focus:border-emerald-600'
-                    }`}
                     required
+                    min="0"
+                    step="any"
+                    style={{
+                      ...FIELD,
+                      ...NUM,
+                      width: '100%',
+                      height: 42,
+                      padding: '0 12px',
+                      fontSize: 14,
+                      fontWeight: 600,
+                    }}
                   />
                 </div>
               </div>
-            </div>
 
-          </div>
-
-          {/* Discrepancies live banner */}
-          <div className={`p-4 rounded-xl border ${
-            cashDiscrepancy === 0 && upiDiscrepancy === 0 && cardDiscrepancy === 0
-              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500'
-              : 'bg-rose-500/10 border-rose-500/20 text-rose-500'
-          } flex items-start gap-3 text-xs`}>
-            <ShieldAlert size={18} className="shrink-0 mt-0.5" />
-            <div className="space-y-1 leading-relaxed">
-              <strong>Live Reconciliation Discrepancy Status:</strong>
-              <div className="grid grid-cols-3 gap-4 mt-1 font-semibold">
-                <span>Cash: {cashDiscrepancy === 0 ? 'Perfect' : `₹${cashDiscrepancy.toFixed(2)}`}</span>
-                <span>UPI: {upiDiscrepancy === 0 ? 'Perfect' : `₹${upiDiscrepancy.toFixed(2)}`}</span>
-                <span>Card: {cardDiscrepancy === 0 ? 'Perfect' : `₹${cardDiscrepancy.toFixed(2)}`}</span>
+              {/* Variances List */}
+              <div className="space-y-2 pt-1">
+                {[
+                  {
+                    label: 'Cash variance',
+                    val: cashDiscrepancy,
+                  },
+                  {
+                    label: 'UPI variance',
+                    val: upiDiscrepancy,
+                  },
+                  {
+                    label: 'Card variance',
+                    val: cardDiscrepancy,
+                  },
+                ].map((v) => {
+                  const isMatch = Math.abs(v.val) < 0.01;
+                  const chipStyle = isMatch ? CHIP.ok : CHIP.danger;
+                  return (
+                    <div
+                      key={v.label}
+                      className="flex items-center justify-between px-3 py-2 rounded-lg text-xs"
+                      style={chipStyle}
+                    >
+                      <span style={EYEBROW} className="text-[10px]">
+                        {v.label}
+                      </span>
+                      <span style={NUM} className="font-bold text-sm">
+                        {isMatch
+                          ? 'Match'
+                          : (v.val > 0 ? '+' : '') + inr(v.val)}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
+
+              {/* Notes */}
+              <div>
+                <label className="block text-xs font-semibold text-[var(--ink2)] mb-1.5">
+                  Reconciliation notes
+                </label>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Record any cash difference or audit explanation"
+                  style={{
+                    ...FIELD,
+                    width: '100%',
+                    height: 72,
+                    padding: '8px 12px',
+                    fontSize: 12,
+                    lineHeight: 1.5,
+                    resize: 'none',
+                  }}
+                />
+              </div>
+
+              {/* Submit Button */}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full h-12 rounded-lg font-bold text-xs cursor-pointer transition-opacity flex items-center justify-center gap-2 hover:opacity-90 disabled:opacity-50 mt-3"
+                style={{
+                  background: 'var(--ink)',
+                  color: 'var(--panel)',
+                  border: 0,
+                }}
+              >
+                {loading ? 'Reconciling drawer…' : 'Close shift & print Z-report'}
+              </button>
             </div>
           </div>
-
-          {/* Notes */}
-          <div className="space-y-1.5">
-            <label className="text-[11px] font-medium tracking-wide uppercase opacity-75">Shift Reconciliation Notes</label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Record any cash differences or audit explanation here..."
-              className={`w-full px-3 py-2 text-xs border rounded-lg outline-none h-20 resize-none ${
-                darkMode ? 'bg-gray-800/30 border-gray-700 focus:border-emerald-500 text-white' : 'bg-gray-50 border-gray-200 focus:border-emerald-600 text-gray-800'
-              }`}
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-bold py-3.5 px-6 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-red-600/20 transition-all cursor-pointer"
-          >
-            {loading ? 'Reconciling drawer...' : 'Confirm Drawer counts & End Shift'}
-            <ArrowRight size={20} />
-          </button>
         </form>
       </div>
     </div>

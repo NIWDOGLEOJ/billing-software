@@ -1,298 +1,675 @@
-# NexusFlow — Advanced LAN-Based Retail Billing System
+# NexusFlow — Advanced LAN-Based Retail POS System
 
-NexusFlow is a state-of-the-art, high-performance retail billing, inventory management, and store operations application designed specifically for local area networks (LAN). It provides store cashiers with a fluid, keyboard-driven checkout interface, incorporates enterprise-grade security protocols, and offers owners complete, real-time administrative control over inventory, tax reports, employee performance, AI forecasting, and multi-device registers.
+<p align="center">
+  <strong>A high-performance, full-stack Point-of-Sale system for retail, grocery & wholesale shops — runs entirely on your local network.</strong>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/React-18.3-61DAFB?logo=react" alt="React 18.3"/>
+  <img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript" alt="TypeScript"/>
+  <img src="https://img.shields.io/badge/Vite-6-646CFF?logo=vite" alt="Vite 6"/>
+  <img src="https://img.shields.io/badge/Express-5-000000?logo=express" alt="Express 5"/>
+  <img src="https://img.shields.io/badge/SQLite-WAL-003B57?logo=sqlite" alt="SQLite"/>
+  <img src="https://img.shields.io/badge/Tailwind-4-06B6D4?logo=tailwindcss" alt="Tailwind CSS 4"/>
+  <img src="https://img.shields.io/badge/tests-179%20passed-brightgreen" alt="179 tests"/>
+</p>
 
 ---
 
-## 🏗️ Complete System Architecture
+## Table of Contents
 
-NexusFlow operates on a highly optimized local client-server framework. It does not rely on an external internet connection, making it completely immune to cloud outages and extremely fast for high-traffic checkout lines.
+1. [Project Overview](#-project-overview)
+2. [Architecture](#️-architecture)
+3. [Tech Stack](#-tech-stack)
+4. [Feature Reference](#-feature-reference)
+5. [Directory Structure](#-directory-structure)
+6. [Setup & Running](#️-setup--running)
+7. [Available Scripts](#-available-scripts)
+8. [Environment Variables](#-environment-variables)
+9. [Keyboard Shortcuts](#️-keyboard-shortcuts)
+10. [Barcode Scanner Support](#-barcode-scanner-support)
+11. [Mobile Usage](#-mobile-usage)
+12. [Customer Website](#-customer-website)
+13. [Database Schema](#️-database-schema)
+14. [WebSocket Events](#-websocket-events)
+15. [Product Image Pipeline](#-product-image-pipeline)
+16. [Deployment Notes](#-deployment-notes)
+17. [Test Suite](#-test-suite)
 
-```mermaid
-graph TD
-    subgraph LAN Register Terminal [Cashier Terminal (Vite + React Client)]
-        UI[Glassmorphic React UI]
-        State[React Context / State]
-        WS_Client[WebSocket Hook Client]
-        Crypto[SubtleCrypto AES-GCM Encryptor]
-        UI --> State
-        State --> Crypto
-    end
+---
 
-    subgraph Native Android Wrapper [NexusFlow Android App (Kotlin WebView)]
-        Immersive[Immersive Fullscreen Lock]
-        CamBridge[WebChromeClient Camera Permission Bridge]
-        IpCache[LAN Server IP SharedPreferences Cache]
-        Immersive --> UI
-        CamBridge --> UI
-    end
+## 🏪 Project Overview
 
-    subgraph Local LAN Server [Host Machine (Express.js + TypeScript)]
-        Express[Express REST API]
-        WS_Server[WebSocket Server Router]
-        DB[(SQLite DB - WAL Mode)]
-        Daemon[Background Archiver & Retention Daemon]
-        Sweeper[Active Session Heartbeat Sweeper]
-        
-        Express --> DB
-        WS_Server --> Express
-        Daemon --> DB
-        Sweeper --> DB
-    end
+NexusFlow is a production-ready, self-hosted retail POS platform built for **retail, grocery, and wholesale shops**. It runs completely on a LAN — no internet connection required — making it immune to cloud outages and blazing fast at high-traffic checkout counters.
 
-    State -- REST API Requests --> Express
-    WS_Client -- Real-Time Subscriptions --> WS_Server
-    WS_Server -- Push Notifications --> WS_Client
+**Core values:**
+- ⚡ Instant checkout — barcode scan → cart → receipt in seconds
+- 🔒 All data stays on your server, zero cloud dependency
+- 📱 Works on desktop browsers, tablets, and mobile phones on the same LAN
+- 🎨 NexusFlow instrument-panel design — warm greyscale palette, Public Sans UI text, IBM Plex Mono for numbers
+
+---
+
+## 🏗️ Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                        LAN Network                               │
+│                                                                  │
+│  ┌─────────────────┐   REST + WS   ┌──────────────────────────┐ │
+│  │  Cashier/Owner  │◄─────────────►│   Express.js Server      │ │
+│  │  React SPA      │               │   (Node.js + TypeScript)  │ │
+│  │  (Vite, port    │               │   port 3000               │ │
+│  │   5173 dev)     │               │                           │ │
+│  └─────────────────┘               │  ┌─────────────────────┐  │ │
+│                                    │  │  SQLite (WAL mode)  │  │ │
+│  ┌─────────────────┐               │  │  better-sqlite3     │  │ │
+│  │  Customer       │   REST        │  └─────────────────────┘  │ │
+│  │  Website        │◄─────────────►│                           │ │
+│  │  (separate Vite │               │  ┌─────────────────────┐  │ │
+│  │   app /website) │               │  │  WebSocket Server   │  │ │
+│  └─────────────────┘               │  │  (ws library)       │  │ │
+│                                    │  └─────────────────────┘  │ │
+│  ┌─────────────────┐               └──────────────────────────┘ │
+│  │  Mobile Scanner │   Camera +                                  │
+│  │  (same React    │   REST                                      │
+│  │   app, /scan    │                                             │
+│  │   route)        │                                             │
+│  └─────────────────┘                                             │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-### The Technology Stack
-*   **Frontend Client**: React (Vite-powered Single Page Application) with Tailwind CSS for glassmorphic styling, Lucide React for modern icons, and HTML5 Canvas + Physics Engines for background ambient animations.
-*   **Native Mobile/Tablet App**: Native Kotlin Android Wrapper featuring Immersive Sticky Locks, SharedPreferences IP storage, and custom `WebChromeClient` permissions hooks.
-*   **Backend LAN Server**: Node.js & Express.js written in TypeScript, acting as the local host.
-*   **Database Layer**: SQLite database configured in Write-Ahead Logging (WAL) mode for maximum concurrency and high-speed write performance across multiple terminals.
-*   **Real-time Synchronization**: Lightweight custom WebSocket (WS) layer that propagates system events across all registers instantaneously.
-*   **Cryptographic Core**: Web Crypto API (`window.crypto.subtle`) for client-side hardware-accelerated E2EE encryption/decryption routines.
+The Express server serves the compiled React SPA from `dist/`, handles all REST API routes under `/api`, and runs a WebSocket server that broadcasts real-time events to every connected terminal.
 
 ---
 
-## 💎 Advanced Key Features
+## 🛠️ Tech Stack
 
-### 1. 🔒 Client-Side End-to-End Encrypted (E2EE) Chat & Cart Sharing
-*   **Hardware-Grade AES-256-GCM Encryption**: Text messages and cooperative bill transfers are encrypted locally in the cashier's browser using `SubtleCrypto` before being transmitted over the LAN. The server remains a blind cryptographic relay, storing and broadcasting *only* secure base64 ciphertext envelopes.
-*   **Passphrase Key Derivation**: Keys are derived locally via SHA-256 with an inline hex fingerprint (e.g., `E8-2F-9A-0D`) so registers can quickly align store keys.
-*   **Cooperative Bill Transfers**: Cashiers can package active draft carts (items, discounts, customer names) with one click, E2EE encrypt them, and broadcast them over the chat. Other cashiers sharing the passphrase see an interactive **Accept Bill** card that instantly hydrates their checkout cart.
-*   **Parser Resilience**: Incorporates a recursive unescaper to handle escaped JSON WebSocket frames up to 5 levels deep, ensuring zero-fault card rendering.
+### Billing App (Main SPA)
 
-### 2. 🔄 Concurrency Control, 30s Heartbeats & Sudden Crash Sweepers
-*   **Single-Session Enforcement**: To ensure employee accountability, a cashier can only maintain a **single active login session** on the LAN. Logging into a new register instantly kicks out any older sessions via a `SESSION_INVALIDATED` WebSocket event.
-*   **30s Keep-Alive Heartbeat**: Frontend terminals periodically ping `/api/auth/heartbeat` when `currentSession` is active. Sudden tab closes or power failures are caught using background keep-alive fetches on window unload.
-*   **Active Session Sweeper (`cleanupStaleSessions`)**: Runs on server boot and every 60 seconds on the server. Stale sessions (no heartbeat for >2 minutes) are automatically closed and their exact logout time is written back to the database matching their last known active timestamp to preserve 100% correct shift durations.
+| Layer | Technology |
+|---|---|
+| Frontend framework | React 18.3 + TypeScript |
+| Build tool | Vite 6 |
+| Styling | Tailwind CSS 4 + shadcn/ui (Radix UI primitives) |
+| Routing | React Router 7 |
+| Forms | React Hook Form |
+| Icons | Lucide React |
+| Charts | Recharts |
+| Animations | Motion (Framer Motion v12) |
+| Barcode scanning | Native `BarcodeDetector` API + `@zxing/library` fallback |
+| Date handling | date-fns 3 |
 
-### 3. 📅 Color-Coded Registration-Aware Attendance Calendar
-*   **Colored Status Schemes**: Overhauled monthly grid in layout shell to color-code attendance statuses: **Blue** (Present), **Red** (Absent), **Orange** (Leave), and **Green** (Holiday) with visual badge indicators.
-*   **Hiring Registration Date Boundaries**: Restricted the `Absent` status to past days *on or after* the employee's account registration date (`created_at`), preventing false absence marks on historical calendar days prior to hiring.
-*   **Legend & Owner Filter**: Mounted an intuitive status legend and a dropdown filter so owners can audit any specific cashier's monthly grid separately.
+### Backend Server
 
-### 4. 📈 AI Predictive Sales Forecasting & Dashboard Panel
-*   **Linear Regression Engine**: Built a mathematical engine using simple linear regression ($y = mx + c$) on daily sales data to project upcoming 7-day outward revenue metrics.
-*   **Dashed Recharts Linkage**: Plotted actual sales area with projected dashed lines in Recharts, complete with interactive toggles and sliding details panels.
-*   **AI Insights Side-Panel**: Developed a sliding details panel providing projected 7-day total revenue figures, a trend trajectory delta index (+/- revenue per day), and statistical $R^2$ accuracy confidence scores.
+| Layer | Technology |
+|---|---|
+| Runtime | Node.js (ESM) |
+| HTTP framework | Express.js 5 |
+| Language | TypeScript (transpiled with `tsx` in dev, `tsc` for prod) |
+| Database | SQLite via `better-sqlite3` (WAL mode) |
+| Authentication | JWT (`jsonwebtoken`) + bcrypt (`bcryptjs`) |
+| Real-time | WebSocket (`ws` library) |
+| Image processing | `sharp` (server-side segmentation & WebP conversion) |
+| Cryptography | Web Crypto API (client-side AES-256-GCM) |
 
-### 5. 🧾 Outward Supplies GSTR-1 Tax Exporter
-*   **GST GSTR-1 Report**: Added a fully functional GSTR-1 Report tab in the analytics dashboard that aggregates sales from SQLite bills JSON data on-the-fly.
-*   **B2B CSV Export**: Groups transactions by HSN and tax slabs (e.g. 0%, 5%, 12%, 18%) into CGST and SGST outputs, with compliant GSTR-1 outward CSV spreadsheet downloads.
+### Customer Website (`/website/`)
 
-### 6. 📦 Restock Purchase Order (PO) Procurement Generator
-*   **Interactive Restock PO**: Mounted a Restock PO Generator tab in System Settings sidebar that automatically flags low-stock catalog items.
-*   **Supplier Configurations & Exports**: Pre-fills order quantities based on threshold targets, sets procurement rates (defaulting to 30% margin), supports customized supplier setups, and generates printable purchase order CSVs.
+| Layer | Technology |
+|---|---|
+| Framework | React + TypeScript |
+| Build tool | Vite |
+| Styling | Tailwind CSS |
+| Integration | WhatsApp order links, NexusFlow REST API for products & coupons |
 
-### 7. 💵 Shift Closing Tally & Physical Denominations Calculator
-*   **Collapsible Denomination Tally Panel**: Mounted a collapsible grid panel inside the Shift Closing counts section that standardizes closing balances.
-*   **INR Denominations Support**: Created tally fields for all standard INR bills and coins (₹2000, ₹500, ₹200, ₹100, ₹50, ₹20, ₹10, ₹5, ₹2, ₹1).
-*   **Manual Input Safety Lock Guard**: Enabled automatic synchronization between the calculator total and the `actualCash` input field, dynamically locking the text box when the calculator is active to enforce strict audit integrity.
+### Design System
 
-### 8. ⭐ Spend-Based Loyalty Tiers & Checkout Gamification
-*   **Spend-Based Tiers**: Categorizes customers based on total spend instead of points balances, resolving reset flaws: **Bronze** (< ₹5k; 1.0x), **Silver** (₹5k - ₹15k; 1.2x), **Gold** (₹15k - ₹40k; 1.5x), and **Platinum** (> ₹40k; 2.0x).
-*   **Checkout Multipliers**: Points earned during checkout are scaled automatically using the customer's current spend-based tier multiplier.
-*   **Gamified Progress Bar**: Revamped the cashier customer card UI to render dual balances (point balances in high-contrast purple, total lifetime spent in rich emerald) and a visual progress slider bar themed with individual gradient styling showing the exact progress towards the next limit (e.g. `₹3,400 / ₹5,000 to Silver Tier`).
-
-### 9. 📱 Mobile-First Scan Billing & Attendance Rules
-*   **Streamlined Mobile Register View**: Accessing the POS on mobile viewports (< 768px) bypasses desktop grids in favor of simple item lists, a quick-add drop-down, and a clear attendance check-in status card.
-*   **Mobile Login Attendance Exemptions**: Cashiers logging in on a mobile app do **not** get automatically marked as present or start their shift (preventing clocking in from home!). A shift is only opened and their attendance validated **once they complete their first checkout bill transaction**.
-*   **Live HTML5 Barcode Camera Scanner**: Features a rear-camera HTML5 stream using media devices (`getUserMedia`) in a scanning overlay with a red sweeping laser line. Decodes barcodes automatically via the native `BarcodeDetector` API, and includes a quick demo scan simulator.
-
-### 10. 🤖 Native Android Tablet POS Application Wrapper
-*   **Fullscreen Immersive Sticky Mode**: Auto-hides standard Android navigation bars and system status menus. Cashiers remain locked inside the POS billing terminal.
-*   **Dynamic LAN Server IP Dialog**: On first launch, the app displays a Material-themed dialog asking for the local IP address of your POS Host Server. Once entered, it automatically caches the IP in Android `SharedPreferences` and connects.
-*   **Camera Permission Bridge**: Integrates a custom `WebChromeClient` inside `MainActivity.kt` that intercepts web-page camera queries (`getUserMedia`) and bridges them directly to Android Runtime OS permissions, allowing camera scanning natively.
-
-### 11. ⚖️ GST-Compliant Individual Product Discounts
-*   **Dual Price-Discount Synchronization**: Added interactive, real-time discount percentage controls directly to cart items on both Desktop (column-aligned input cells) and Mobile (badge inputs). Changing a discount computes the active price, and changing a price reverse-calculates the discount.
-*   **Compliant Taxable Value Computations**: Calculates regional GST taxes (CGST and SGST) directly on the discounted value of each product, ensuring 100% accurate regional tax and GSTR-1 audit trails.
-
-### 12. 📹 Full HD Continuous Autofocus Mobile Scanner
-*   **Continuous Focus Mode**: Overhauled both settings and checkout mobile scanners to dynamically check media track capabilities (`track.getCapabilities()`). If continuous focus is supported, it is requested and applied programmatically, eliminating blurry barcodes.
-*   **1080p Stream Constraint**: Expanded viewport constraints to ideal `1920x1080` (Full HD) resolution, offering rich image density for small barcode labels.
-
-### 13. 📦 Indian Retail/Wholesale UOM & HSN Rule Exemptions
-*   **Optional HSN Codes**: Relaxed constraints across product validation schemas and front-end forms to make HSN code entry optional, fully supporting non-taxable or small local retail products.
-*   **Custom UOM Entry**: Implemented a dynamic Unit of Measurement selector in catalog forms that lets owners create and save custom measurements (e.g. `PAIR`, `BOTTLE`, `TIN`) on-the-fly.
-
-### 14. 💾 High-Performance CSV Database Exporters
-*   **Blob-based Downloads**: Migrated settings customer, product, employee, and administrator (owners/co-owners) database spreadsheet exporters to use the modern HTML5 `Blob` and `URL.createObjectURL` API. This completely avoids URL length restrictions and special character crashes during heavy multi-thousand row dumps.
-*   **Leak-Proof Administrator Audits**: Built strict privacy filtering inside the Admin DB exporter to automatically clean and filter out the seed developer account credentials (`dev_1`/`developer`/`developer@retailpos.com`) preventing intellectual property leakages to store managers.
-*   **Contextual Access Buttons**: Plotted a beautifully structured four-column download panel inside the data management settings tab, alongside a dedicated, quick "Export CSV" button on the Employee Management page header.
-
-### 15. 👻 Zero-Trace Developer Ghost Mode & WebSocket Invisibility
-*   **Total Administrative Privacy**: The permanent seed developer account (`dev_1` / `developer` / `developer@retailpos.com`) is completely omitted from all database subqueries (`GET /api/users`), making it completely invisible in settings pages, employee lists, or co-owner management interfaces.
-*   **Active WebSocket Cloaking**: The server handles the developer's client WebSocket socket silently. When the developer logs in, they are registered to receive LAN updates, but they are excluded from the `ACTIVE_USERS_LIST` broadcast. No active user counts, connection badges, or presence lights are broadcasted to other terminal screens.
-*   **Suppressed State Broadcasts**: Broadcaster guards intercept and silence WebSocket messages (`SESSION_CHANGED`, `SESSION_INVALIDATED`, `BREAK_CHANGED`, `SHIFT_CHANGED`, `BILL_CREATED`, `LEAVES_UPDATED`) for any activities triggered under the developer identity.
-*   **Leak-Proof Logs**: Chat archives, breaks, shifts, leaves, and transaction logs associated with the developer are completely filtered out in query endpoints, ensuring a completely clean, zero-trace ghost presence across all cashier and owner analytical interfaces.
+- **Typeface (UI):** Public Sans
+- **Typeface (numbers/mono):** IBM Plex Mono
+- **Palette:** Warm greyscale instrument-panel — neutral backgrounds with high-contrast data ink
+- **Branding:** Shop name displayed prominently; `nexusflow` in 9–10 px faint text at bottom of every page
 
 ---
 
-## 🕸️ Real-Time LAN Synchronization Framework
+## ✨ Feature Reference
 
-To synchronize registers on a local network without cloud overhead, NexusFlow utilizes an event-driven WebSocket broadcast protocol. When a cashier or owner makes a change on one terminal, the server instantly pushes specific events to all other terminals:
+### 1. Cashier Register (Desktop & Mobile)
 
-```mermaid
-sequenceDiagram
-    participant C as Cashier Terminal
-    participant S as Local Express Server
-    participant O as Owner Dashboard
-    
-    C->>{S}: POST /api/users/breaks (Start Break)
-    Note over S: DB updated: Active break recorded
-    S-->>C: Response: 200 OK (Updates Cashier UI)
-    S-->>O: WebSocket Broadcast: BREAK_CHANGED
-    Note over O: Auto-reloads Shift Audit & Performance Grids
-    Note over O: Pulses Amber "On Break" badge in real-time
+- **Dual-mode layout:** Full desktop grid for counter use; compact mobile card stack for handheld operation
+- **Barcode scanner:** Continuous RAF scanning loop using native `BarcodeDetector` + `@zxing/library` TRY_HARDER fallback
+- **1D & 2D formats supported:**
+  - EAN-13, EAN-8, UPC-A, UPC-E
+  - Code 128, Code 39, Code 93
+  - ITF, Codabar, GS1 DataBar RSS-14 & Expanded
+  - QR Code, Data Matrix, Aztec, PDF417
+- **Cart management:** Add, remove, adjust quantity and per-item discount in real time
+- **Wholesale pricing tiers:** Retail / Dealer / Distributor — switch at billing time
+- **GST calculation:** Auto-selects IGST (inter-state) or CGST + SGST (intra-state) based on settings
+- **Khata (credit):** Record sales on credit against a customer account
+- **F-key shortcuts:** F1–F12 for fast actions (see [Keyboard Shortcuts](#️-keyboard-shortcuts))
+
+### 2. Unified Discounts & Loyalty Rewards
+
+Single card in the checkout sheet handles:
+- Flat ₹ discount
+- Percentage (%) discount
+- Loyalty point redemption (customer points balance shown inline)
+- Coupon code input box (validates and applies in one step)
+
+### 3. Coupon System
+
+- Admin creates single-use coupon codes stored in SQLite
+- Atomic transaction enforcement — a coupon can only be claimed once, even with concurrent requests
+- Claimed coupons disappear from all UI surfaces (POS checkout + customer website) instantly via WebSocket sync
+- LAN-wide `COUPON_REDEEMED` broadcast ensures all terminals update without page refresh
+
+### 4. Mobile Scanner
+
+- **Live video RAF loop** with progressive camera constraint fallback:
+  - HD back-camera (1920×1080) → standard (640×480) → any video input
+- In-browser camera fallback for non-HTTPS LAN environments
+- **90° orientation-invariant pass** — detects vertical barcodes without rotating the phone
+- Photo capture mode with ZXing decode for still images
+- **Auto Quick-Add** on unknown barcode — pops a form to add the new product directly
+
+### 5. Product Image Pipeline
+
+1. **Mobile capture** — cashier/owner photographs product with phone camera directly in the browser
+2. **Client-side compression** — 12–48 MP shot compressed to ~250 KB using `imageCompressor.ts`
+3. **Server-side background removal** — `sharp`-powered algorithm:
+   - Sobel edge barrier detection
+   - Corner consensus classification (background vs. foreground)
+   - BFS flood-fill segmentation
+   - Pure `#FFFFFF` compositing over transparent PNG
+4. **Enhancement** — brightness / saturation / sharpness tuning applied server-side
+5. **WebP output** — final image saved as WebP and served via `/uploads/`
+6. **WebSocket broadcast** — `STOCK_UPDATED` + `IMAGE_ENHANCED` events propagate to all terminals
+
+> Product images are intentionally **hidden** in the billing software UI and only shown on the customer-facing website.
+
+### 6. OTP Bill Pickup & Chat (E2EE)
+
+- Customers receive an OTP; cashier scans or types it to hand off a reserved order
+- **AES-256-GCM end-to-end encrypted** chatbox for inter-terminal communication
+  - Keys derived client-side via SHA-256 from a shared passphrase
+  - Server is a blind relay — only stores and forwards ciphertext
+- `RESERVATION_CLAIMED` WebSocket event closes the pickup on all terminals simultaneously
+- **Auto-hide claimed orders** toggle to keep the pickup queue clean
+- All chat/reservation records persisted in SQLite
+
+### 7. Settings (16-tab Panel)
+
+Full-screen settings accessible from the dashboard shell:
+
+| Tab | Contents |
+|---|---|
+| General | Shop name, address, GST number, sector |
+| Users | Staff accounts, role assignment, password reset |
+| Shifts | Active shift list, denomination calculator |
+| Products | Bulk import via RFC-4180 CSV, HSN/UOM rules |
+| Customers | Loyalty tier thresholds, khata management |
+| Discounts | Coupon code creation & management |
+| Billing | GST mode (IGST/CGST+SGST), receipt format |
+| Appearance | Theme tokens, font preview |
+| Backup/Restore | Full DB export & restore |
+| Analytics | GSTR-1 export, HSN summary CSV |
+| Keyboard | Shortcut reference card |
+| Attendance | Registration date awareness, admin override |
+| Restock PO | Auto-flagged low-stock items, supplier config |
+| …and more | WAI-ARIA tablist, Escape navigation throughout |
+
+### 8. Accessibility (WAI-ARIA)
+
+- Full roving `tabIndex` in all list/grid components
+- Focus trapping in every modal and drawer
+- Escape key closes any open panel, sheet, or dialog
+- Screen-reader-compatible landmark regions
+
+### 9. Back Office & Analytics
+
+- **Sales analytics dashboard** with Recharts area charts
+- **AI forecasting panel** — linear regression on daily sales, projects 7-day revenue, R² confidence score, trend delta
+- **GSTR-1 export** — aggregates bills by HSN/tax slab, generates compliant B2B CSV
+- **RFC-4180 CSV import** — bulk product upsert via validated spreadsheet upload
+- **CSV exports** — products, customers, employees, bills — filenames include shop name slug
+- **Khata ledger** — per-customer credit history
+
+### 10. Staff & Shift Management
+
+- **Attendance calendar** — color-coded grid (Blue=Present, Red=Absent, Orange=Leave, Green=Holiday)
+- Registration-date-aware: no absent marks before hire date
+- **Shift closing** — denomination counter with INR coins/notes, variance chips showing over/short
+- Shift data persisted server-side; Z-report printable
+
+### 11. Login Page
+
+- Minimal: shop name at top, username + password fields only
+- No test shortcuts, no LAN connection cards visible
+- Single-session enforcement: logging in on a new device invalidates the previous session via WebSocket
+
+### 12. Dynamic Shop Branding
+
+- Shop name loaded from DB settings at runtime, no hardcoding
+- Appears in: nav header, print receipts, page titles, WebSocket broadcasts, CSV filename slugs
+- `nexusflow` in 9–10 px faint text at bottom of every page/receipt
+
+### 13. Customer Website (`/website/`)
+
+- Product catalog with white-background enhanced images
+- Shopping cart with WhatsApp order integration (pre-filled message)
+- Coupon display — only shows unredeemed codes applicable to customer
+- Syncs product data from NexusFlow REST API
+
+### 14. Vite Configuration
+
+- `allowedHosts` includes `*.trycloudflare.com` for Cloudflare tunnel LAN exposure
+- Proxies `/api` and WebSocket to Express backend in dev mode
+
+---
+
+## 📂 Directory Structure
+
 ```
-
-### Registered System Events:
-1.  `STOCK_UPDATED`: Sent when inventory details or stock levels change, auto-updating checkout registers.
-2.  `BREAK_CHANGED`: Broadcast when an employee starts/ends a break, updating shift monitors.
-3.  `SHIFT_CHANGED`: Broadcast on shift start/closing, updating register session lists.
-4.  `SESSION_CHANGED`: Broadcast on login/logout, keeping cashier logs synced.
-5.  `SALES_CHANGED`: Broadcast on billing completion, updating analytics charts in real-time.
-6.  `SESSION_INVALIDATED`: Sent to a specific WebSocket client to force-logout an older concurrent session.
-
----
-
-## 🗃️ Complete Relational Database Schema
-
-The SQLite database (`store.db`) utilizes five clean relational schemas with index lookups for fast retrieval:
-
-```mermaid
-erDiagram
-    users ||--o{ shift_records : "starts"
-    users ||--o{ break_records : "takes"
-    users ||--o{ bills : "generates"
-    customers ||--o{ bills : "owns"
-    
-    users {
-        text id PK
-        text username
-        text password_hash
-        text name
-        text role "owner | co-owner | employee"
-        text status "active | inactive"
-        text permissions
-    }
-    
-    shift_records {
-        text id PK
-        text user_id FK
-        text status "active | closed"
-        text start_time
-        text end_time
-        real opening_cash
-        real closing_cash
-    }
-    
-    break_records {
-        text id PK
-        text user_id FK
-        text start_time
-        text end_time
-        integer duration
-    }
-    
-    bills {
-        text id PK
-        text bill_number PK
-        text cashier_id FK
-        text customer_phone FK
-        text date
-        real total
-        real subtotal
-        real gst_amount
-        real cgst
-        real sgst
-        text payment_mode "cash | upi | card"
-        text items "JSON array of items"
-    }
-
-    customers {
-        text phone PK
-        text name
-        integer loyalty_points
-        real total_spent
-    }
-
-    chats {
-        text id PK
-        text sender_name
-        text sender_role
-        text ciphertext
-        text iv
-        text timestamp
-        text fingerprint
-        text recipient_name
-        integer is_bill_transfer
-    }
-```
-
----
-
-## 🛠️ Developer Setup & Directory Framework
-
-If you are a developer extending the NexusFlow system, here is the core structural directory layout:
-
-```text
-├── index.html                  # Main SPA HTML5 anchor
-├── package.json                # Project dependencies and startup scripts
-├── vite.config.ts              # Vite asset bundles config
-├── server/                     # LAN EXPRESS BACKEND
-│   ├── index.ts                # HTTP & WebSocket initialization
-│   ├── db.ts                   # SQLite connections and migrations
+Retail Billing UI Design/
+├── index.html                        # Main SPA HTML entry point
+├── package.json                      # Root dependencies & scripts
+├── pnpm-workspace.yaml               # pnpm workspace (includes /website)
+├── vite.config.ts                    # Vite config (proxy, allowedHosts)
+├── tsconfig.json                     # Frontend TS config
+├── tsconfig.server.json              # Server TS config (CommonJS output)
+│
+├── server/                           # Express.js backend
+│   ├── index.ts                      # HTTP + WebSocket server init
+│   ├── db.ts                         # SQLite setup, migrations, seed
 │   ├── middleware/
-│   │   └── auth.ts             # Auth middleware & DB session validation
-│   └── routes/                 # REST API Controller Endpoints
-│       ├── auth.ts             # Cashier session routes
-│       ├── chats.ts            # E2EE chat history routes
-│       ├── products.ts         # Inventory CRUD routes
-│       ├── shifts.ts           # Z-Reports and shift subqueries
-│       └── users.ts            # cashiers and break routes
-├── android app/                # NATIVE KOTLIN ANDROID CONTAINER
-│   ├── build.gradle            # Root buildscript
-│   ├── settings.gradle         # Root configuration
-│   └── app/
-│       ├── build.gradle        # App dependencies & SDK targets
-│       └── src/main/
-│           ├── AndroidManifest.xml # Permissions & tablet support map
-│           ├── java/com/nexusflow/pos/MainActivity.kt # Immersive WebView launcher
-│           └── res/layout/activity_main.xml # Fullscreen WebView Layout
-└── src/                        # CLIENT REACT FRONTEND
-    ├── main.tsx                # App bootstrap entry
-    └── app/
-        ├── routes.ts           # React Router declarations
-        ├── contexts/           # Auth and Theme provider hooks
-        ├── hooks/              # useWebSocket LAN syncing hooks
-        └── components/         # CORE UI MODULES
-            ├── layout.tsx      # Global dashboard shell & navigation
-            ├── login-page.tsx  # Authentication view with 3D tilting card
-            ├── pos-settings.tsx# Shift auditing and Product Inventory CRUD
-            ├── cashier-billing-advanced.tsx # Real-time Checkout sheet
-            └── ui/             # REUSABLE UI ELEMENTS
-                ├── e2ee-chatbox.tsx # AES-256 E2EE chat widget
-                └── interactive-mesh-background.tsx # Canvas animations
+│   │   └── auth.ts                   # JWT verification middleware
+│   ├── routes/
+│   │   ├── auth.ts                   # Login, logout, heartbeat
+│   │   ├── bills.ts                  # Bill creation & history
+│   │   ├── chats.ts                  # E2EE chat message routes
+│   │   ├── coupons.ts                # Coupon CRUD & redemption
+│   │   ├── products.ts               # Inventory CRUD + CSV import
+│   │   ├── print.ts                  # Receipt generation
+│   │   ├── reservations.ts           # OTP bill pickup
+│   │   ├── settings.ts               # Shop settings CRUD
+│   │   ├── shifts.ts                 # Shift open/close + Z-report
+│   │   └── users.ts                  # User management, attendance
+│   └── services/                     # Background services
+│
+├── src/                              # React frontend
+│   ├── main.tsx                      # App bootstrap
+│   ├── app/
+│   │   ├── App.tsx                   # Root component + providers
+│   │   ├── routes.ts                 # React Router route declarations
+│   │   ├── contexts/
+│   │   │   ├── auth-context.tsx      # Auth state + session management
+│   │   │   └── theme-context.tsx     # Theme token provider
+│   │   ├── hooks/
+│   │   │   ├── useWebSocket.ts       # LAN WebSocket hook
+│   │   │   ├── useConfirm.tsx        # Async confirm dialog hook
+│   │   │   └── useDeferredLocalStorage.ts
+│   │   ├── components/
+│   │   │   ├── cashier-billing-advanced.tsx  # Main checkout sheet
+│   │   │   ├── analytics-dashboard.tsx       # Sales analytics + AI panel
+│   │   │   ├── pos-settings.tsx              # 16-tab settings panel
+│   │   │   ├── employee-management.tsx       # Staff CRUD
+│   │   │   ├── shift-closing-modal.tsx       # Denomination counter
+│   │   │   ├── shift-start-modal.tsx         # Shift open form
+│   │   │   ├── login-page.tsx                # Auth page
+│   │   │   ├── layout.tsx                    # Dashboard shell + nav
+│   │   │   ├── product-photo-capture-modal.tsx  # Image capture flow
+│   │   │   └── ui/
+│   │   │       ├── e2ee-chatbox.tsx          # AES-256-GCM chat
+│   │   │       ├── liquid-glass-card.tsx     # Glassmorphism card
+│   │   │       └── …                         # Other shadcn/ui components
+│   │   ├── sectors/                  # Retail/Grocery/Wholesale sector UI
+│   │   ├── lib/                      # Shared utilities
+│   │   └── utils/
+│   │       ├── api.ts                # Typed REST client
+│   │       ├── imageCompressor.ts    # Client-side image compression
+│   │       └── glare.ts/tsx          # Liquid glass glare effect
+│   ├── styles/
+│   │   ├── globals.css               # Global resets
+│   │   ├── design-tokens.css         # CSS custom properties
+│   │   ├── theme.css                 # Light/dark theme vars
+│   │   ├── fonts.css                 # Public Sans + IBM Plex Mono
+│   │   └── redesign.css              # NexusFlow instrument-panel overrides
+│   └── assets/                       # Static images & SVGs
+│
+├── website/                          # Customer-facing website (separate app)
+│   ├── index.html
+│   ├── package.json
+│   ├── vite.config.ts
+│   ├── src/                          # Website React components
+│   └── public/                       # Website static assets
+│
+├── android app/                      # Native Kotlin Android wrapper
+│   └── app/src/main/
+│       ├── AndroidManifest.xml
+│       └── java/com/nexusflow/pos/MainActivity.kt
+│
+└── scripts/
+    └── dev.js                        # Concurrently runner for dev mode
 ```
 
-### Installation
-1.  Install dependencies:
-    ```bash
-    pnpm install
-    ```
-2.  Start the development environment (both backend Express server and Vite frontend client):
-    ```bash
-    pnpm dev
-    ```
-3.  Compile for production release:
-    ```bash
-    pnpm build
-    ```
-4.  Run production server:
-    ```bash
-    pnpm start
-    ```
+---
+
+## ⚙️ Setup & Running
+
+### Prerequisites
+
+- **Node.js** 20+ (LTS recommended)
+- **pnpm** 9+ (`npm install -g pnpm`)
+- A modern browser (Chrome 88+, Edge 88+, or Firefox 90+ with BarcodeDetector polyfill)
+
+### 1. Install dependencies
+
+```bash
+pnpm install
+```
+
+This installs all workspace packages (root + `/website`).
+
+### 2. Development (hot reload)
+
+```bash
+# Starts both Express server (port 3000) and Vite dev server (port 5173)
+pnpm dev
+```
+
+Or with LAN access (open to all devices on the network):
+
+```bash
+pnpm dev:host
+```
+
+Open: `http://localhost:5173` (or `http://<your-machine-ip>:5173` on other LAN devices)
+
+### 3. Production build & run
+
+```bash
+# Build React SPA + compile TypeScript server
+pnpm build
+
+# Start production Express server (serves SPA + API on port 3000)
+pnpm start
+```
+
+Open: `http://localhost:3000` (or `http://<your-machine-ip>:3000`)
+
+### 4. Customer website (development)
+
+```bash
+pnpm website:dev
+```
+
+### 5. First-time setup
+
+On first startup, the server automatically:
+1. Creates the SQLite database (`retail.db`) with all tables
+2. Runs schema migrations
+3. Seeds a default owner account — **change the password immediately in Settings → Users**
+
+---
+
+## 📜 Available Scripts
+
+| Script | Description |
+|---|---|
+| `pnpm dev` | Start dev server (Express + Vite, port 3000/5173) |
+| `pnpm dev:host` | Dev server exposed to LAN (`--host`) |
+| `pnpm dev:server` | Express server only (tsx watch) |
+| `pnpm dev:client` | Vite only |
+| `pnpm build` | Production build (SPA + server TS compile) |
+| `pnpm build:client` | Vite SPA build only |
+| `pnpm build:server` | TypeScript server compile only |
+| `pnpm start` | Run compiled production server |
+| `pnpm website:dev` | Customer website dev server |
+| `pnpm website:build` | Customer website production build |
+| `pnpm test` | Run full test suite (Vitest, 179 tests) |
+| `pnpm test:watch` | Vitest in watch mode |
+
+---
+
+## 🔐 Environment Variables
+
+NexusFlow needs minimal configuration. Create a `.env` file in the project root (never commit this):
+
+```env
+# Server
+PORT=3000
+JWT_SECRET=replace-with-a-long-random-string
+
+# Database path (defaults to ./retail.db)
+DB_PATH=./retail.db
+```
+
+For the customer website, create `website/.env` (see `website/.env.example`):
+
+```env
+VITE_API_BASE_URL=http://<your-server-ip>:3000
+```
+
+---
+
+## ⌨️ Keyboard Shortcuts
+
+| Key | Action |
+|---|---|
+| `F1` | Open barcode scanner / quick-scan input |
+| `F2` | Add product by name search |
+| `F3` | Focus customer phone lookup |
+| `F4` | Print current receipt |
+| `F5` | Toggle wholesale pricing tier |
+| `F8` | Open discounts & loyalty card |
+| `F9` | Print last bill |
+| `F10` | Open OTP bill pickup |
+| `F12` | Open shift closing |
+| `Escape` | Close any open modal, sheet, or dialog |
+| `Tab` / `Shift+Tab` | Roving focus through all interactive elements |
+| `Enter` / `Space` | Activate focused button or list item |
+| `Arrow keys` | Navigate within tablist, select menus |
+
+> All shortcuts are WAI-ARIA compliant with full roving `tabIndex` and focus trapping inside modals.
+
+---
+
+## 📷 Barcode Scanner Support
+
+NexusFlow uses a **dual decode engine** with automatic fallback:
+
+1. **Primary:** Native `BarcodeDetector` API (Chrome 83+, Edge 83+) — hardware-accelerated, zero latency
+2. **Fallback:** `@zxing/library` with `TRY_HARDER` hint — software decode, works in Firefox and older browsers
+
+**Supported formats:**
+
+| Category | Formats |
+|---|---|
+| 1D Retail | EAN-13, EAN-8, UPC-A, UPC-E |
+| 1D Industrial | Code 128, Code 39, Code 93, ITF, Codabar |
+| GS1 | DataBar RSS-14, DataBar Expanded |
+| 2D | QR Code, Data Matrix, Aztec, PDF417 |
+
+**Scanner modes:**
+- **Continuous RAF loop** — scans every animation frame for instant detection
+- **90° orientation pass** — automatically detects vertical barcodes without rotating the device
+- **Photo capture** — tap a capture button to decode a still frame via ZXing
+
+---
+
+## 📱 Mobile Usage
+
+Access the full POS app on any phone or tablet connected to the same LAN:
+
+1. Run `pnpm dev:host` (or `pnpm start` in production)
+2. Open `http://<server-ip>:3000` on the mobile browser
+3. The UI automatically switches to a mobile-optimized layout on viewports < 768 px
+
+**Mobile-specific features:**
+- Live barcode scanner via rear camera (progressive HD → standard → any fallback)
+- Photo capture for product images — compress on device, process on server
+- Compact cart with swipe-to-remove
+- In-browser camera works over plain HTTP on LAN (no HTTPS required for same-network devices in Chrome)
+
+**Android app wrapper** (`/android app/`):
+- Native Kotlin `WebView` wrapper with immersive fullscreen sticky mode
+- Bridges `getUserMedia` camera permissions to Android runtime
+- Caches server IP in `SharedPreferences` — enter once, remembered forever
+
+---
+
+## 🌐 Customer Website
+
+The `/website/` directory is a **completely separate Vite/React application** that provides a public-facing storefront:
+
+- Product catalog with enhanced white-background images (served from NexusFlow `/uploads/`)
+- Shopping cart
+- WhatsApp order integration (click-to-order via `wa.me` link)
+- Coupon display — only shows active, unredeemed coupons
+- Syncs product data from NexusFlow REST API
+
+**Run in parallel with the main app:**
+```bash
+# Terminal 1
+pnpm dev        # Main POS (port 3000/5173)
+
+# Terminal 2
+pnpm website:dev  # Customer website (port 5174)
+```
+
+---
+
+## 🗃️ Database Schema
+
+SQLite database (`retail.db`) in WAL mode for concurrent reads:
+
+```
+users               — staff accounts, roles, password hashes
+shift_records       — shift open/close times, cash amounts
+break_records       — break start/end per user
+bills               — completed transactions (items stored as JSON)
+customers           — phone, name, loyalty points, total spent
+chats               — E2EE ciphertext messages
+coupons             — single-use coupon codes
+reservations        — OTP bill pickup queue
+products            — inventory, pricing tiers, HSN, UOM
+settings            — shop name, address, GST, sector, theme
+attendance          — daily attendance records
+```
+
+---
+
+## 📡 WebSocket Events
+
+All terminals subscribe to a single WebSocket connection. Events:
+
+| Event | Triggered by | Effect on receivers |
+|---|---|---|
+| `STOCK_UPDATED` | Product edit/add | Reload product catalogue |
+| `IMAGE_ENHANCED` | Server finishes image processing | Refresh product image |
+| `SALES_CHANGED` | Bill completed | Update analytics charts |
+| `SHIFT_CHANGED` | Shift open/close | Refresh shift status badge |
+| `BREAK_CHANGED` | Break start/end | Update employee status indicator |
+| `SESSION_CHANGED` | Login/logout | Refresh active users list |
+| `SESSION_INVALIDATED` | Concurrent login | Force-logout old session |
+| `COUPON_REDEEMED` | Coupon used | Remove coupon from all UI |
+| `RESERVATION_CLAIMED` | OTP pickup confirmed | Remove from pickup queue |
+| `ACTIVE_USERS_LIST` | Server heartbeat | Update online badge count |
+
+---
+
+## 🖼️ Product Image Pipeline
+
+```
+Phone camera capture
+       │
+       ▼
+Client-side compression (imageCompressor.ts)
+  12–48 MP → ~250 KB JPEG
+       │
+       ▼  POST /api/products/:id/image
+Server receives image buffer
+       │
+       ▼
+sharp — Sobel edge detection
+  + Corner consensus (BFS flood fill)
+  + Background classification
+       │
+       ▼
+White (#FFFFFF) background compositing
+  + Brightness/saturation/sharpness enhancement
+       │
+       ▼
+WebP output → saved to /uploads/
+       │
+       ▼
+WebSocket broadcast: STOCK_UPDATED + IMAGE_ENHANCED
+```
+
+---
+
+## 🚀 Deployment Notes
+
+### LAN Deployment (recommended)
+
+1. Run `pnpm build` on the host machine
+2. Run `pnpm start` — Express serves everything on port 3000
+3. All devices on the same WiFi/LAN can connect via `http://<host-ip>:3000`
+4. No SSL required for camera access on Chrome within LAN (localhost exemption + LAN IP exemption)
+
+### Cloudflare Tunnel (remote access)
+
+For remote access without port forwarding:
+
+```bash
+cloudflared tunnel --url http://localhost:3000
+```
+
+NexusFlow's `vite.config.ts` already includes `*.trycloudflare.com` in `allowedHosts`, so the Cloudflare tunnel URL works out of the box.
+
+### Production Checklist
+
+- [ ] Set a strong `JWT_SECRET` in `.env`
+- [ ] Change the default owner password in Settings → Users
+- [ ] Configure `DB_PATH` to a persistent storage location (not temporary)
+- [ ] Set up OS-level backup for the SQLite database file
+- [ ] Test barcode scanning on the intended hardware before go-live
+
+### What Is NOT included (intentionally)
+
+- No Docker config — SQLite + Node.js runs natively; containerization is straightforward if needed
+- No cloud database — SQLite is the deliberate choice for offline-first LAN operation
+- No HTTPS cert management — use a reverse proxy (nginx/Caddy) or Cloudflare tunnel for SSL
+
+---
+
+## 🧪 Test Suite
+
+**179 tests across 8 test suites** powered by [Vitest](https://vitest.dev/):
+
+```bash
+pnpm test          # run once
+pnpm test:watch    # watch mode
+```
+
+Tests cover:
+- Product CRUD API routes
+- Bill creation and GST calculation logic
+- Coupon atomic redemption (single-use enforcement)
+- Barcode format detection utilities
+- Image compression pipeline
+- Loyalty point tier thresholds
+- CSV import validation
+- WebSocket event broadcasting
+
+---
+
+## 📄 License & Attributions
+
+See [ATTRIBUTIONS.md](./ATTRIBUTIONS.md) for third-party library credits.
+
+---
+
+<p align="center">
+  <sub>nexusflow</sub>
+</p>

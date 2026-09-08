@@ -1,0 +1,151 @@
+/* ---------------------------------------------------------------------------
+   Redesign layer.
+
+   Imported LAST, after globals.css, so it wins on equal specificity. It does
+   the three things a token swap alone cannot:
+
+     1. Puts Public Sans on the UI and IBM Plex Mono on numbers.
+     2. Forces tabular numerals wherever digits are stacked in a column.
+     3. Restyles the all-caps micro-labels, which were `font-black` +
+        `tracking-widest` at 9-10px in a dozen places — too heavy to read at
+        that size. Mono at 600 with looser tracking is legible small, which is
+        the whole point of a label that size.
+
+   Everything here is a class or an element selector already present in the
+   codebase, so no component markup has to change.
+   --------------------------------------------------------------------------- */
+
+html {
+  font-size: var(--font-size);
+}
+
+body {
+  font-family: 'Public Sans', system-ui, -apple-system, sans-serif;
+  font-feature-settings: 'cv05' 1, 'ss01' 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--background);
+  color: var(--text-primary);
+  text-wrap: pretty;
+}
+
+/* Links. Defined app-wide because an undefined <a> renders browser-default
+   blue, which is not in this palette. */
+a {
+  color: var(--primary);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--accent-hi);
+}
+
+/* Headings sit tighter than the browser default. At 24-32px, -0.02em is the
+   difference between a heading and a heading that looks like body text scaled
+   up. */
+h1, h2, h3, h4 {
+  letter-spacing: -0.018em;
+  text-wrap: balance;
+}
+
+/* --- Numerals -------------------------------------------------------------
+
+   Tabular numerals on every element that holds a figure in a column. Without
+   this, proportional digits make a cart of ₹1,240.00 / ₹99.00 / ₹1,111.00 read
+   as a ragged edge and cashiers lose the decimal point. */
+table,
+th,
+td,
+input[type='number'],
+.font-mono,
+.tabular-nums,
+[class*='tabular'] {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+.font-mono,
+code,
+kbd,
+pre {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* --- Micro-labels ---------------------------------------------------------
+
+   The `text-[9px]/[10px] font-black uppercase tracking-wider` pattern used
+   throughout. Rendered as mono 600 with open tracking instead: at that size
+   weight stops helping and letterspacing starts. */
+.text-\[9px\].uppercase,
+.text-\[10px\].uppercase,
+.text-\[11px\].uppercase {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-weight: 600 !important;
+  letter-spacing: 0.13em !important;
+  color: var(--text-muted);
+}
+
+/* --- Surfaces -------------------------------------------------------------
+
+   Panels are flat with a real border. The previous look leaned on large
+   coloured shadows (`shadow-lg shadow-blue-500/5` and friends) to separate
+   panels; on the warm ramp a 1px border does it with no haze, and stacked
+   glows were making dense screens feel soft. */
+.rounded-3xl {
+  border-radius: 12px !important;
+}
+.rounded-2xl {
+  border-radius: 10px !important;
+}
+.rounded-xl {
+  border-radius: 8px !important;
+}
+
+/* Scrollbars, so the long cart and ledger columns don't ship OS-default grey
+   bars against the warm panels. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border2) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border2);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text-faint);
+  background-clip: content-box;
+}
+
+/* Focus ring. One ring, everywhere, replacing the mix of
+   `focus:ring-blue-500/20` and no ring at all. */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Kill the decorative animate-pulse on status badges. A PREPARING ticket that
+   pulses forever trains the eye to ignore movement, which is a problem when
+   something genuinely does need attention. Elapsed-time colour carries the
+   urgency instead. */
+.animate-pulse {
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

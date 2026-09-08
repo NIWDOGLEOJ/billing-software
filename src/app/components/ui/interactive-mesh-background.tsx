@@ -295,7 +295,7 @@ export function InteractiveMeshBackground() {
     >
       {/* 🔮 Interactive Animated Blobs */}
       <div 
-        className={`absolute top-[-15%] left-[-15%] w-[60%] h-[60%] rounded-full transition-transform duration-[1200ms] cubic-bezier(0.16, 1, 0.3, 1) will-change-transform ${
+        className={`absolute top-[-15%] left-[-15%] w-[60%] h-[60%] rounded-full transition-transform duration-[1200ms] ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform ${
           darkMode 
             ? isLoginPage 
               ? 'bg-indigo-500/15 blur-[130px]' 
@@ -307,7 +307,7 @@ export function InteractiveMeshBackground() {
         }}
       />
       <div 
-        className={`absolute bottom-[-15%] right-[-15%] w-[60%] h-[60%] rounded-full transition-transform duration-[1200ms] cubic-bezier(0.16, 1, 0.3, 1) will-change-transform ${
+        className={`absolute bottom-[-15%] right-[-15%] w-[60%] h-[60%] rounded-full transition-transform duration-[1200ms] ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform ${
           darkMode 
             ? isLoginPage 
               ? 'bg-pink-500/12 blur-[130px]' 
@@ -319,7 +319,7 @@ export function InteractiveMeshBackground() {
         }}
       />
       <div 
-        className={`absolute top-[25%] left-[35%] w-[450px] h-[450px] rounded-full transition-transform duration-[1500ms] cubic-bezier(0.16, 1, 0.3, 1) animate-pulse will-change-transform ${
+        className={`absolute top-[25%] left-[35%] w-[450px] h-[450px] rounded-full transition-transform duration-[1500ms] ease-[cubic-bezier(0.16,1,0.3,1)] animate-pulse will-change-transform ${
           darkMode 
             ? isLoginPage 
               ? 'bg-violet-600/8 blur-[100px]' 
@@ -333,7 +333,7 @@ export function InteractiveMeshBackground() {
 
       {/* 🕸️ Mesh/Grid Texture overlay reacting with mouse in elegant 3D parallax */}
       <div 
-        className={`absolute inset-0 transition-transform duration-[800ms] cubic-bezier(0.16, 1, 0.3, 1) will-change-transform ${
+        className={`absolute inset-0 transition-transform duration-[800ms] ease-[cubic-bezier(0.16,1,0.3,1)] will-change-transform ${
           darkMode 
             ? isLoginPage 
               ? 'opacity-[0.09]' 

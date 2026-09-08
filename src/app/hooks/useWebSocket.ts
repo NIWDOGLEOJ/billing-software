@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
+import { CLIENT_ID } from '../utils/api';
 
 type WSHandler = (data: unknown) => void;
 
@@ -28,7 +29,14 @@ export function useWebSocket(handlers: Record<string, WSHandler>) {
 
     ws.onmessage = (event) => {
       try {
-        const { type, data } = JSON.parse(event.data);
+        const { type, data, originClientId } = JSON.parse(event.data);
+
+        // Our own write coming back to us. The handler that made the change has
+        // already applied the result locally, so acting on the echo would mean
+        // re-fetching data we have and firing a "synced" toast at the person who
+        // caused the sync.
+        if (originClientId && originClientId === CLIENT_ID) return;
+
         if (handlersRef.current[type]) {
           handlersRef.current[type](data);
         }

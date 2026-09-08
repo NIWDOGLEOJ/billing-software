@@ -4,8 +4,77 @@
     <head>
       <meta charset="UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-      <title>NexusFlow</title>
+      <title>Sunrise Provisions - Retail POS &amp; Inventory System</title>
+      <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M18 68 L78 68 L68 34 L28 34 Z' fill='none' stroke='%23F97316' stroke-width='8' stroke-linejoin='round'/%3E%3Cpath d='M58 12 L58 62 C58 76 44 80 30 74' fill='none' stroke='%232563EB' stroke-width='10' stroke-linecap='round'/%3E%3Cpath d='M24 20 Q34 10 44 20 Q54 10 64 20' fill='none' stroke='%23F97316' stroke-width='7' stroke-linecap='round'/%3E%3Ccircle cx='32' cy='85' r='8' fill='%232563EB'/%3E%3Ccircle cx='66' cy='85' r='8' fill='%232563EB'/%3E%3C/svg%3E" />
+      <link rel="preconnect" href="https://fonts.googleapis.com" />
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,300..800;1,300..800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" />
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" />
       <style>html, body { height: 100%; margin: 0; } #root { height: 100%; }</style>
+    <script>
+      (function() {
+        try {
+          var sn = localStorage.getItem('pos_shop_name');
+          if (!sn) {
+            var raw = localStorage.getItem('shopDetails');
+            if (raw) {
+              var p = JSON.parse(raw);
+              if (p && p.name) sn = p.name;
+            }
+          }
+          if (sn) document.title = sn + ' - Retail POS & Inventory System';
+        } catch (e) {}
+        try {
+          var savedTheme = null;
+          try {
+            savedTheme = localStorage.getItem('theme') || localStorage.getItem('nexusflow_theme');
+          } catch (e) {}
+
+          var validThemes = ['system', 'light', 'dark'];
+          if (!savedTheme || validThemes.indexOf(savedTheme) === -1) {
+            savedTheme = null;
+          }
+
+          var legacyDark = null;
+          try {
+            legacyDark = localStorage.getItem('darkMode');
+          } catch (e) {}
+
+          var parsedLegacy = null;
+          if (legacyDark !== null) {
+            try {
+              parsedLegacy = JSON.parse(legacyDark);
+            } catch (e) {
+              parsedLegacy = null;
+            }
+          }
+
+          var theme = savedTheme;
+          if (!theme) {
+            if (typeof parsedLegacy === 'boolean') {
+              theme = parsedLegacy ? 'dark' : 'light';
+            } else {
+              theme = 'system';
+            }
+          }
+
+          var resolvedTheme = theme;
+          if (theme === 'system') {
+            resolvedTheme = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+          }
+
+          if (resolvedTheme !== 'dark' && resolvedTheme !== 'light') {
+            resolvedTheme = 'light';
+          }
+
+          var docEl = document.documentElement;
+          docEl.classList.remove('dark', 'light');
+          docEl.classList.add(resolvedTheme);
+          docEl.setAttribute('data-theme', resolvedTheme);
+          docEl.style.colorScheme = resolvedTheme;
+        } catch (e) {}
+      })();
+    </script>
     </head>
 
     <body>
@@ -13,4 +82,5 @@
       <script type="module" src="/src/main.tsx"></script>
     </body>
   </html>
+
   

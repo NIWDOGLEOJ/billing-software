@@ -1,5 +1,5 @@
 import { ShieldAlert, RefreshCw, Coffee, LogOut, Lock } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
 interface KioskLockOverlayProps {
   onRestore: () => void;
@@ -10,14 +10,16 @@ interface KioskLockOverlayProps {
 
 export function KioskLockOverlay({ onRestore, onBreak, onLogout, darkMode }: KioskLockOverlayProps) {
   const [timeLeft, setTimeLeft] = useState(5);
+  const onRestoreRef = useRef(onRestore);
+  onRestoreRef.current = onRestore;
 
-  // Auto-restore fullscreen after 5 seconds
+  // Auto-restore fullscreen countdown: ticks once per second, invoking onRestore upon reaching 0
   useEffect(() => {
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          onRestore();
+          onRestoreRef.current();
           return 0;
         }
         return prev - 1;
@@ -25,7 +27,7 @@ export function KioskLockOverlay({ onRestore, onBreak, onLogout, darkMode }: Kio
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [onRestore]);
+  }, []);
 
   // Prevent any keydown event from bypassing the overlay while it is active
   useEffect(() => {
@@ -51,7 +53,7 @@ export function KioskLockOverlay({ onRestore, onBreak, onLogout, darkMode }: Kio
       title="Click anywhere on backdrop to restore fullscreen"
       className={`fixed inset-0 z-[9999] flex items-center justify-center p-4 backdrop-blur-2xl cursor-pointer ${
         darkMode 
-          ? 'bg-gray-955/95 text-white' 
+          ? 'bg-[var(--background)]/95 text-white' 
           : 'bg-gray-900/90 text-white'
       } transition-all duration-500 overflow-hidden`}
     >
@@ -91,7 +93,7 @@ export function KioskLockOverlay({ onRestore, onBreak, onLogout, darkMode }: Kio
             Terminal Locked
           </h2>
           <p className="text-gray-400 text-sm leading-relaxed max-w-sm">
-            NexusFlow Cashier Dashboard operates strictly inside an immersive containers state. Exit from fullscreen requires terminal authorization or break logs.
+            Cashier Register operates strictly inside an immersive terminal state. Exit from fullscreen requires terminal authorization or break logs.
           </p>
         </div>
 
@@ -140,7 +142,7 @@ export function KioskLockOverlay({ onRestore, onBreak, onLogout, darkMode }: Kio
 
         {/* Brand stamp footer */}
         <div className="mt-8 text-center text-[10px] text-gray-500 tracking-wider uppercase font-semibold select-none">
-          NexusFlow System • Immersive Container Auth 1.0.4
+          POS Terminal System • Immersive Container 1.0.4
         </div>
       </div>
     </div>

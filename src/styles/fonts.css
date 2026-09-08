@@ -1,0 +1,11 @@
+/*
+ * Public Sans  — UI and prose.
+ * IBM Plex Mono — every figure, code, timestamp and eyebrow label.
+ *
+ * Inter and Plus Jakarta Sans — legacy screens reference them through
+ * --font-sans / --font-display in globals.css.
+ *
+ * NOTE: Fonts are loaded via <link rel="stylesheet"> in index.html to comply
+ * with the CSS specification requiring @import rules to precede all other rules,
+ * and to prevent PostCSS build/dev warnings with Tailwind CSS v4.
+ */

@@ -164,10 +164,7 @@ router.get('/network-ip', authenticateToken, (req, res) => {
 
 // POST /api/settings/install - Dynamically initialize bespoke database and remove other databases from disk
 router.post('/install', authenticateToken, (req: AuthRequest, res: Response) => {
-  const { sector, multiEnabled } = req.body;
-  if (!sector) {
-    return res.status(400).json({ error: 'Sector profile type is required' });
-  }
+  const sector = 'retail';
 
   try {
     const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -261,40 +258,59 @@ router.post('/install', authenticateToken, (req: AuthRequest, res: Response) => 
     }
     
     // ── STEP 4: Clean up unwanted database files from disk ────────────────
-    const sectors = ['retail', 'pharmacy', 'wholesale', 'restaurant'];
-    for (const sec of sectors) {
-      if (sec !== sector) {
+    //
+    // DO NOT use getDbPath() here. It force-maps every sector name back to
+    // 'retail' (a leftover from disabling multi-sector), so asking it for the
+    // pharmacy/wholesale/restaurant paths returned retail.db three times and
+    // this loop deleted the LIVE database — main file, -wal and -shm — during
+    // first-run onboarding. The open file handle kept the app working until the
+    // next server restart, at which point every product, bill, customer and
+    // staff record was gone.
+    //
+    // Paths are built from the sector name directly, and anything resolving to
+    // the active database is skipped as a hard safety net.
+    const activeDbPath = path.resolve(getDbPath(sector));
+    const isActiveDb = (p: string) => path.resolve(p) === activeDbPath;
+
+    const removeDbFiles = (dbPath: string, label: string) => {
+      if (isActiveDb(dbPath)) {
+        console.warn(`[CLEANUP] Refusing to delete ${label}: it is the active database.`);
+        return;
+      }
+      for (const suffix of ['', '-wal', '-shm']) {
+        const filePath = dbPath + suffix;
         try {
-          const dbPath = getDbPath(sec);
-          // Delete main .db file and SQLite journal/WAL files
-          for (const suffix of ['', '-wal', '-shm']) {
-            const filePath = dbPath + suffix;
-            if (fs.existsSync(filePath)) {
-              fs.unlinkSync(filePath);
-              console.log(`[CLEANUP] Deleted: ${sec}.db${suffix}`);
-            }
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+            console.log(`[CLEANUP] Deleted: ${label}${suffix}`);
           }
         } catch (e) {
-          console.warn(`[CLEANUP] Failed to delete: ${sec}.db`, e);
+          console.warn(`[CLEANUP] Failed to delete: ${label}${suffix}`, e);
         }
       }
+    };
+
+    // Databases live next to the active one (project root). `__dirname` here is
+    // server/routes, so building paths from it pointed at server/*.db — files
+    // that never exist — which is why this cleanup silently did nothing while
+    // the getDbPath() call above was busy deleting the real database instead.
+    const dbDir = path.dirname(activeDbPath);
+
+    const sectors = ['retail', 'pharmacy', 'wholesale', 'restaurant'];
+    for (const sec of sectors) {
+      if (sec === sector) continue;
+      removeDbFiles(path.join(dbDir, `${sec}.db`), `${sec}.db`);
     }
-    
-    // Also delete any old legacy store.db and its journal files
-    try {
-      const storeDbPath = path.join(__dirname, '..', 'store.db');
-      for (const suffix of ['', '-wal', '-shm']) {
-        const filePath = storeDbPath + suffix;
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-          console.log(`[CLEANUP] Deleted legacy store.db${suffix}`);
-        }
-      }
-    } catch (e) {}
+
+    // NOTE: legacy store.db removal is deliberately NOT performed here.
+    // Because of the path bug above it has never actually run, so any existing
+    // store.db predates this code and may hold a shop's real history. Enabling
+    // the deletion now would destroy that data on a first-run button press.
+    // If you do want it cleaned up, do it explicitly and after taking a backup.
 
     res.json({ 
       success: true, 
-      message: `Bespoke sector database (${sector}.db) successfully prepared. Unwanted billing databases deleted.`
+      message: `Retail grocery database (${sector}.db) successfully prepared. Unwanted billing databases deleted.`
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });

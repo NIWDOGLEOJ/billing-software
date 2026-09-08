@@ -1,20 +1,36 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/auth-context';
-import { useTheme } from '../contexts/theme-context';
-import { Store, ArrowRight, DollarSign, Wallet, ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
+import { X } from 'lucide-react';
+import { MONO, NUM, EYEBROW, FIELD, inr } from '../lib/design-system';
 
-export function ShiftStartModal() {
+interface ShiftStartModalProps {
+  onClose?: () => void;
+  forceOpen?: boolean;
+}
+
+export function ShiftStartModal({ onClose, forceOpen = false }: ShiftStartModalProps = {}) {
   const { user, activeShift, startShift, logout } = useAuth();
-  const { darkMode } = useTheme();
   const [initialCash, setInitialCash] = useState('1000');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && onClose) {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   // Owners and co-owners do not need to open shifts to view dashboards
   // Only enforce shift starting on checkout cashiers
   const isCashier = user?.role === 'employee';
 
-  if (!user || activeShift || !isCashier) {
+  if (!forceOpen && (!user || activeShift || !isCashier)) {
     return null;
   }
 
@@ -23,14 +39,15 @@ export function ShiftStartModal() {
     const float = parseFloat(initialCash);
 
     if (isNaN(float) || float < 0) {
-      toast.error('❌ Please enter a valid positive cash float');
+      toast.error('Please enter a valid positive cash float');
       return;
     }
 
     setLoading(true);
     try {
       await startShift(float);
-      toast.success(`💼 Drawer opened with ₹${float.toFixed(2)} float cash`);
+      toast.success(`Drawer opened with ${inr(float)} float cash`);
+      onClose?.();
     } catch (err: any) {
       toast.error(err.message || 'Failed to start drawer shift');
     } finally {
@@ -39,73 +56,112 @@ export function ShiftStartModal() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
-      <div className={`w-full max-w-md rounded-2xl border ${
-        darkMode ? 'bg-gray-900/90 border-gray-800 text-white' : 'bg-white/95 border-gray-200 text-gray-800'
-      } shadow-2xl overflow-hidden transform scale-100 transition-all duration-300`}>
-        
-        {/* Banner header */}
-        <div className="bg-gradient-to-r from-emerald-600 to-teal-700 p-6 text-white text-center relative">
-          <div className="mx-auto w-14 h-14 bg-white/10 rounded-full flex items-center justify-center mb-3 backdrop-blur-sm border border-white/20">
-            <Wallet size={28} className="text-emerald-100 animate-pulse" />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 font-sans">
+      <div
+        className="w-full max-w-md rounded-xl overflow-hidden flex flex-col shadow-2xl"
+        style={{
+          background: 'var(--panel)',
+          border: '1px solid var(--border)',
+          color: 'var(--ink)',
+        }}
+      >
+        {/* Header */}
+        <div
+          className="flex items-center justify-between px-5 py-4"
+          style={{ borderBottom: '1px solid var(--rule2)' }}
+        >
+          <div>
+            <div style={EYEBROW}>Shift Start &middot; Till 2</div>
+            <h2 className="text-base font-bold text-[var(--ink)] mt-0.5">Open Cash Drawer</h2>
           </div>
-          <h2 className="text-2xl font-bold tracking-tight">Open Cash Drawer</h2>
-          <p className="text-emerald-100/80 text-sm mt-1">Initialize your cash till for today's shift</p>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-7 h-7 rounded-md flex items-center justify-center text-[var(--ink3)] hover:text-[var(--ink)] hover:bg-[var(--surface-hover)] cursor-pointer"
+            >
+              <X size={15} />
+            </button>
+          )}
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          <div className="flex items-start gap-3 p-3.5 rounded-xl border border-amber-500/20 bg-amber-500/10 text-amber-500 text-xs leading-relaxed">
-            <ShieldAlert size={20} className="shrink-0 mt-0.5" />
-            <p>
-              <strong>Security Policy:</strong> You must record the exact floating cash amount present in your physical drawer to unlock checkout features.
-            </p>
+        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          <div
+            className="p-3.5 rounded-lg text-xs leading-relaxed"
+            style={{
+              background: 'var(--sub)',
+              border: '1px solid var(--rule2)',
+              color: 'var(--ink2)',
+            }}
+          >
+            Count and verify the physical floating currency present in your cash drawer before starting customer transactions.
           </div>
 
-          <div className="space-y-2">
-            <label className="block text-sm font-medium tracking-wide uppercase text-xs opacity-85">
+          <div>
+            <label style={EYEBROW} className="block mb-1.5">
               Initial Floating Cash (₹)
             </label>
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-semibold text-lg">
-                ₹
-              </span>
-              <input
-                type="number"
-                value={initialCash}
-                onChange={(e) => setInitialCash(e.target.value)}
-                placeholder="1000"
-                className={`w-full pl-8 pr-4 py-3.5 text-xl font-bold rounded-xl border outline-none transition-all ${
-                  darkMode
-                    ? 'bg-gray-800/50 border-gray-700 focus:border-emerald-500 text-white focus:ring-2 focus:ring-emerald-500/20'
-                    : 'bg-gray-50 border-gray-200 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20'
-                }`}
-                disabled={loading}
-                required
-              />
-            </div>
+            <input
+              type="number"
+              value={initialCash}
+              onChange={(e) => setInitialCash(e.target.value)}
+              placeholder="1000"
+              disabled={loading}
+              required
+              min="0"
+              step="1"
+              style={{
+                ...FIELD,
+                ...NUM,
+                height: 48,
+                padding: '0 14px',
+                fontSize: 18,
+                fontWeight: 600,
+              }}
+            />
           </div>
 
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-2 pt-2">
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white font-bold py-3.5 px-6 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 hover:shadow-emerald-600/30 transition-all cursor-pointer"
+              className="h-11 rounded-md font-bold text-xs cursor-pointer transition-opacity flex items-center justify-center gap-2 hover:opacity-90 disabled:opacity-50"
+              style={{
+                background: 'var(--ink)',
+                color: 'var(--panel)',
+                border: 0,
+              }}
             >
-              {loading ? 'Initializing drawer...' : 'Open Till & Start Shift'}
-              <ArrowRight size={20} />
+              {loading ? 'Initializing drawer…' : 'Open Till & Start Shift'}
             </button>
 
-            <button
-              type="button"
-              onClick={() => logout()}
-              className={`w-full py-3 px-6 font-semibold rounded-xl text-center border transition-all cursor-pointer ${
-                darkMode
-                  ? 'border-gray-800 hover:bg-gray-800 text-gray-400 hover:text-white'
-                  : 'border-gray-200 hover:bg-gray-50 text-gray-500 hover:text-gray-800'
-              }`}
-            >
-              Cancel & Exit System
-            </button>
+            {onClose ? (
+              <button
+                type="button"
+                onClick={onClose}
+                className="h-10 rounded-md font-semibold text-xs cursor-pointer transition-colors"
+                style={{
+                  background: 'var(--sub)',
+                  border: '1px solid var(--border2)',
+                  color: 'var(--ink3)',
+                }}
+              >
+                Cancel
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => logout()}
+                className="h-10 rounded-md font-semibold text-xs cursor-pointer transition-colors"
+                style={{
+                  background: 'var(--sub)',
+                  border: '1px solid var(--border2)',
+                  color: 'var(--ink3)',
+                }}
+              >
+                Sign out &amp; Exit
+              </button>
+            )}
           </div>
         </form>
       </div>

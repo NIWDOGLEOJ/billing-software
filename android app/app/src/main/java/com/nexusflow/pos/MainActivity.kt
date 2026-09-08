@@ -3,8 +3,11 @@ package com.nexusflow.pos
 import android.Manifest
 import android.app.AlertDialog
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
+import android.provider.MediaStore
 import android.view.View
 import android.webkit.*
 import android.widget.EditText
@@ -18,7 +21,9 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
     private val CAMERA_PERMISSION_CODE = 1001
+    private val FILE_CHOOSER_REQUEST_CODE = 1002
     private var pendingPermissionRequest: PermissionRequest? = null
+    private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -108,6 +113,44 @@ class MainActivity : AppCompatActivity() {
                 }
                 super.onPermissionRequest(request)
             }
+
+            override fun onShowFileChooser(
+                webView: WebView?,
+                filePathCallback: ValueCallback<Array<Uri>>?,
+                fileChooserParams: FileChooserParams?
+            ): Boolean {
+                fileChooserCallback?.onReceiveValue(null)
+                fileChooserCallback = filePathCallback
+
+                val takePictureIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+                val contentSelectionIntent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "image/*"
+                }
+
+                val intentArray: Array<Intent> = if (takePictureIntent.resolveActivity(packageManager) != null) {
+                    arrayOf(takePictureIntent)
+                } else {
+                    emptyArray()
+                }
+
+                val chooserIntent = Intent(Intent.ACTION_CHOOSER).apply {
+                    putExtra(Intent.EXTRA_INTENT, contentSelectionIntent)
+                    putExtra(Intent.EXTRA_TITLE, "Select Product Photo")
+                    if (intentArray.isNotEmpty()) {
+                        putExtra(Intent.EXTRA_INITIAL_INTENTS, intentArray)
+                    }
+                }
+
+                return try {
+                    startActivityForResult(chooserIntent, FILE_CHOOSER_REQUEST_CODE)
+                    true
+                } catch (e: Exception) {
+                    fileChooserCallback?.onReceiveValue(null)
+                    fileChooserCallback = null
+                    false
+                }
+            }
         }
     }
 
@@ -162,6 +205,31 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, "Camera permission denied. Cannot scan barcodes.", Toast.LENGTH_LONG).show()
             }
             pendingPermissionRequest = null
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == FILE_CHOOSER_REQUEST_CODE) {
+            val results: Array<Uri>? = if (resultCode == RESULT_OK) {
+                if (data != null) {
+                    val dataString = data.dataString
+                    val clipData = data.clipData
+                    if (clipData != null) {
+                        Array(clipData.itemCount) { i -> clipData.getItemAt(i).uri }
+                    } else if (dataString != null) {
+                        arrayOf(Uri.parse(dataString))
+                    } else {
+                        null
+                    }
+                } else {
+                    null
+                }
+            } else {
+                null
+            }
+            fileChooserCallback?.onReceiveValue(results)
+            fileChooserCallback = null
         }
     }
 

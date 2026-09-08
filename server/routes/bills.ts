@@ -46,15 +46,66 @@ router.post('/', authenticateToken, (req: AuthRequest, res: Response) => {
     gst_enabled,
     gst_rate,
     customer_gstin,
-    pricing_tier
+    pricing_tier,
+    reservation_id,
+    coupon_code,
+    coupon_discount
   } = req.body;
 
   if (!id || !bill_number || !items || !Array.isArray(items)) {
     return res.status(400).json({ error: 'Missing required fields (id, bill_number, items)' });
   }
 
+  let redeemedCouponToBroadcast: string | null = null;
+
   // Database transaction for stock updates and bill generation
   const transaction = db.transaction(() => {
+    // If this bill is fulfilling an online reservation, mark reservation as 'completed'
+    // and track its items so we do not deduct stock twice!
+    const reservedItemMap: Record<string, number> = {};
+    let resCouponCode: string | null = null;
+    if (reservation_id) {
+      const resRow = db.prepare('SELECT id, items, status, coupon_code FROM reservations WHERE id = ?').get(reservation_id) as any;
+      if (resRow) {
+        resCouponCode = resRow.coupon_code || null;
+        db.prepare(`
+          UPDATE reservations 
+          SET status = 'completed', completed_at = ?, completed_by = ? 
+          WHERE id = ?
+        `).run(date || new Date().toISOString(), req.user?.name || 'Cashier', reservation_id);
+
+        if (resRow.items) {
+          try {
+            const rItems = JSON.parse(resRow.items);
+            for (const ri of rItems) {
+              const rId = String(ri.id || '');
+              const rSku = String(ri.sku || '');
+              const qty = Number(ri.quantity || 0);
+              if (rId) reservedItemMap[rId] = (reservedItemMap[rId] || 0) + qty;
+              if (rSku) reservedItemMap[rSku] = (reservedItemMap[rSku] || 0) + qty;
+            }
+          } catch {}
+        }
+      }
+    }
+
+    // Strictly check and redeem coupon if present on bill or reservation
+    const targetCouponCode = (coupon_code || resCouponCode || '').toString().trim().toUpperCase();
+    if (targetCouponCode) {
+      const couponRecord = db.prepare('SELECT * FROM coupons WHERE UPPER(code) = ?').get(targetCouponCode) as any;
+      if (couponRecord) {
+        if (couponRecord.is_redeemed) {
+          throw new Error(`Coupon "${targetCouponCode}" has already been redeemed and cannot be used again.`);
+        }
+        db.prepare(`
+          UPDATE coupons
+          SET is_redeemed = 1, redeemed_at = ?, redeemed_bill_id = ?
+          WHERE UPPER(code) = ? AND is_redeemed = 0
+        `).run(date || new Date().toISOString(), id, targetCouponCode);
+        redeemedCouponToBroadcast = targetCouponCode;
+      }
+    }
+
     // 1. Insert bill
     db.prepare(`
       INSERT INTO bills (
@@ -62,8 +113,8 @@ router.post('/', authenticateToken, (req: AuthRequest, res: Response) => {
         customer_phone, customer_name, subtotal, gst_amount, cgst, sgst, igst,
         total, payment_mode, amount_received, change_amount, rounding_adjustment,
         points_earned, points_redeemed, items, shop_details, gst_enabled, gst_rate,
-        customer_gstin, pricing_tier
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        customer_gstin, pricing_tier, coupon_code, coupon_discount
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       bill_number,
@@ -89,15 +140,22 @@ router.post('/', authenticateToken, (req: AuthRequest, res: Response) => {
       gst_enabled ? 1 : 0,
       Number(gst_rate || 0),
       customer_gstin || null,
-      pricing_tier || 'retail'
+      pricing_tier || 'retail',
+      targetCouponCode || null,
+      Number(coupon_discount || 0)
     );
 
     // 2. Deduct product stock & update inventory ledgers / batches
     for (const item of items) {
-      const prod = db.prepare('SELECT stock FROM products WHERE id = ?').get(item.id) as any;
-      if (prod) {
-        const newStock = Math.max(0, prod.stock - item.quantity);
-        db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(newStock, item.id);
+      const reservedQty = (item.id && reservedItemMap[item.id]) || (item.sku && reservedItemMap[item.sku]) || 0;
+      const qtyToDeduct = Math.max(0, item.quantity - reservedQty);
+
+      if (qtyToDeduct > 0) {
+        const prod = db.prepare('SELECT stock FROM products WHERE id = ?').get(item.id) as any;
+        if (prod) {
+          const newStock = Math.max(0, prod.stock - qtyToDeduct);
+          db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(newStock, item.id);
+        }
       }
 
       // Deduct from pharmacy batch if applicable
@@ -194,6 +252,12 @@ router.post('/', authenticateToken, (req: AuthRequest, res: Response) => {
       broadcast({ type: 'STOCK_UPDATED', data: allProducts });
       if (req.user && req.user.id !== 'dev_1') {
         broadcast({ type: 'BILL_CREATED', data: createdBill });
+      }
+      if (redeemedCouponToBroadcast) {
+        broadcast({
+          type: 'COUPON_REDEEMED',
+          data: { code: redeemedCouponToBroadcast, customerPhone: customer_phone || null }
+        });
       }
     }
 

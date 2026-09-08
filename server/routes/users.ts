@@ -100,7 +100,7 @@ router.put('/:id', authenticateToken, requireOwner, (req, res) => {
 // PUT /api/users/:id/password (User can update their own password, or owner can update any employee's password)
 router.put('/:id/password', authenticateToken, (req: AuthRequest, res: Response) => {
   const { id } = req.params;
-  const { password } = req.body;
+  const password = req.body.password || req.body.newPassword;
 
   if (!password) {
     return res.status(400).json({ error: 'Password is required' });

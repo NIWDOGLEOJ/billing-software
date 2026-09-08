@@ -1,6 +1,7 @@
+import { useEffect } from 'react';
 import { motion } from 'motion/react';
-import { CheckCircle, Receipt, X } from 'lucide-react';
-import { useTheme } from '../contexts/theme-context';
+import { X, Check } from 'lucide-react';
+import { MONO, NUM, EYEBROW, inr } from '../lib/design-system';
 
 interface CompletionModalProps {
   billNumber: string;
@@ -21,107 +22,197 @@ export function CompletionModal({
   onClose,
   onNewBill,
 }: CompletionModalProps) {
-  const { darkMode } = useTheme();
-
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      } else if (e.key === 'F5' || e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        onNewBill();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose, onNewBill]);
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[70] p-4 font-sans">
       <motion.div
-        initial={{ opacity: 0, scale: 0.9 }}
+        initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        className={`rounded-2xl max-w-md w-full shadow-2xl overflow-hidden border transition-all ${
-          darkMode 
-            ? 'bg-slate-900 border-slate-800 text-white shadow-indigo-950/20' 
-            : 'bg-white border-gray-100 text-gray-900'
-        }`}
+        exit={{ opacity: 0, scale: 0.95 }}
+        className="w-full max-w-md rounded-xl overflow-hidden flex flex-col shadow-2xl"
+        style={{
+          background: 'var(--panel)',
+          border: '1px solid var(--border)',
+          color: 'var(--ink)',
+        }}
       >
-        {/* Success Header */}
-        <div className="bg-gradient-to-r from-green-500 to-emerald-500 p-6 text-center">
-          <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ delay: 0.2, type: 'spring', stiffness: 200 }}
+        {/* Header */}
+        <div
+          className="flex items-center justify-between px-5 py-4"
+          style={{ borderBottom: '1px solid var(--rule2)' }}
+        >
+          <div className="flex items-center gap-3">
+            <div
+              className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
+              style={{ background: 'var(--ok-soft)', border: '1px solid var(--ok-line)', color: 'var(--ok)' }}
+            >
+              <Check size={16} strokeWidth={2.5} />
+            </div>
+            <div>
+              <div style={{ ...EYEBROW, color: 'var(--ok)' }}>Settled &middot; Sale Recorded</div>
+              <h2 className="text-lg font-bold tracking-tight text-[var(--ink)]">
+                Bill {billNumber}
+              </h2>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-md flex items-center justify-center cursor-pointer transition-colors"
+            style={{
+              background: 'var(--sub)',
+              border: '1px solid var(--border2)',
+              color: 'var(--ink3)',
+            }}
+            aria-label="Close"
           >
-            <CheckCircle size={64} className="mx-auto text-white mb-3" />
-          </motion.div>
-          <h2 className="text-2xl font-bold text-white mb-1">
-            Bill Generated Successfully!
-          </h2>
-          <p className="text-green-100 text-sm">
-            Transaction completed
-          </p>
+            <X size={16} />
+          </button>
         </div>
 
-        {/* Bill Summary */}
-        <div className="p-6 space-y-4">
-          <div className={`rounded-lg p-4 space-y-3 ${
-            darkMode ? 'bg-slate-950/40 border border-slate-800/60' : 'bg-gray-55 border border-gray-200/60'
-          }`}>
-            <div className="flex justify-between items-center">
-              <span className={`text-sm ${darkMode ? 'text-slate-400' : 'text-gray-600'}`}>Bill Number</span>
-              <span className={`font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>{billNumber}</span>
+        {/* Body */}
+        <div className="p-5 space-y-4">
+          <div
+            className="rounded-lg p-4 space-y-2.5"
+            style={{
+              background: 'var(--sub)',
+              border: '1px solid var(--rule2)',
+            }}
+          >
+            <div className="flex justify-between items-center text-xs">
+              <span style={{ color: 'var(--ink2)' }}>Items Count</span>
+              <span style={{ ...NUM, fontWeight: 600 }}>{itemCount} {itemCount === 1 ? 'item' : 'items'}</span>
             </div>
-            
-            <div className="flex justify-between items-center">
-              <span className={`text-sm ${darkMode ? 'text-slate-400' : 'text-gray-600'}`}>Total Items</span>
-              <span className={`font-semibold ${darkMode ? 'text-slate-200' : 'text-gray-900'}`}>{itemCount}</span>
+
+            <div className="flex justify-between items-center text-xs">
+              <span style={{ color: 'var(--ink2)' }}>Payment Mode</span>
+              <span
+                style={{
+                  fontFamily: MONO,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  padding: '2px 8px',
+                  borderRadius: 4,
+                  background: 'var(--rule)',
+                  color: 'var(--ink)',
+                }}
+              >
+                {paymentMode}
+              </span>
             </div>
-            
-            <div className={`flex justify-between items-center border-t pt-3 ${darkMode ? 'border-slate-800' : 'border-gray-200'}`}>
-              <span className={`text-sm ${darkMode ? 'text-slate-400' : 'text-gray-600'}`}>Payment Mode</span>
-              <span className={`font-semibold uppercase ${darkMode ? 'text-slate-200' : 'text-gray-900'}`}>{paymentMode}</span>
+
+            <div
+              className="flex justify-between items-baseline pt-2"
+              style={{ borderTop: '1px solid var(--rule)' }}
+            >
+              <span className="text-sm font-semibold" style={{ color: 'var(--ink)' }}>Amount Paid</span>
+              <span style={{ ...NUM, fontSize: 22, fontWeight: 700, color: 'var(--accent)' }}>
+                {inr(total)}
+              </span>
             </div>
-            
-            <div className="flex justify-between items-center">
-              <span className={`text-lg font-bold ${darkMode ? 'text-slate-300' : 'text-gray-900'}`}>Amount Paid</span>
-              <span className="text-2xl font-bold text-green-500">₹{total.toFixed(2)}</span>
-            </div>
-            
+
             {changeAmount > 0 && (
-              <div className={`flex justify-between items-center -mx-4 -mb-4 mt-3 p-4 rounded-b-lg ${
-                darkMode ? 'bg-amber-950/20 border-t border-amber-900/30' : 'bg-yellow-50'
-              }`}>
-                <span className={`text-sm font-medium ${darkMode ? 'text-amber-400' : 'text-yellow-800'}`}>Change Returned</span>
-                <span className={`text-xl font-bold ${darkMode ? 'text-amber-400' : 'text-yellow-800'}`}>₹{changeAmount.toFixed(2)}</span>
+              <div
+                className="flex justify-between items-center p-3 rounded-md mt-2"
+                style={{
+                  background: 'var(--ok-soft)',
+                  border: '1px solid var(--ok-line)',
+                }}
+              >
+                <span
+                  style={{
+                    fontFamily: MONO,
+                    fontSize: 11,
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.08em',
+                    color: 'var(--ok)',
+                  }}
+                >
+                  Change returned
+                </span>
+                <span style={{ ...NUM, fontSize: 18, fontWeight: 700, color: 'var(--ok)' }}>
+                  {inr(changeAmount)}
+                </span>
               </div>
             )}
           </div>
 
-          <div className={`rounded-lg p-4 border ${
-            darkMode 
-              ? 'bg-indigo-950/25 border-indigo-900/30 text-indigo-300' 
-              : 'bg-blue-50 border-blue-200 text-blue-800'
-          }`}>
-            <p className="text-sm text-center">
-              Receipt has been printed. Press <strong>ESC</strong> or click below to start a new bill.
-            </p>
+          <div
+            className="rounded-lg p-3 text-center text-xs leading-relaxed"
+            style={{
+              background: 'var(--panel)',
+              border: '1px dashed var(--border2)',
+              color: 'var(--ink3)',
+              fontFamily: MONO,
+            }}
+          >
+            Bill print output armed &middot; Press <strong className="text-[var(--ink)]">ESC</strong> or <strong className="text-[var(--ink)]">F5</strong> for next customer
           </div>
         </div>
 
-        {/* Actions */}
-        <div className={`p-4 flex gap-3 border-t ${darkMode ? 'border-slate-800/80 bg-slate-950/10' : 'border-gray-100 bg-white'}`}>
+        {/* Footer Actions */}
+        <div
+          className="px-5 py-3.5 flex items-center justify-end gap-2.5"
+          style={{
+            background: 'var(--sub)',
+            borderTop: '1px solid var(--rule2)',
+          }}
+        >
           <button
+            type="button"
             onClick={onClose}
-            className={`flex-1 px-4 py-3 rounded-lg transition-colors font-medium border cursor-pointer ${
-              darkMode 
-                ? 'bg-slate-850 hover:bg-slate-800 text-slate-300 border-slate-700/60' 
-                : 'bg-gray-150 hover:bg-gray-250 text-gray-700 border-transparent'
-            }`}
+            className="h-10 px-4 rounded-md text-xs font-semibold cursor-pointer transition-colors"
+            style={{
+              background: 'var(--panel)',
+              border: '1px solid var(--border2)',
+              color: 'var(--ink2)',
+            }}
           >
-            <span className="flex items-center justify-center gap-2">
-              <X size={18} />
-              Close
-            </span>
+            Close
           </button>
           <button
+            type="button"
             onClick={onNewBill}
-            className="flex-1 px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium flex items-center justify-center gap-2 cursor-pointer"
+            className="h-10 px-5 rounded-md text-xs font-bold cursor-pointer transition-opacity flex items-center gap-2 hover:opacity-90"
+            style={{
+              background: 'var(--ink)',
+              color: 'var(--panel)',
+              border: 0,
+            }}
           >
-            <Receipt size={18} />
-            New Bill
+            <span>New Bill</span>
+            <span
+              style={{
+                fontFamily: MONO,
+                fontSize: 10,
+                fontWeight: 700,
+                padding: '2px 5px',
+                borderRadius: 4,
+                background: 'var(--panel)',
+                color: 'var(--ink)',
+              }}
+            >
+              F5
+            </span>
           </button>
         </div>
       </motion.div>
     </div>
   );
 }
-

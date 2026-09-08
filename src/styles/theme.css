@@ -1,114 +1,241 @@
 @custom-variant dark (&:is(.dark *));
 
+/* ---------------------------------------------------------------------------
+   Redesign token set.
+
+   Every token name from the previous theme.css is kept, so no component needs
+   to change to pick the redesign up — `var(--surface)`, `var(--text-primary)`,
+   `var(--border)` and friends simply resolve to new values.
+
+   Two things changed underneath the names:
+
+   1. The neutral ramp is warm, not slate. The old palette was #0d1527/#f8fafc
+      cool blue-grey, which pushed the accent and every status colour toward the
+      same hue family and made the screens read as one blue slab. The warm ramp
+      (#101110 dark, #f2f0ea light) leaves the blue accent as the only cool
+      thing on screen, so it actually reads as the accent.
+
+   2. Radius dropped from 0.75rem to 0.5rem. A POS is a dense table-and-row
+      interface; 12px corners on a 32px-tall row eat the row.
+   --------------------------------------------------------------------------- */
+
 :root {
   --font-size: 16px;
-  --background: #ffffff;
-  --foreground: oklch(0.145 0 0);
-  --card: #ffffff;
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: #030213;
-  --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.95 0.0058 264.53);
-  --secondary-foreground: #030213;
-  --muted: #ececf0;
-  --muted-foreground: #717182;
-  --accent: #e9ebef;
-  --accent-foreground: #030213;
-  --destructive: #d4183d;
+
+  /* Surfaces — bg is the page, surface the panel, surface-elevated sits above
+     it (modals, drawers), surface-hover is the row hover. */
+  --background: #f2f0ea;
+  --surface: #fffdf8;
+  --surface-rgb: 255, 253, 248;
+  --surface-elevated: #fffdf8;
+  --surface-hover: #f8f6f1;
+  --sub: #f8f6f1;
+
+  --foreground: #1a1917;
+  --text-primary: #1a1917;
+  --text-secondary: #4a463e;
+  --text-muted: #6f6b62;
+  --text-faint: #8d8779;
+
+  --card: #fffdf8;
+  --card-foreground: #1a1917;
+  --popover: #fffdf8;
+  --popover-foreground: #1a1917;
+
+  /* Accent. Stated in oklch so the light and dark accents are the same hue at
+     different lightness, rather than two hand-picked hexes that drift apart. */
+  --primary: oklch(0.55 0.14 250);
+  --primary-foreground: #ffffff;
+  --primary-accent: oklch(0.55 0.14 250);
+  --accent-hi: oklch(0.42 0.14 250);
+  --accent-soft: oklch(0.965 0.018 250);
+  --accent-line: oklch(0.86 0.06 250);
+
+  --secondary: oklch(0.965 0.018 250);
+  --secondary-foreground: oklch(0.42 0.14 250);
+  --muted: #f0eee7;
+  --muted-foreground: #6f6b62;
+  --accent: oklch(0.965 0.018 250);
+  --accent-foreground: oklch(0.42 0.14 250);
+
+  /* Status. Held at similar chroma so no one state shouts over the others —
+     an expired batch and an overdue khata should carry the same weight. */
+  --success: oklch(0.55 0.13 155);
+  --success-soft: oklch(0.96 0.03 155);
+  --warning: oklch(0.62 0.14 75);
+  --warning-soft: oklch(0.96 0.04 75);
+  --danger: oklch(0.55 0.19 20);
+  --danger-soft: oklch(0.96 0.03 20);
+  --destructive: oklch(0.55 0.19 20);
   --destructive-foreground: #ffffff;
-  --border: rgba(0, 0, 0, 0.1);
-  --input: transparent;
-  --input-background: #f3f3f5;
-  --switch-background: #cbced4;
-  --font-weight-medium: 500;
+
+  --border: #e3dfd4;
+  --border2: #ded9cd;
+  --border-glass: #e3dfd4;
+  --rule: #f0eee7;
+  --rule2: #ece8de;
+  --divider: #ece8de;
+
+  --input: #f8f6f1;
+  --input-background: #f8f6f1;
+  --switch-background: #ded9cd;
+
+  --liquid-glass-bg: rgba(255, 253, 248, 0.72);
+  --liquid-glass-border: rgba(26, 25, 23, 0.08);
+
   --font-weight-normal: 400;
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: #030213;
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --font-weight-medium: 500;
+  --ring: oklch(0.55 0.14 250);
+
+  /* Charts: one hue rotation, even chroma, so a five-series chart doesn't have
+     one series visually dominating on colour alone. */
+  --chart-1: oklch(0.55 0.14 250);
+  --chart-2: oklch(0.58 0.13 190);
+  --chart-3: oklch(0.55 0.13 155);
+  --chart-4: oklch(0.62 0.14 75);
+  --chart-5: oklch(0.55 0.16 15);
+
+  --radius: 0.5rem;
+
+  --sidebar: #fffdf8;
+  --sidebar-foreground: #1a1917;
+  --sidebar-primary: oklch(0.55 0.14 250);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: oklch(0.965 0.018 250);
+  --sidebar-accent-foreground: oklch(0.42 0.14 250);
+  --sidebar-border: #e3dfd4;
+  --sidebar-ring: oklch(0.55 0.14 250);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.145 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.145 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.985 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.396 0.141 25.723);
-  --destructive-foreground: oklch(0.637 0.237 25.331);
-  --border: oklch(0.269 0 0);
-  --input: oklch(0.269 0 0);
-  --ring: oklch(0.439 0 0);
-  --font-weight-medium: 500;
-  --font-weight-normal: 400;
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.269 0 0);
-  --sidebar-ring: oklch(0.439 0 0);
+  --background: #101110;
+  --surface: #1b1d1a;
+  --surface-rgb: 27, 29, 26;
+  --surface-elevated: #24261f;
+  --surface-hover: #24261f;
+  --sub: #24261f;
+
+  --foreground: #f0eee6;
+  --text-primary: #f0eee6;
+  --text-secondary: #c6c2b4;
+  --text-muted: #969287;
+  --text-faint: #7c7870;
+
+  --card: #1b1d1a;
+  --card-foreground: #f0eee6;
+  --popover: #24261f;
+  --popover-foreground: #f0eee6;
+
+  --primary: oklch(0.74 0.13 250);
+  --primary-foreground: #101110;
+  --primary-accent: oklch(0.74 0.13 250);
+  --accent-hi: oklch(0.86 0.09 250);
+  --accent-soft: oklch(0.29 0.055 250);
+  --accent-line: oklch(0.45 0.1 250);
+
+  --secondary: oklch(0.29 0.055 250);
+  --secondary-foreground: oklch(0.86 0.09 250);
+  --muted: #24261f;
+  --muted-foreground: #c6c2b4;
+  --accent: oklch(0.29 0.055 250);
+  --accent-foreground: oklch(0.86 0.09 250);
+
+  --success: oklch(0.75 0.14 155);
+  --success-soft: oklch(0.29 0.05 155);
+  --warning: oklch(0.79 0.14 80);
+  --warning-soft: oklch(0.3 0.055 80);
+  --danger: oklch(0.68 0.18 22);
+  --danger-soft: oklch(0.3 0.07 22);
+  --destructive: oklch(0.68 0.18 22);
+  --destructive-foreground: #ffffff;
+
+  --border: #33362e;
+  --border2: #3c3f36;
+  --border-glass: #33362e;
+  --rule: #282a24;
+  --rule2: #2c2f28;
+  --divider: #282a24;
+
+  --input: #24261f;
+  --input-background: #24261f;
+  --switch-background: #3c3f36;
+
+  --liquid-glass-bg: rgba(27, 29, 26, 0.72);
+  --liquid-glass-border: rgba(240, 238, 230, 0.08);
+
+  --ring: oklch(0.74 0.13 250);
+
+  --chart-1: oklch(0.74 0.13 250);
+  --chart-2: oklch(0.76 0.12 190);
+  --chart-3: oklch(0.75 0.14 155);
+  --chart-4: oklch(0.79 0.14 80);
+  --chart-5: oklch(0.7 0.16 15);
+
+  --sidebar: #161814;
+  --sidebar-foreground: #f0eee6;
+  --sidebar-primary: oklch(0.74 0.13 250);
+  --sidebar-primary-foreground: #101110;
+  --sidebar-accent: oklch(0.29 0.055 250);
+  --sidebar-accent-foreground: oklch(0.86 0.09 250);
+  --sidebar-border: #33362e;
+  --sidebar-ring: oklch(0.74 0.13 250);
 }
 
 @theme inline {
+  --font-sans: 'Public Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
   --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-surface-hover: var(--surface-hover);
   --color-foreground: var(--foreground);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-text-faint: var(--text-faint);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-accent: var(--primary-accent);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-line: var(--accent-line);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
+  --color-border-glass: var(--border-glass);
+  --color-divider: var(--divider);
+  --color-rule: var(--rule);
   --color-input: var(--input);
   --color-input-background: var(--input-background);
   --color-switch-background: var(--switch-background);
   --color-ring: var(--ring);
+  --color-liquid-glass-bg: var(--liquid-glass-bg);
+  --color-liquid-glass-border: var(--liquid-glass-border);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 3px);
+  --radius-md: calc(var(--radius) - 1px);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-xl: calc(var(--radius) + 3px);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -117,79 +244,4 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
-}
-
-@layer base {
-  * {
-    @apply border-border outline-ring/50;
-  }
-
-  body {
-    @apply bg-background text-foreground;
-  }
-
-  /**
-  * Default typography styles for HTML elements (h1-h4, p, label, button, input).
-  * These are in @layer base, so Tailwind utility classes (like text-sm, text-lg) automatically override them.
-  */
-
-  html {
-    font-size: var(--font-size);
-  }
-
-  h1 {
-    font-size: var(--text-2xl);
-    font-weight: var(--font-weight-medium);
-    line-height: 1.5;
-  }
-
-  h2 {
-    font-size: var(--text-xl);
-    font-weight: var(--font-weight-medium);
-    line-height: 1.5;
-  }
-
-  h3 {
-    font-size: var(--text-lg);
-    font-weight: var(--font-weight-medium);
-    line-height: 1.5;
-  }
-
-  h4 {
-    font-size: var(--text-base);
-    font-weight: var(--font-weight-medium);
-    line-height: 1.5;
-  }
-
-  label {
-    font-size: var(--text-base);
-    font-weight: var(--font-weight-medium);
-    line-height: 1.5;
-  }
-
-  button {
-    font-size: var(--text-base);
-    font-weight: var(--font-weight-medium);
-    line-height: 1.5;
-  }
-
-  input {
-    font-size: var(--text-base);
-    font-weight: var(--font-weight-normal);
-    line-height: 1.5;
-  }
-}
-
-.blurred-screen {
-  filter: brightness(0) !important; /* Instantly turns the entire DOM solid black, simulating hardware DRM! */
-  background-color: #000000 !important;
-  transition: filter 0.05s ease-in-out;
-  pointer-events: none;
-  user-select: none;
-}
-
-@media print {
-  body {
-    display: none !important;
-  }
 }

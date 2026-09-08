@@ -1,0 +1,81 @@
+# ============================================================
+# NexusFlow — .gitignore
+# ============================================================
+
+# --- Dependencies ---
+node_modules/
+.pnpm-store/
+
+# --- Build outputs ---
+dist/
+dist-server/
+website/dist/
+website/output/
+
+# --- SQLite databases ---
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# --- Environment / secrets ---
+.env
+.env.*
+!.env.example
+website/.env
+website/.env.*
+!website/.env.example
+
+# --- Uploaded product images ---
+uploads/
+server/receipts/
+
+# --- macOS junk ---
+.DS_Store
+**/.DS_Store
+Thumbs.db
+
+# --- Editor / IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Logs ---
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# --- Runtime state ---
+server/active_sector.txt
+
+# --- Agent/AI work dirs ---
+.agents/
+.claude/
+.antigravitycli/
+
+# --- Design / scratch dirs (not source code) ---
+.redesign-backup-*/
+chats/
+design-handoff/
+design_handoff_pos_redesign/
+scratch/
+memory.md
+log.md
+guidelines/
+
+# --- Vitest cache ---
+node_modules/.vite/
+
+# --- Logo images (large binary assets; keep locally) ---
+jmart_logo.png
+jmart_logo_transparent.png
+
+# --- Website playwright cache ---
+website/.playwright-cli/
+website/sync/
+
+# --- Test coverage ---
+coverage/

@@ -1,0 +1,355 @@
+/*
+ * NexusFlow redesign — token source of truth.
+ * Mirrors design-handoff/README.md ("Design tokens"). Values are copied
+ * verbatim from that table; change them there and here together.
+ *
+ * WHY THIS FILE AND NOT THE PATCH'S theme.css
+ * -------------------------------------------
+ * The redesign patch shipped src/styles/theme.css, but nothing in this repo has
+ * ever imported theme.css — not before the patch and not in the patch's own
+ * index.css. It also carries 21 of the spec's 34 tokens and disagrees with the
+ * spec on 11 values. This file is in the import graph (index.css), is imported
+ * AFTER globals.css so it wins on source order, and is spec-complete.
+ *
+ * ORDERING IS LOad-BEARING: globals.css opens its own unlayered :root (line 2)
+ * and .dark (line 90) defining --background, --surface, --text-primary,
+ * --primary-accent and --border. Both are unlayered, so source order alone
+ * decides. Keep this file last in index.css.
+ *
+ * Dark is the default theme, per the design. theme-context.tsx sets both the
+ * .dark class and data-theme on <html>, so the light override needs no wiring.
+ */
+
+:root {
+  --bg: #101110;
+  --panel: #1b1d1a;
+  --sub: #24261f;
+  --rule: #282a24;
+  --rule2: #2c2f28;
+  --border: #33362e;
+  --border2: #3c3f36;
+
+  --ink: #f0eee6;
+  --ink2: #c6c2b4;
+  --ink3: #969287;
+  --ink4: #7c7870;
+
+  --accent: oklch(0.74 0.13 250);
+  --accent-hi: oklch(0.86 0.09 250);
+  --accent-soft: oklch(0.29 0.055 250);
+  --accent-soft2: oklch(0.31 0.07 250);
+  --accent-line: oklch(0.45 0.10 250);
+
+  --danger: oklch(0.76 0.15 25);
+  --danger-strong: oklch(0.58 0.15 25);
+  --danger-soft: oklch(0.26 0.05 25);
+  --danger-soft2: oklch(0.235 0.035 25);
+  --danger-line: oklch(0.45 0.12 25);
+  --danger-line2: oklch(0.42 0.10 25);
+
+  --warn: oklch(0.80 0.12 80);
+  --warn-hi: oklch(0.84 0.11 75);
+  --warn-soft: oklch(0.26 0.05 75);
+  --warn-line: oklch(0.45 0.09 75);
+
+  --ok: oklch(0.76 0.13 155);
+  --ok-soft: oklch(0.245 0.045 155);
+  --ok-soft2: oklch(0.27 0.055 155);
+  --ok-line: oklch(0.42 0.09 155);
+
+  --grid1: rgba(255, 255, 255, 0.028);
+  --grid2: rgba(255, 255, 255, 0.055);
+  --glow-a: rgba(126, 158, 224, 0.11);
+  --glow-b: rgba(226, 182, 120, 0.06);
+  --paper-shadow: rgba(0, 0, 0, 0.55);
+
+  --dc-sans: 'Public Sans', system-ui, -apple-system, sans-serif;
+  --dc-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/*
+ * The light theme is not an inversion. --danger and --danger-strong swap roles
+ * (dark needs light error text over a darker border; light needs the reverse),
+ * and warn/ok chroma rises while lightness drops so chips stay legible on cream.
+ */
+:root[data-theme='light'] {
+  --bg: #f2f0ea;
+  --panel: #fffdf8;
+  --sub: #f8f6f1;
+  --rule: #f0eee7;
+  --rule2: #ece8de;
+  --border: #e3dfd4;
+  --border2: #ded9cd;
+
+  --ink: #1a1917;
+  --ink2: #4a463e;
+  --ink3: #6f6b62;
+  --ink4: #8d8779;
+
+  --accent: oklch(0.55 0.14 250);
+  --accent-hi: oklch(0.42 0.14 250);
+  --accent-soft: oklch(0.965 0.018 250);
+  --accent-soft2: oklch(0.94 0.04 250);
+  --accent-line: oklch(0.86 0.06 250);
+
+  --danger: oklch(0.5 0.16 25);
+  --danger-strong: oklch(0.7 0.14 25);
+  --danger-soft: oklch(0.97 0.02 25);
+  --danger-soft2: oklch(0.98 0.012 25);
+  --danger-line: oklch(0.85 0.07 25);
+  --danger-line2: oklch(0.88 0.05 25);
+
+  --warn: oklch(0.46 0.12 70);
+  --warn-hi: oklch(0.44 0.11 60);
+  --warn-soft: oklch(0.96 0.03 70);
+  --warn-line: oklch(0.86 0.07 75);
+
+  --ok: oklch(0.46 0.11 150);
+  --ok-soft: oklch(0.96 0.03 155);
+  --ok-soft2: oklch(0.94 0.04 155);
+  --ok-line: oklch(0.86 0.06 155);
+
+  --grid1: rgba(26, 25, 23, 0.032);
+  --grid2: rgba(26, 25, 23, 0.055);
+  --glow-a: rgba(96, 130, 206, 0.10);
+  --glow-b: rgba(196, 148, 74, 0.07);
+  --paper-shadow: rgba(26, 25, 23, 0.16);
+}
+
+/* ---------------------------------------------------------------------------
+   Legacy name bridge.
+
+   The five screens that have not been rebuilt read the shadcn/app token names
+   (--background, --surface, --text-primary, --primary…), not the design's
+   (--bg, --panel, --ink, --accent). Pointing the old names at the new values is
+   what re-skins those screens without editing 580 KB of TSX.
+
+   --border needs no alias: the design already owns that name.
+   --------------------------------------------------------------------------- */
+:root {
+  --background: var(--bg);
+  --foreground: var(--ink);
+  --surface: var(--panel);
+  --surface-elevated: var(--sub);
+  --surface-hover: var(--sub);
+  --card: var(--panel);
+  --card-bg: var(--panel);
+  --card-foreground: var(--ink);
+  --card-border: var(--border);
+  --popover: var(--panel);
+  --popover-foreground: var(--ink);
+
+  --text-primary: var(--ink);
+  --text-secondary: var(--ink2);
+  --text-muted: var(--ink3);
+  --text-faint: var(--ink4);
+  --muted: var(--sub);
+  --muted-foreground: var(--ink3);
+  --secondary: var(--sub);
+  --secondary-foreground: var(--ink2);
+
+  --divider: var(--rule);
+  --input: var(--border);
+  --input-bg: var(--sub);
+  --input-background: var(--sub);
+  --input-border: var(--border);
+  --switch-background: var(--border2);
+
+  --sidebar: var(--panel);
+  --sidebar-foreground: var(--ink2);
+  --sidebar-border: var(--border);
+  --sidebar-accent: var(--sub);
+  --sidebar-accent-foreground: var(--ink);
+
+  --primary: var(--accent);
+  --primary-accent: var(--accent);
+  --ring: var(--accent);
+  --sidebar-primary: var(--accent);
+  --sidebar-ring: var(--accent);
+  --chart-1: var(--accent);
+  --success: var(--ok);
+  --warning: var(--warn);
+  /* Status-pill fills. Both sides resolve per theme via --ok-soft/--warn-soft,
+     so one alias covers dark and light. */
+  --success-soft: var(--ok-soft);
+  --warning-soft: var(--warn-soft);
+
+  /* Dark accent is light, so ink on top of it must be dark. */
+  --primary-foreground: #101110;
+  --primary-accent-rgb: 103, 176, 249;
+  --destructive: var(--danger-strong);
+  --destructive-foreground: #f0eee6;
+
+  --font-sans: var(--dc-sans);
+  --font-display: var(--dc-sans);
+  --font-mono: var(--dc-mono);
+}
+
+:root[data-theme='light'] {
+  --primary-foreground: #ffffff;
+  --primary-accent-rgb: 31, 116, 191;
+  --destructive: var(--danger);
+  --destructive-foreground: #ffffff;
+}
+
+/*
+ * shadcn's --accent means "subtle hover fill", but the design's --accent is the
+ * blue itself. Without this, every `bg-accent` dropdown row and hover state goes
+ * solid blue. Repoint the Tailwind utility at the soft tint instead.
+ */
+@theme inline {
+  --color-accent: var(--accent-soft);
+  --color-accent-foreground: var(--ink);
+  --color-border2: var(--border2);
+  --color-rule: var(--rule);
+  --color-rule2: var(--rule2);
+  --color-sub: var(--sub);
+  --color-ink: var(--ink);
+  --color-ink2: var(--ink2);
+  --color-ink3: var(--ink3);
+  --color-ink4: var(--ink4);
+}
+
+/* ---------------------------------------------------------------------------
+   Panels on a ruled ground: a fixed two-layer grid (40px major, 5px minor) plus
+   two soft radial glows. The grid never appears inside a panel.
+
+   Unlayered, so it beats the `@apply bg-background` on body in globals.css's
+   @layer base. The decorative overlays that used to paint here — the emerald
+   texture wash, the fractal-noise body::before and the indigo/sky .app-backdrop
+   field — were removed from globals.css in the same change.
+   --------------------------------------------------------------------------- */
+html,
+body,
+.dc-ground {
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(1100px 640px at 80% -12%, var(--glow-a), transparent 62%),
+    radial-gradient(880px 560px at 4% 108%, var(--glow-b), transparent 62%),
+    repeating-linear-gradient(0deg, var(--grid2) 0 1px, transparent 1px 40px),
+    repeating-linear-gradient(90deg, var(--grid2) 0 1px, transparent 1px 40px),
+    repeating-linear-gradient(0deg, var(--grid1) 0 1px, transparent 1px 5px),
+    repeating-linear-gradient(90deg, var(--grid1) 0 1px, transparent 1px 5px);
+  background-attachment: fixed;
+}
+
+body {
+  font-family: var(--dc-sans);
+  color: var(--ink);
+}
+
+/* 10px mono, 700, uppercase, wide tracking — the one device that structures
+ * every panel. Sits above a 1px --rule divider. */
+.dc-eyebrow {
+  font-family: var(--dc-mono);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--ink3);
+}
+
+/* Every figure in the product: tabular so columns align without width fiddling. */
+.dc-mono {
+  font-family: var(--dc-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Numbers stacked in a column must not wander. */
+table,
+th,
+td,
+input[type='number'],
+.font-mono,
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.font-mono,
+code,
+kbd,
+pre {
+  font-family: var(--dc-mono);
+}
+
+/* Cashiers type into these; globals.css disables selection app-wide. */
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* ---------------------------------------------------------------------------
+   Flatten the glass system.
+
+   The design is explicit: "No shadows anywhere in the UI", panels are flat
+   surfaces with a 1px border, and no gradient fills on surfaces or buttons.
+   The inherited look is glassmorphic — .glass-panel and friends stack
+   backdrop-blur with `backdrop-saturate-200`, which does not just look wrong
+   here, it actively breaks the palette: saturating 200% of the ruled ground
+   turns the design's own faint blue and amber page glows into a pink-lavender
+   wash across every panel in light mode.
+
+   These rules are unlayered, so they beat the Tailwind utility layer that sets
+   the backdrop-filter (backdrop-blur-xl / backdrop-saturate-200) inline on the
+   same elements. This is the interim flattening: it keeps all 200-odd existing
+   .glass-* call sites working while the screens are rebuilt one at a time.
+   --------------------------------------------------------------------------- */
+.liquid-glass,
+.liquid-glass-card,
+.glass-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.glass-btn,
+.liquid-glass-button {
+  background: var(--sub);
+  border: 1px solid var(--border2);
+  color: var(--ink);
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* The prism fringes and bevels are drawn in pseudo-elements with hardcoded
+   slate/white values that no token reaches. */
+.glass-btn::before,
+.glass-btn::after {
+  display: none;
+}
+
+.glass-btn:hover:not(:disabled),
+.liquid-glass-button:hover:not(:disabled) {
+  background: var(--rule2);
+  border-color: var(--border2);
+}
+
+/* One accent, reserved for the primary action. */
+.glass-btn-accent {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--primary-foreground);
+}
+.glass-btn-accent:hover:not(:disabled) {
+  background: var(--accent-hi);
+  border-color: var(--accent-hi);
+}
+.glass-btn-selected {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--ink);
+}
+.glass-btn-danger {
+  background: var(--danger-soft);
+  border-color: var(--danger-line);
+  color: var(--danger);
+}
+.glass-btn-warning {
+  background: var(--warn-soft);
+  border-color: var(--warn-line);
+  color: var(--warn);
+}

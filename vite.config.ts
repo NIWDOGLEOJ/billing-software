@@ -30,7 +30,11 @@ export default defineConfig({
     },
   },
   server: {
-    allowedHosts: true,
+    host: true,
+    allowedHosts: [
+      'civilian-wallet-flying-poster.trycloudflare.com',
+      '.trycloudflare.com',
+    ],
     proxy: {
       '/api': {
         target: 'http://localhost:3000',
@@ -41,5 +45,12 @@ export default defineConfig({
         ws: true,
       },
     },
+  },
+  preview: {
+    host: true,
+    allowedHosts: [
+      'civilian-wallet-flying-poster.trycloudflare.com',
+      '.trycloudflare.com',
+    ],
   },
 })

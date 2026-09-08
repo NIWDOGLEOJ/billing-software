@@ -1,10 +1,34 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { MessageSquare, Send, ShieldCheck, ShieldAlert, Key, X, Lock, Users, Sparkles, Receipt } from 'lucide-react';
+import {
+  MessageSquare,
+  Send,
+  ShieldCheck,
+  ShieldAlert,
+  Key,
+  X,
+  Lock,
+  Users,
+  Receipt,
+  CheckCircle2,
+  Clock,
+  EyeOff
+} from 'lucide-react';
 import { useAuth } from '../../contexts/auth-context';
 import { useTheme } from '../../contexts/theme-context';
 import { useWebSocket } from '../../hooks/useWebSocket';
 import { api } from '../../utils/api';
 import { toast } from 'sonner';
+import {
+  MONO,
+  NUM,
+  EYEBROW,
+  PANEL,
+  PANEL_HEAD,
+  FIELD,
+  KBD,
+  KBD_ON_FILL,
+  inr,
+} from '../../lib/design-system';
 
 interface ChatMessage {
   id: string;
@@ -22,8 +46,16 @@ export function E2EEChatbox() {
   const { user } = useAuth();
   const { darkMode } = useTheme();
   const [isOpen, setIsOpen] = useState(false);
-  const [passphrase, setPassphrase] = useState('nexusflow-secure-outlet');
+  const [passphrase, setPassphrase] = useState('store-secure-terminal');
   const [showSettings, setShowSettings] = useState(false);
+  const [hideClaimedBills, setHideClaimedBills] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('hideClaimedBills') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [claimedOrders, setClaimedOrders] = useState<Record<string, { claimedBy: string; claimedAt: string }>>({});
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [unreadCount, setUnreadCount] = useState(0);
@@ -44,7 +76,7 @@ export function E2EEChatbox() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const derivedKeysCache = useRef<Record<string, { key: CryptoKey; fp: string }>>({});
 
-  // 🔒 Derives a 256-bit AES-GCM key and finger-print from a passphrase using Web Crypto SubtleCrypto
+  // 🔒 Derives a 256-bit AES-GCM key and fingerprint from a passphrase using Web Crypto SubtleCrypto
   const deriveKeyAndFingerprint = useCallback(async (phrase: string) => {
     if (derivedKeysCache.current[phrase]) {
       const cached = derivedKeysCache.current[phrase];
@@ -56,11 +88,7 @@ export function E2EEChatbox() {
     try {
       const encoder = new TextEncoder();
       const phraseBytes = encoder.encode(phrase);
-      
-      // Hash passphrase to SHA-256 to get a solid 256-bit raw key buffer
       const hashBuffer = await window.crypto.subtle.digest('SHA-256', phraseBytes);
-      
-      // Import as AES-GCM key
       const key = await window.crypto.subtle.importKey(
         'raw',
         hashBuffer,
@@ -69,7 +97,6 @@ export function E2EEChatbox() {
         ['encrypt', 'decrypt']
       );
 
-      // Generate a nice visual hex fingerprint of the key (first 4 bytes)
       const hashArray = Array.from(new Uint8Array(hashBuffer));
       const fp = hashArray
         .slice(0, 4)
@@ -84,12 +111,10 @@ export function E2EEChatbox() {
     }
   }, []);
 
-  // Update key whenever the passphrase changes
   useEffect(() => {
     deriveKeyAndFingerprint(passphrase);
   }, [passphrase, deriveKeyAndFingerprint]);
 
-  // Sync scrollbar to bottom
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -101,46 +126,51 @@ export function E2EEChatbox() {
     }
   }, [messages, isOpen]);
 
-  // Listen for custom toggle event and dispatch unread count updates
   useEffect(() => {
-    const handleToggle = () => {
-      setIsOpen(prev => !prev);
-    };
+    const handleToggle = () => setIsOpen((prev) => !prev);
     window.addEventListener('toggle-e2ee-chat', handleToggle);
     return () => window.removeEventListener('toggle-e2ee-chat', handleToggle);
   }, []);
 
   useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen]);
+
+  useEffect(() => {
     window.dispatchEvent(new CustomEvent('chat-unread-updated', { detail: { count: unreadCount } }));
   }, [unreadCount]);
 
-  // Load 24-hour E2EE history from server database upon chat drawer open
   useEffect(() => {
     if (isOpen) {
       const loadChatHistory = async () => {
         try {
           const history = await api.get<ChatMessage[]>('/chats');
           setMessages((prev) => {
-            // Merge loaded history with any current live-session messages, avoiding duplicates
             const merged = [...prev];
             for (const h of history) {
               if (!merged.some((m) => m.id === h.id)) {
                 merged.push(h);
               }
             }
-            // Sort chronologically by timestamp
             return merged.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
           });
         } catch (e) {
           console.error('[E2EE] Failed to load chat history:', e);
         }
       };
-      
       loadChatHistory();
     }
   }, [isOpen]);
 
-  // Load distinct senders for Developer Archive Explorer dropdown
   useEffect(() => {
     if (isOpen && user?.username === 'developer' && devViewMode === 'explorer') {
       const fetchSenders = async () => {
@@ -161,37 +191,32 @@ export function E2EEChatbox() {
       const params: Record<string, string> = {};
       if (archiveDate) params.date = archiveDate;
       if (archiveSender && archiveSender !== 'All') params.sender = archiveSender;
-      
+
       const queryStr = new URLSearchParams(params).toString();
       const results = await api.get<ChatMessage[]>(`/chats/developer?${queryStr}`);
       setArchiveMessages(results.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()));
     } catch (e) {
       console.error('[E2EE] Failed to query archive:', e);
-      toast.error('❌ Failed to fetch developer archives');
+      toast.error('Failed to fetch developer archives');
     } finally {
       setIsLoadingArchive(false);
     }
   };
 
-  // 🔌 WebSocket Event Registration for Real-Time LAN Chat
   const { send } = useWebSocket({
     CHAT_MESSAGE: (data: any) => {
       if (data && typeof data === 'object') {
         const msg = data as ChatMessage;
+        const isForMe =
+          !msg.recipientName ||
+          msg.recipientName === 'All' ||
+          msg.recipientName === user?.name ||
+          msg.senderName === user?.name ||
+          user?.username === 'developer';
 
-        // Client-side Privacy & Developer Intercept:
-        // Only display if the message is a broadcast, OR sent by me, OR addressed to me,
-        // OR if I am the logged-in developer (allowing silent intercept).
-        const isForMe = !msg.recipientName || 
-                        msg.recipientName === 'All' || 
-                        msg.recipientName === user?.name || 
-                        msg.senderName === user?.name || 
-                        user?.username === 'developer';
-                        
         if (!isForMe) return;
 
         setMessages((prev) => {
-          // Avoid duplicate messages
           if (prev.some((m) => m.id === msg.id)) return prev;
           return [...prev, msg];
         });
@@ -203,8 +228,8 @@ export function E2EEChatbox() {
     },
     EDIT_CHAT_MESSAGE: (data: any) => {
       if (data && typeof data === 'object') {
-        setMessages((prev) => 
-          prev.map((m) => m.id === data.id ? { ...m, ciphertext: data.ciphertext, iv: data.iv } : m)
+        setMessages((prev) =>
+          prev.map((m) => (m.id === data.id ? { ...m, ciphertext: data.ciphertext, iv: data.iv } : m))
         );
       }
     },
@@ -213,48 +238,102 @@ export function E2EEChatbox() {
         setMessages((prev) => prev.filter((m) => m.id !== data.id));
       }
     },
+    RESERVATION_CLAIMED: (data: any) => {
+      if (data && (data.reservationId || data.chatId)) {
+        const claimant = data.claimedBy || 'Cashier';
+        const claimTime = data.claimedAt || new Date().toISOString();
+        setClaimedOrders((prev) => ({
+          ...prev,
+          ...(data.reservationId ? { [data.reservationId]: { claimedBy: claimant, claimedAt: claimTime } } : {}),
+          ...(data.chatId ? { [data.chatId]: { claimedBy: claimant, claimedAt: claimTime } } : {}),
+        }));
+
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (data.chatId && m.id === data.chatId) {
+              try {
+                const parsed = JSON.parse(m.ciphertext);
+                parsed.isAccepted = true;
+                parsed.claimedBy = claimant;
+                parsed.claimedAt = claimTime;
+                parsed.status = 'claimed';
+                return { ...m, ciphertext: JSON.stringify(parsed) };
+              } catch {}
+            }
+            try {
+              const parsed = JSON.parse(m.ciphertext);
+              if (parsed && (parsed.reservationId === data.reservationId || parsed.id === data.reservationId)) {
+                parsed.isAccepted = true;
+                parsed.claimedBy = claimant;
+                parsed.claimedAt = claimTime;
+                parsed.status = 'claimed';
+                return { ...m, ciphertext: JSON.stringify(parsed) };
+              }
+            } catch {}
+            return m;
+          })
+        );
+      }
+    },
     ACTIVE_USERS_LIST: (data: any) => {
       if (Array.isArray(data)) {
         setActiveUsers(data);
         setActiveUsersCount(data.length);
       }
     },
-    // Keep track of active connections from server events if broadcasted
     STOCK_UPDATED: () => {
-      // Just a simple heuristic pulse to fetch active terminals
       setActiveUsersCount((c) => Math.max(c, 2));
-    }
+    },
   });
 
-  // 🔄 Pulse periodic self-registration to WebSocket server for online cashier discovery
   useEffect(() => {
     if (user) {
       const register = () => {
         send('REGISTER_USER', {
           name: user.name,
           username: user.username,
-          // Mask role: developer has owner privileges but shows as Employee on LAN users list
-          role: user.username === 'developer' ? 'Employee' : (user.role === 'owner' ? 'Owner' : user.role === 'co-owner' ? 'Co-Owner' : 'Employee'),
-          id: user.id
+          role:
+            user.username === 'developer'
+              ? 'Employee'
+              : user.role === 'owner'
+              ? 'Owner'
+              : user.role === 'co-owner'
+              ? 'Co-Owner'
+              : 'Employee',
+          id: user.id,
         });
       };
-      
+
       register();
       const interval = setInterval(register, 10000);
       return () => clearInterval(interval);
     }
   }, [user, send]);
 
-  // 🔄 E2EE Client Encrypted Cart Transfer Function
+  const handleClaimBill = useCallback((reservationId?: string, chatId?: string, cashierName?: string) => {
+    const claimant = cashierName || user?.name || 'Cashier';
+    const claimTime = new Date().toISOString();
+    setClaimedOrders((prev) => ({
+      ...prev,
+      ...(reservationId ? { [reservationId]: { claimedBy: claimant, claimedAt: claimTime } } : {}),
+      ...(chatId ? { [chatId]: { claimedBy: claimant, claimedAt: claimTime } } : {}),
+    }));
+    send('RESERVATION_CLAIMED', {
+      reservationId: reservationId || chatId,
+      chatId: chatId,
+      claimedBy: claimant,
+      claimedAt: claimTime,
+    });
+  }, [user, send]);
+
   const handleShareCart = useCallback(async () => {
     if (!cryptoKey) return;
 
-    // Set up a one-time event listener to capture active cart details from cashier
     const onCartReceived = async (e: Event) => {
       window.removeEventListener('share-cart-data-response', onCartReceived);
       const data = (e as CustomEvent).detail;
       if (!data || !Array.isArray(data.items) || data.items.length === 0) {
-        toast.error('❌ Cannot share an empty cart');
+        toast.error('Cannot share an empty cart');
         return;
       }
 
@@ -270,13 +349,13 @@ export function E2EEChatbox() {
             const lineTotal = item.price * item.quantity;
             const lineGst = (lineTotal * item.gstRate) / 100;
             return sum + lineTotal + lineGst;
-          }, 0)
+          }, 0),
         };
 
         const encoder = new TextEncoder();
         const plaintextBytes = encoder.encode(JSON.stringify(payload));
         const iv = window.crypto.getRandomValues(new Uint8Array(12));
-        
+
         const encryptedBuffer = await window.crypto.subtle.encrypt(
           { name: 'AES-GCM', iv },
           cryptoKey,
@@ -288,128 +367,133 @@ export function E2EEChatbox() {
 
         const chatMsg: ChatMessage = {
           id: `chat_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-          senderName: user?.username === 'developer' ? 'System Support' : (user?.name || 'Cashier'),
-          senderRole: user?.username === 'developer' ? 'System' : (user?.role === 'owner' ? 'Owner' : user?.role === 'co-owner' ? 'Co-Owner' : 'Employee'),
+          senderName: user?.username === 'developer' ? 'System Support' : user?.name || 'Cashier',
+          senderRole:
+            user?.username === 'developer'
+              ? 'System'
+              : user?.role === 'owner'
+              ? 'Owner'
+              : user?.role === 'co-owner'
+              ? 'Co-Owner'
+              : 'Employee',
           ciphertext: ciphertextBase64,
           iv: ivBase64,
           timestamp: new Date().toISOString(),
           fingerprint: keyFingerprint,
           isBillTransfer: true,
-          recipientName: recipientName
+          recipientName: recipientName,
         };
 
-        // Instantly add to local message list
         setMessages((prev) => [...prev, chatMsg]);
-
-        // Broadcast over WebSockets LAN
         send('CHAT_MESSAGE', chatMsg);
-        toast.success('📤 Settle/Transfer bill shared to secure LAN chat!');
+        toast.success('Active cart shared to LAN chat');
       } catch (err) {
         console.error('[E2EE] Failed to encrypt cart transfer payload:', err);
       }
     };
 
     window.addEventListener('share-cart-data-response', onCartReceived);
-    
-    // Dispatch request trigger
     window.dispatchEvent(new Event('trigger-cart-share-request'));
-
-    // Automatically clean up listener after 500ms in case cart is empty or not loaded
     setTimeout(() => {
       window.removeEventListener('share-cart-data-response', onCartReceived);
     }, 500);
   }, [cryptoKey, user, keyFingerprint, send, recipientName]);
 
-  const handleDeleteMessage = useCallback(async (msgId: string) => {
-    try {
-      await api.delete(`/chats/${msgId}`);
-      // Update local state
-      setMessages((prev) => prev.filter((m) => m.id !== msgId));
-      // Broadcast delete to LAN over WS
-      send('DELETE_CHAT_MESSAGE', { id: msgId });
-      toast.success('🗑️ Message deleted successfully!');
-    } catch (e: any) {
-      console.error('[E2EE] Failed to delete message:', e);
-      toast.error('❌ Failed to delete message');
-    }
-  }, [send]);
+  const handleDeleteMessage = useCallback(
+    async (msgId: string) => {
+      try {
+        await api.delete(`/chats/${msgId}`);
+        setMessages((prev) => prev.filter((m) => m.id !== msgId));
+        send('DELETE_CHAT_MESSAGE', { id: msgId });
+        toast.success('Message deleted');
+      } catch (e: any) {
+        console.error('[E2EE] Failed to delete message:', e);
+        toast.error('Failed to delete message');
+      }
+    },
+    [send]
+  );
 
-  const handleEditMessage = useCallback(async (msgId: string, newText: string) => {
-    if (!cryptoKey) return;
-    try {
-      const encoder = new TextEncoder();
-      const plaintextBytes = encoder.encode(newText);
-      const iv = window.crypto.getRandomValues(new Uint8Array(12));
-      
-      const encryptedBuffer = await window.crypto.subtle.encrypt(
-        { name: 'AES-GCM', iv },
-        cryptoKey,
-        plaintextBytes
-      );
+  const handleEditMessage = useCallback(
+    async (msgId: string, newText: string) => {
+      if (!cryptoKey) return;
+      try {
+        const encoder = new TextEncoder();
+        const plaintextBytes = encoder.encode(newText);
+        const iv = window.crypto.getRandomValues(new Uint8Array(12));
 
-      const ciphertextBase64 = btoa(String.fromCharCode(...new Uint8Array(encryptedBuffer)));
-      const ivBase64 = btoa(String.fromCharCode(...iv));
+        const encryptedBuffer = await window.crypto.subtle.encrypt(
+          { name: 'AES-GCM', iv },
+          cryptoKey,
+          plaintextBytes
+        );
 
-      await api.put(`/chats/${msgId}`, {
-        ciphertext: ciphertextBase64,
-        iv: ivBase64
-      });
+        const ciphertextBase64 = btoa(String.fromCharCode(...new Uint8Array(encryptedBuffer)));
+        const ivBase64 = btoa(String.fromCharCode(...iv));
 
-      // Update local state
-      setMessages((prev) => 
-        prev.map((m) => m.id === msgId ? { ...m, ciphertext: ciphertextBase64, iv: ivBase64 } : m)
-      );
+        await api.put(`/chats/${msgId}`, {
+          ciphertext: ciphertextBase64,
+          iv: ivBase64,
+        });
 
-      // Broadcast edit to LAN over WS
-      send('EDIT_CHAT_MESSAGE', { id: msgId, ciphertext: ciphertextBase64, iv: ivBase64 });
-      toast.success('✏️ Message edited successfully!');
-    } catch (e: any) {
-      console.error('[E2EE] Failed to edit message:', e);
-      toast.error('❌ Failed to edit message');
-    }
-  }, [cryptoKey, send]);
+        setMessages((prev) =>
+          prev.map((m) => (m.id === msgId ? { ...m, ciphertext: ciphertextBase64, iv: ivBase64 } : m))
+        );
 
-  // 📝 Encrypt and Send Message
+        send('EDIT_CHAT_MESSAGE', {
+          id: msgId,
+          ciphertext: ciphertextBase64,
+          iv: ivBase64,
+        });
+        toast.success('Message updated');
+      } catch (e) {
+        console.error('[E2EE] Failed to update message:', e);
+        toast.error('Failed to update message');
+      }
+    },
+    [cryptoKey, send]
+  );
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim() || !cryptoKey) return;
 
     try {
-      const plaintext = inputText.trim();
+      const text = inputText.trim();
       setInputText('');
 
       const encoder = new TextEncoder();
-      const plaintextBytes = encoder.encode(plaintext);
-      
-      // Generate unique 12-byte initialization vector (IV) for AES-GCM
+      const plaintextBytes = encoder.encode(text);
       const iv = window.crypto.getRandomValues(new Uint8Array(12));
-      
-      // Perform AES-GCM E2EE Client Encryption
+
       const encryptedBuffer = await window.crypto.subtle.encrypt(
         { name: 'AES-GCM', iv },
         cryptoKey,
         plaintextBytes
       );
 
-      // Convert ArrayBuffers to base64 strings for standard network transport
       const ciphertextBase64 = btoa(String.fromCharCode(...new Uint8Array(encryptedBuffer)));
       const ivBase64 = btoa(String.fromCharCode(...iv));
 
       const chatMsg: ChatMessage = {
         id: `chat_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        senderName: user?.username === 'developer' ? 'System Support' : (user?.name || 'Cashier'),
-        senderRole: user?.username === 'developer' ? 'System' : (user?.role === 'owner' ? 'Owner' : user?.role === 'co-owner' ? 'Co-Owner' : 'Employee'),
+        senderName: user?.username === 'developer' ? 'System Support' : user?.name || 'Cashier',
+        senderRole:
+          user?.username === 'developer'
+            ? 'System'
+            : user?.role === 'owner'
+            ? 'Owner'
+            : user?.role === 'co-owner'
+            ? 'Co-Owner'
+            : 'Employee',
         ciphertext: ciphertextBase64,
         iv: ivBase64,
         timestamp: new Date().toISOString(),
         fingerprint: keyFingerprint,
-        recipientName: recipientName
+        recipientName: recipientName,
       };
 
-      // Instantly add to local message lists
       setMessages((prev) => [...prev, chatMsg]);
-
-      // Broadcast to all registers over the WebSocket LAN channel
       send('CHAT_MESSAGE', chatMsg);
     } catch (e) {
       console.error('[E2EE] Failed to encrypt message:', e);
@@ -418,92 +502,176 @@ export function E2EEChatbox() {
 
   return (
     <>
-      {/* 💳 Collapsible Secure Chat drawer */}
       {isOpen && (
         <div
-          className={`fixed bottom-24 right-6 z-40 w-85 h-120 rounded-2xl border backdrop-blur-xl shadow-2xl flex flex-col overflow-hidden transition-all duration-300 animate-fadeIn ${
-            darkMode 
-              ? 'bg-slate-900/90 border-slate-800/90 text-white' 
-              : 'bg-white/95 border-gray-200/90 text-gray-900'
-          }`}
+          role="dialog"
+          aria-label="Encrypted LAN Register Chat"
+          style={{
+            ...PANEL,
+            position: 'fixed',
+            bottom: 24,
+            right: 20,
+            zIndex: 50,
+            width: 390,
+            maxWidth: 'calc(100vw - 32px)',
+            height: 540,
+            maxHeight: 'calc(100vh - 48px)',
+            display: 'flex',
+            flexDirection: 'column',
+            boxShadow: '0 12px 36px rgba(0, 0, 0, 0.28)',
+          }}
+          className="animate-fadeIn"
         >
-          {/* Header */}
-          <div className={`p-3.5 border-b flex justify-between items-center flex-shrink-0 ${
-            darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-gray-50 border-gray-150'
-          }`}>
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
-                </span>
-                <h3 className="text-xs font-black uppercase tracking-wider flex items-center gap-1">
-                  <Lock size={11} className="text-purple-400" />
-                  E2EE Outlet Chat
-                </h3>
+          {/* Header Strip per instrument panel spec */}
+          <div
+            style={{
+              ...PANEL_HEAD,
+              padding: '12px 14px',
+              justifyContent: 'space-between',
+              background: 'var(--panel)',
+            }}
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <div
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  background: 'var(--ok)',
+                  boxShadow: '0 0 8px var(--ok)',
+                  flexShrink: 0,
+                }}
+              />
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span style={EYEBROW}>Encrypted LAN Chat</span>
+                  <span style={KBD}>{keyFingerprint || '...'}</span>
+                </div>
+                <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--ink3)' }} className="truncate">
+                  AES-256-GCM · {activeUsersCount} online
+                </div>
               </div>
-              <p className={`text-[10px] ${darkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                Key fingerprint: <code className="font-black text-purple-400 dark:text-purple-300 bg-purple-500/10 px-1 rounded">{keyFingerprint || '...'}</code>
-              </p>
             </div>
-            <div className="flex items-center gap-1">
-              <button 
-                onClick={() => setShowSettings(!showSettings)}
-                title="Change encryption settings"
-                className={`p-1.5 rounded-lg transition-colors ${
-                  showSettings 
-                    ? (darkMode ? 'bg-purple-900/30 text-purple-400' : 'bg-purple-50 text-purple-600') 
-                    : (darkMode ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-gray-100 text-gray-500')
-                }`}
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setHideClaimedBills((prev) => {
+                    const next = !prev;
+                    try {
+                      localStorage.setItem('hideClaimedBills', String(next));
+                    } catch {}
+                    toast.info(next ? 'Claimed bills hidden from view' : 'Claimed bills visible');
+                    return next;
+                  });
+                }}
+                title={hideClaimedBills ? 'Claimed bills are hidden (Click to show)' : 'Claimed bills are shown (Click to auto-hide)'}
+                className="cursor-pointer transition-colors"
+                style={{
+                  ...FIELD,
+                  height: 30,
+                  padding: '0 8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  fontSize: 10,
+                  fontWeight: 600,
+                  fontFamily: MONO,
+                  background: hideClaimedBills ? 'var(--accent-soft)' : 'var(--sub)',
+                  borderColor: hideClaimedBills ? 'var(--accent-line)' : 'var(--border2)',
+                  color: hideClaimedBills ? 'var(--accent)' : 'var(--ink2)',
+                }}
               >
-                <Key size={14} />
+                {hideClaimedBills ? <EyeOff size={12} /> : <CheckCircle2 size={12} />}
+                <span>{hideClaimedBills ? 'Hidden' : 'Claimed'}</span>
               </button>
-              <button 
-                onClick={() => setIsOpen(false)}
-                className={`p-1.5 rounded-lg transition-colors ${
-                  darkMode ? 'hover:bg-slate-800 text-slate-400' : 'hover:bg-gray-100 text-gray-500'
-                }`}
+              <button
+                type="button"
+                onClick={() => setShowSettings(!showSettings)}
+                title="Encryption Key Settings"
+                className="cursor-pointer transition-colors"
+                style={{
+                  ...FIELD,
+                  width: 30,
+                  height: 30,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: showSettings ? 'var(--accent-soft)' : 'var(--sub)',
+                  borderColor: showSettings ? 'var(--accent-line)' : 'var(--border2)',
+                  color: showSettings ? 'var(--accent)' : 'var(--ink2)',
+                }}
               >
-                <X size={14} />
+                <Key size={13} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsOpen(false)}
+                title="Close chat (Esc)"
+                className="cursor-pointer transition-colors"
+                style={{
+                  ...FIELD,
+                  height: 30,
+                  padding: '0 8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  fontFamily: MONO,
+                  color: 'var(--ink2)',
+                }}
+              >
+                <span>Close</span>
+                <span style={KBD}>Esc</span>
               </button>
             </div>
           </div>
 
           {/* Developer Navigation Tabs */}
           {user?.username === 'developer' && (
-            <div className={`flex border-b text-[10px] uppercase font-black tracking-wider flex-shrink-0 ${
-              darkMode ? 'border-slate-800 bg-slate-950/20' : 'border-gray-150 bg-gray-50/50'
-            }`}>
+            <div
+              className="flex border-b text-[10px] uppercase font-bold tracking-wider shrink-0"
+              style={{ borderColor: 'var(--rule)', background: 'var(--sub)' }}
+            >
               <button
+                type="button"
                 onClick={() => setDevViewMode('chat')}
-                className={`flex-1 py-2 text-center transition-all ${
-                  devViewMode === 'chat'
-                    ? 'border-b-2 border-purple-500 text-purple-400 dark:text-purple-300 bg-purple-500/5'
-                    : (darkMode ? 'text-slate-400 hover:text-white' : 'text-gray-500 hover:text-gray-900')
-                }`}
+                className="flex-1 py-2 text-center cursor-pointer transition-colors"
+                style={{
+                  fontFamily: MONO,
+                  borderBottom: devViewMode === 'chat' ? '2px solid var(--accent)' : '2px solid transparent',
+                  color: devViewMode === 'chat' ? 'var(--accent)' : 'var(--ink3)',
+                  background: devViewMode === 'chat' ? 'var(--panel)' : 'transparent',
+                }}
               >
-                💬 Live Chat
+                Live Chat
               </button>
               <button
+                type="button"
                 onClick={() => setDevViewMode('explorer')}
-                className={`flex-1 py-2 text-center transition-all ${
-                  devViewMode === 'explorer'
-                    ? 'border-b-2 border-purple-500 text-purple-400 dark:text-purple-300 bg-purple-500/5'
-                    : (darkMode ? 'text-slate-400 hover:text-white' : 'text-gray-500 hover:text-gray-900')
-                }`}
+                className="flex-1 py-2 text-center cursor-pointer transition-colors"
+                style={{
+                  fontFamily: MONO,
+                  borderBottom: devViewMode === 'explorer' ? '2px solid var(--accent)' : '2px solid transparent',
+                  color: devViewMode === 'explorer' ? 'var(--accent)' : 'var(--ink3)',
+                  background: devViewMode === 'explorer' ? 'var(--panel)' : 'transparent',
+                }}
               >
-                🔍 Archive Explorer
+                Archive Explorer
               </button>
             </div>
           )}
 
           {/* Encryption Key Settings Panel */}
           {showSettings && (
-            <div className={`p-3.5 border-b space-y-2.5 flex-shrink-0 animate-slideDown ${
-              darkMode ? 'bg-slate-950/20 border-slate-800' : 'bg-gray-50/50 border-gray-150'
-            }`}>
+            <div
+              className="p-3 border-b space-y-2 shrink-0 animate-slideDown"
+              style={{ background: 'var(--sub)', borderColor: 'var(--rule)' }}
+            >
               <div>
-                <label className={`block text-[10px] font-black uppercase tracking-wider mb-1 ${darkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                <label className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ fontFamily: MONO, color: 'var(--ink3)' }}>
                   Store Passphrase
                 </label>
                 <input
@@ -511,47 +679,44 @@ export function E2EEChatbox() {
                   value={passphrase}
                   onChange={(e) => setPassphrase(e.target.value)}
                   placeholder="Enter store encryption key..."
-                  className={`w-full px-2.5 py-1.5 border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-purple-500/25 ${
-                    darkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-gray-300'
-                  }`}
+                  className="w-full px-2.5 py-1.5 text-xs font-mono"
+                  style={{ ...FIELD, height: 34 }}
                 />
               </div>
-              <p className={`text-[9px] leading-relaxed ${darkMode ? 'text-slate-500' : 'text-gray-500'}`}>
-                ⚠️ <strong>Security Notice:</strong> All registers must share exact passphrases to decrypt broadcasts. Content is encrypted locally before being transmitted on the network.
+              <p className="text-[10px] leading-relaxed" style={{ color: 'var(--ink3)' }}>
+                All registers must use identical passphrases to decrypt broadcasts. Packets are encrypted locally before network transit.
               </p>
             </div>
           )}
 
           {devViewMode === 'explorer' && user?.username === 'developer' ? (
             <>
-              {/* Archive Explorer Filter Panel */}
-              <div className={`p-3.5 border-b space-y-2.5 flex-shrink-0 animate-slideDown ${
-                darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-gray-50/50 border-gray-150'
-              }`}>
-                <div className="grid grid-cols-2 gap-2.5">
+              <div
+                className="p-3 border-b space-y-2 shrink-0"
+                style={{ background: 'var(--sub)', borderColor: 'var(--rule)' }}
+              >
+                <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className={`block text-[8px] font-black uppercase tracking-wider mb-1 ${darkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                      Select Date
+                    <label className="block text-[9px] font-bold uppercase tracking-wider mb-1" style={{ fontFamily: MONO, color: 'var(--ink3)' }}>
+                      Date
                     </label>
                     <input
                       type="date"
                       value={archiveDate}
                       onChange={(e) => setArchiveDate(e.target.value)}
-                      className={`w-full px-2.5 py-1.5 border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-purple-500/25 ${
-                        darkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-gray-350 text-gray-700'
-                      }`}
+                      className="w-full px-2 py-1 text-xs"
+                      style={{ ...FIELD, height: 32 }}
                     />
                   </div>
                   <div>
-                    <label className={`block text-[8px] font-black uppercase tracking-wider mb-1 ${darkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                      Filter Cashier
+                    <label className="block text-[9px] font-bold uppercase tracking-wider mb-1" style={{ fontFamily: MONO, color: 'var(--ink3)' }}>
+                      Sender
                     </label>
                     <select
                       value={archiveSender}
                       onChange={(e) => setArchiveSender(e.target.value)}
-                      className={`w-full px-2 py-1.5 border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-purple-500/25 ${
-                        darkMode ? 'bg-slate-950 border-slate-800 text-white' : 'bg-white border-gray-350 text-gray-700'
-                      }`}
+                      className="w-full px-2 py-1 text-xs"
+                      style={{ ...FIELD, height: 32 }}
                     >
                       <option value="All">All Senders</option>
                       {distinctSenders.map((s) => (
@@ -561,49 +726,41 @@ export function E2EEChatbox() {
                   </div>
                 </div>
                 <button
+                  type="button"
                   onClick={handleQueryArchive}
                   disabled={isLoadingArchive}
-                  className={`w-full py-1.5 font-bold rounded-lg text-xs transition-colors flex items-center justify-center gap-1 cursor-pointer ${
-                    darkMode 
-                      ? 'bg-purple-600 hover:bg-purple-500 text-white' 
-                      : 'bg-purple-500 hover:bg-purple-600 text-white shadow-sm'
-                  }`}
+                  className="w-full h-8 text-xs font-bold rounded cursor-pointer transition-opacity flex items-center justify-center gap-1"
+                  style={{ background: 'var(--ink)', color: 'var(--panel)', border: 0 }}
                 >
-                  {isLoadingArchive ? 'Retrieving Secure Logs...' : '🔍 Retrieve Chat Archives'}
+                  {isLoadingArchive ? 'Retrieving Secure Logs...' : 'Query Archives'}
                 </button>
               </div>
 
-              {/* Archive Messages Outlet */}
-              <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3.5 bg-slate-950/5">
+              <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3" style={{ background: 'var(--bg)' }}>
                 {isLoadingArchive ? (
-                  <div className="h-full flex items-center justify-center text-xs opacity-55 animate-pulse">
+                  <div className="h-full flex items-center justify-center text-xs opacity-60" style={{ fontFamily: MONO }}>
                     Querying secure database...
                   </div>
                 ) : archiveMessages.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-center p-4">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center mb-2.5 ${
-                      darkMode ? 'bg-slate-800 text-slate-500' : 'bg-gray-100 text-gray-400'
-                    }`}>
-                      <Users size={18} />
-                    </div>
-                    <p className="text-xs font-bold opacity-60">No Archived Logs Found</p>
-                    <p className="text-[10px] opacity-40 max-w-[180px] mt-1 leading-normal">
-                      Select a different date or employee filter and click query above.
-                    </p>
+                    <p className="text-xs font-bold" style={{ color: 'var(--ink2)' }}>No Archived Logs Found</p>
+                    <p className="text-[11px] mt-1" style={{ color: 'var(--ink3)' }}>Select another date or cashier filter.</p>
                   </div>
                 ) : (
                   archiveMessages.map((msg) => {
-                    const isMe = user?.username === 'developer'
-                      ? msg.senderName === 'System Support'
-                      : msg.senderName === (user?.name || 'Cashier');
+                    const isMe =
+                      user?.username === 'developer'
+                        ? msg.senderName === 'System Support'
+                        : msg.senderName === (user?.name || 'Cashier');
                     return (
-                      <MessageBubble 
-                        key={msg.id} 
-                        msg={msg} 
-                        isMe={isMe} 
-                        cryptoKey={cryptoKey} 
-                        fingerprint={keyFingerprint}
-                        darkMode={darkMode}
+                      <MessageBubble
+                        key={msg.id}
+                        msg={msg}
+                        isMe={isMe}
+                        cryptoKey={cryptoKey}
+                        hideClaimed={hideClaimedBills}
+                        claimedOrders={claimedOrders}
+                        onClaim={handleClaimBill}
                         onEdit={handleEditMessage}
                         onDelete={handleDeleteMessage}
                       />
@@ -615,90 +772,88 @@ export function E2EEChatbox() {
             </>
           ) : (
             <>
-              {/* Dynamic Conversation Tabs */}
-              <div className={`px-3 py-2 border-b flex items-center gap-1.5 overflow-x-auto no-scrollbar flex-shrink-0 ${
-                darkMode ? 'bg-slate-900/60 border-slate-800/80' : 'bg-gray-50/70 border-gray-150'
-              }`}>
-                {/* Broadcast Option */}
+              {/* Channel / Recipient Selector Chips */}
+              <div
+                className="px-3 py-2 border-b flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0"
+                style={{ background: 'var(--sub)', borderColor: 'var(--rule)' }}
+              >
                 <button
                   type="button"
                   onClick={() => setRecipientName('All')}
-                  className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer flex items-center gap-1 hover:scale-105 active:scale-95 ${
-                    recipientName === 'All'
-                      ? 'bg-purple-600 text-white shadow-sm'
-                      : (darkMode ? 'bg-slate-950 text-slate-400 hover:text-white hover:bg-slate-800' : 'bg-white text-gray-600 hover:text-gray-900 border border-gray-250 hover:bg-gray-50')
-                  }`}
+                  className="px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1"
+                  style={{
+                    fontFamily: MONO,
+                    background: recipientName === 'All' ? 'var(--ink)' : 'var(--panel)',
+                    color: recipientName === 'All' ? 'var(--panel)' : 'var(--ink2)',
+                    border: '1px solid var(--border2)',
+                  }}
                 >
-                  <span>📣 Broadcast</span>
-                  <span className={`px-1 py-0.5 rounded-full text-[7px] font-black ${
-                    recipientName === 'All'
-                      ? 'bg-purple-800 text-purple-200'
-                      : 'bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300'
-                  }`}>
-                    {messages.filter(m => {
+                  <span>Broadcast</span>
+                  <span
+                    className="px-1 py-0.2 rounded text-[9px]"
+                    style={{
+                      background: recipientName === 'All' ? 'var(--panel)' : 'var(--rule)',
+                      color: recipientName === 'All' ? 'var(--ink)' : 'var(--ink3)',
+                    }}
+                  >
+                    {messages.filter((m) => {
                       const ageMs = Date.now() - new Date(m.timestamp).getTime();
                       return ageMs < 24 * 60 * 60 * 1000 && (!m.recipientName || m.recipientName === 'All');
                     }).length}
                   </span>
                 </button>
 
-                {/* Individual Conversations */}
                 {(() => {
-                  // Compile all distinct conversation names (online cashiers + anyone we have private messages exchanged with)
                   const conversationNames = new Set<string>();
-                  
-                  // 1. Add all active online users (except ourselves)
-                  activeUsers
-                    .filter((u) => u.name !== user?.name)
-                    .forEach((u) => conversationNames.add(u.name));
-                  
-                  // 2. Add senders/recipients of private messages in our 24h history
+                  activeUsers.filter((u) => u.name !== user?.name).forEach((u) => conversationNames.add(u.name));
                   messages.forEach((m) => {
                     const ageMs = Date.now() - new Date(m.timestamp).getTime();
                     if (ageMs < 24 * 60 * 60 * 1000 && m.recipientName && m.recipientName !== 'All') {
-                      if (m.senderName !== user?.name) {
-                        conversationNames.add(m.senderName);
-                      }
-                      if (m.recipientName !== user?.name) {
-                        conversationNames.add(m.recipientName);
-                      }
+                      if (m.senderName !== user?.name) conversationNames.add(m.senderName);
+                      if (m.recipientName !== user?.name) conversationNames.add(m.recipientName);
                     }
                   });
 
                   return Array.from(conversationNames).map((name) => {
                     const onlineUser = activeUsers.find((u) => u.name === name);
                     const isOnline = !!onlineUser;
-                    
-                    const privateMsgCount = messages.filter(m => {
+                    const count = messages.filter((m) => {
                       const ageMs = Date.now() - new Date(m.timestamp).getTime();
                       if (ageMs >= 24 * 60 * 60 * 1000) return false;
-                      if (user?.username === 'developer') {
-                        return m.senderName === name || m.recipientName === name;
-                      }
-                      return (m.senderName === name && m.recipientName === user?.name) ||
-                             (m.senderName === user?.name && m.recipientName === name);
+                      if (user?.username === 'developer') return m.senderName === name || m.recipientName === name;
+                      return (
+                        (m.senderName === name && m.recipientName === user?.name) ||
+                        (m.senderName === user?.name && m.recipientName === name)
+                      );
                     }).length;
-                    
+
                     return (
                       <button
                         key={name}
                         type="button"
                         onClick={() => setRecipientName(name)}
-                        className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wider transition-all whitespace-nowrap flex items-center gap-1.5 hover:scale-105 active:scale-95 cursor-pointer ${
-                          recipientName === name
-                            ? 'bg-purple-600 text-white shadow-sm'
-                            : (darkMode ? 'bg-slate-950 text-slate-400 hover:text-white hover:bg-slate-800' : 'bg-white text-gray-600 hover:text-gray-900 border border-gray-250 hover:bg-gray-50')
-                        }`}
+                        className="px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1.5"
+                        style={{
+                          fontFamily: MONO,
+                          background: recipientName === name ? 'var(--ink)' : 'var(--panel)',
+                          color: recipientName === name ? 'var(--panel)' : 'var(--ink2)',
+                          border: '1px solid var(--border2)',
+                        }}
                       >
-                        <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-450'}`}></span>
+                        <span
+                          className="w-1.5 h-1.5 rounded-full"
+                          style={{ background: isOnline ? 'var(--ok)' : 'var(--ink4)' }}
+                        />
                         <span>{name}</span>
-                        {privateMsgCount > 0 && (
-                          <span className={`px-1 py-0.5 rounded-full text-[7px] font-black ${
-                            recipientName === name
-                              ? 'bg-purple-800 text-purple-200'
-                              : 'bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300'
-                          }`}>
-                            {privateMsgCount}
+                        {count > 0 && (
+                          <span
+                            className="px-1 py-0.2 rounded text-[9px]"
+                            style={{
+                              background: recipientName === name ? 'var(--panel)' : 'var(--rule)',
+                              color: recipientName === name ? 'var(--ink)' : 'var(--ink3)',
+                            }}
+                          >
+                            {count}
                           </span>
                         )}
                       </button>
@@ -707,62 +862,52 @@ export function E2EEChatbox() {
                 })()}
               </div>
 
-              {/* Messages Outlet */}
-              <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3.5 bg-slate-950/5">
+              {/* Messages Scroll Area */}
+              <div className="flex-1 min-h-0 overflow-y-auto p-3.5 space-y-3" style={{ background: 'var(--bg)' }}>
                 {(() => {
                   const recentMessages = messages.filter((msg) => {
                     const ageMs = Date.now() - new Date(msg.timestamp).getTime();
                     if (ageMs >= 24 * 60 * 60 * 1000) return false;
-                    
-                    // Filter by selected recipientName
+
                     if (recipientName === 'All') {
-                      // Broadcasts
                       return !msg.recipientName || msg.recipientName === 'All';
                     } else {
                       if (user?.username === 'developer') {
-                        // Developer sees anything involving the selected cashier
                         return msg.senderName === recipientName || msg.recipientName === recipientName;
                       }
-                      
-                      // Direct Messages between me and recipientName
                       const isSenderRecipient = msg.senderName === recipientName && msg.recipientName === user?.name;
                       const isMeSending = msg.senderName === user?.name && msg.recipientName === recipientName;
                       return isSenderRecipient || isMeSending;
                     }
                   });
-                  
+
                   if (recentMessages.length === 0) {
                     return (
                       <div className="h-full flex flex-col items-center justify-center text-center p-4">
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center mb-2.5 ${
-                          darkMode ? 'bg-slate-800 text-slate-500' : 'bg-gray-100 text-gray-400'
-                        }`}>
-                          <Lock size={18} />
-                        </div>
-                        <p className="text-xs font-bold opacity-60">
-                          {recipientName === 'All' ? 'Secure LAN Chat Room' : `Private Chat with ${recipientName}`}
+                        <p className="text-xs font-bold" style={{ color: 'var(--ink2)' }}>
+                          {recipientName === 'All' ? 'Secure Outlet Broadcast' : `Private Chat with ${recipientName}`}
                         </p>
-                        <p className="text-[10px] opacity-40 max-w-[180px] mt-1 leading-normal">
-                          {recipientName === 'All' 
-                            ? 'Type a message below to broadcast encrypted text to all connected terminals.' 
-                            : `All messages are E2EE encrypted. Type a message below to start a private conversation.`}
+                        <p className="text-[11px] max-w-[200px] mt-1" style={{ color: 'var(--ink3)' }}>
+                          All messages are end-to-end encrypted locally over LAN.
                         </p>
                       </div>
                     );
                   }
-                  
+
                   return recentMessages.map((msg) => {
-                    const isMe = user?.username === 'developer'
-                      ? msg.senderName === 'System Support'
-                      : msg.senderName === (user?.name || 'Cashier');
+                    const isMe =
+                      user?.username === 'developer'
+                        ? msg.senderName === 'System Support'
+                        : msg.senderName === (user?.name || 'Cashier');
                     return (
-                      <MessageBubble 
-                        key={msg.id} 
-                        msg={msg} 
-                        isMe={isMe} 
-                        cryptoKey={cryptoKey} 
-                        fingerprint={keyFingerprint}
-                        darkMode={darkMode}
+                      <MessageBubble
+                        key={msg.id}
+                        msg={msg}
+                        isMe={isMe}
+                        cryptoKey={cryptoKey}
+                        hideClaimed={hideClaimedBills}
+                        claimedOrders={claimedOrders}
+                        onClaim={handleClaimBill}
                         onEdit={handleEditMessage}
                         onDelete={handleDeleteMessage}
                       />
@@ -772,59 +917,52 @@ export function E2EEChatbox() {
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Recipient Indicator */}
-              <div className={`px-3 py-1.5 border-t flex items-center justify-between gap-2 text-[10px] flex-shrink-0 ${
-                darkMode ? 'bg-slate-950/20 border-slate-800/80 text-slate-300' : 'bg-gray-50/50 border-gray-150 text-gray-600'
-              }`}>
-                <span className="font-black flex items-center gap-1 uppercase tracking-wider text-[8px] opacity-75">
-                  <Users size={11} className="text-purple-400" />
-                  Active Target:
-                </span>
-                <span className={`px-2 py-0.5 rounded-full font-bold text-[9px] uppercase tracking-wider ${
-                  recipientName === 'All'
-                    ? 'bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 border border-purple-200/20'
-                    : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200/20'
-                }`}>
-                  {recipientName === 'All' ? '📣 All Registers (Broadcast)' : `👤 Private: ${recipientName}`}
-                </span>
-              </div>
-
-              {/* Chat input */}
-              <form 
+              {/* Input Area */}
+              <form
                 onSubmit={handleSendMessage}
-                className={`p-3 border-t flex gap-2 flex-shrink-0 ${
-                  darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-150'
-                }`}
+                className="p-2.5 border-t flex gap-2 shrink-0"
+                style={{ background: 'var(--panel)', borderColor: 'var(--rule)' }}
               >
                 <button
                   type="button"
                   onClick={handleShareCart}
-                  title="Transfer active bill via secure E2EE chat"
-                  className={`p-2 rounded-xl border flex items-center justify-center transition-all cursor-pointer hover:scale-105 active:scale-95 ${
-                    darkMode
-                      ? 'border-slate-800 bg-slate-950/60 text-purple-400 hover:bg-slate-850 hover:text-purple-300'
-                      : 'border-gray-300 bg-gray-50 text-purple-600 hover:bg-gray-100 hover:text-purple-700'
-                  }`}
+                  title="Share active cart bill to LAN chat"
+                  className="cursor-pointer transition-colors"
+                  style={{
+                    ...FIELD,
+                    width: 38,
+                    height: 38,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--ink2)',
+                  }}
                 >
-                  <Receipt size={14} />
+                  <Receipt size={15} />
                 </button>
                 <input
                   type="text"
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
-                  placeholder="Send E2EE message..."
-                  className={`flex-1 px-3 py-2 border rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-purple-500/25 ${
-                    darkMode ? 'bg-slate-950 border-slate-800 text-white placeholder-slate-600' : 'bg-white border-gray-300 placeholder-gray-400'
-                  }`}
+                  placeholder={recipientName === 'All' ? 'Broadcast message to registers...' : `Message ${recipientName}...`}
+                  className="flex-1 px-3 text-xs"
+                  style={{ ...FIELD, height: 38 }}
                 />
                 <button
                   type="submit"
                   disabled={!inputText.trim()}
-                  className={`p-2 rounded-xl text-white transition-all duration-150 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed hover:scale-105 active:scale-95 ${
-                    darkMode 
-                      ? 'bg-purple-600 hover:bg-purple-500' 
-                      : 'bg-purple-500 hover:bg-purple-600'
-                  }`}
+                  className="cursor-pointer transition-opacity disabled:opacity-40"
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: 7,
+                    background: 'var(--ink)',
+                    color: 'var(--panel)',
+                    border: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
                 >
                   <Send size={14} />
                 </button>
@@ -837,21 +975,23 @@ export function E2EEChatbox() {
   );
 }
 
-// 📦 Smart E2EE Decrypting Message Bubble Component
-function MessageBubble({ 
-  msg, 
-  isMe, 
-  cryptoKey, 
-  fingerprint,
-  darkMode,
+// 📦 Decrypting Message Bubble with Instrument-Panel Design System
+function MessageBubble({
+  msg,
+  isMe,
+  cryptoKey,
+  hideClaimed = false,
+  claimedOrders = {},
+  onClaim,
   onEdit,
-  onDelete
-}: { 
-  msg: ChatMessage; 
-  isMe: boolean; 
-  cryptoKey: CryptoKey | null; 
-  fingerprint: string;
-  darkMode: boolean;
+  onDelete,
+}: {
+  msg: ChatMessage;
+  isMe: boolean;
+  cryptoKey: CryptoKey | null;
+  hideClaimed?: boolean;
+  claimedOrders?: Record<string, { claimedBy: string; claimedAt: string }>;
+  onClaim?: (reservationId?: string, chatId?: string, cashierName?: string) => void;
   onEdit?: (id: string, newText: string) => void;
   onDelete?: (id: string) => void;
 }) {
@@ -860,6 +1000,13 @@ function MessageBubble({
   const [decryptionError, setDecryptionError] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState('');
+  const [isEnteringOtp, setIsEnteringOtp] = useState(false);
+  const [enteredOtp, setEnteredOtp] = useState('');
+  const [isClaimedLocally, setIsClaimedLocally] = useState(false);
+  const [claimedByInfo, setClaimedByInfo] = useState<string | null>(null);
+  const [claimedAtInfo, setClaimedAtInfo] = useState<string | null>(null);
+  const [isDismissed, setIsDismissed] = useState(false);
+  const [otpError, setOtpError] = useState<string | null>(null);
 
   const handleStartEdit = () => {
     if (decryptedText !== null) {
@@ -868,11 +1015,16 @@ function MessageBubble({
     }
   };
 
-  // Attempt client-side decryption whenever the key or message changes
   useEffect(() => {
     const decrypt = async () => {
+      if (msg.iv === 'online_system' || msg.fingerprint === 'ONLINE_WEB') {
+        setDecryptedText(msg.ciphertext);
+        setDecryptionError(false);
+        return;
+      }
+
       if (!cryptoKey) return;
-      
+
       try {
         const ciphertext = new Uint8Array(
           atob(msg.ciphertext)
@@ -885,7 +1037,6 @@ function MessageBubble({
             .map((c) => c.charCodeAt(0))
         );
 
-        // Perform AES-GCM Decryption
         const decryptedBuffer = await window.crypto.subtle.decrypt(
           { name: 'AES-GCM', iv },
           cryptoKey,
@@ -896,6 +1047,14 @@ function MessageBubble({
         setDecryptedText(decoder.decode(decryptedBuffer));
         setDecryptionError(false);
       } catch (e) {
+        try {
+          const testParsed = JSON.parse(msg.ciphertext);
+          if (testParsed && (testParsed.type === 'ONLINE_RESERVATION' || testParsed.isBillTransfer)) {
+            setDecryptedText(msg.ciphertext);
+            setDecryptionError(false);
+            return;
+          }
+        } catch {}
         setDecryptedText(null);
         setDecryptionError(true);
       }
@@ -906,111 +1065,152 @@ function MessageBubble({
 
   const dateObj = new Date(msg.timestamp);
   const isToday = new Date().toDateString() === dateObj.toDateString();
-  const timeString = isToday 
+  const timeString = isToday
     ? dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : `${dateObj.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
 
-  // Parse decrypted payload to check if it's a cooperative LAN bill transfer
   let billData: any = null;
   if (decryptedText) {
     try {
       let cleanText = decryptedText.trim();
-      
-      // Handle cases where the text is double-enclosing quoted as a string
       if (cleanText.startsWith('"') && cleanText.endsWith('"')) {
         try {
           cleanText = JSON.parse(cleanText);
         } catch {}
       }
-      
       let parsed = JSON.parse(cleanText);
-      
-      // Resiliently resolve double/recursive stringification if React or WebSocket double-stringified the data
-      let safetyCounter = 0;
-      while (typeof parsed === 'string' && safetyCounter < 5) {
+      let safety = 0;
+      while (typeof parsed === 'string' && safety < 5) {
         parsed = JSON.parse(parsed);
-        safetyCounter++;
+        safety++;
       }
-      
       if (parsed && typeof parsed === 'object') {
-        if (parsed.type === 'BILL_TRANSFER' || parsed.isBillTransfer || Array.isArray(parsed.items)) {
+        if (parsed.type === 'BILL_TRANSFER' || parsed.type === 'ONLINE_RESERVATION' || parsed.isBillTransfer || Array.isArray(parsed.items)) {
           billData = parsed;
         }
       }
-    } catch {
-      // Just a normal text message
-    }
+    } catch {}
+  }
+
+  // Check if claimed either from server message, LAN broadcast override, or local state
+  const claimedOverride = (billData?.reservationId && claimedOrders[billData.reservationId]) || claimedOrders[msg.id];
+  const isClaimed =
+    isClaimedLocally ||
+    !!claimedOverride ||
+    billData?.isAccepted ||
+    billData?.status === 'claimed' ||
+    billData?.status === 'completed' ||
+    !!billData?.claimedBy ||
+    !!billData?.acceptedBy;
+
+  const claimantName = claimedByInfo || claimedOverride?.claimedBy || billData?.claimedBy || billData?.acceptedBy;
+  const claimantTime = claimedAtInfo || claimedOverride?.claimedAt || billData?.claimedAt || billData?.acceptedAt;
+
+  // If user dismissed this completed bill, or hideClaimed is active, hide it completely!
+  if (isDismissed || (hideClaimed && isClaimed)) {
+    return null;
   }
 
   return (
     <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-full animate-fadeIn`}>
-      {/* Sender name & role */}
-      <span className={`text-[9px] font-bold mb-1 px-1 flex items-center gap-1.5 ${
-        darkMode ? 'text-slate-400' : 'text-gray-500'
-      }`}>
-        {msg.senderName} 
-        <span className={`text-[8px] px-1 rounded-sm ${
-          msg.senderRole === 'Owner' 
-            ? 'bg-red-500/10 text-red-400 font-black' 
-            : msg.senderRole === 'Co-Owner' 
-              ? 'bg-blue-500/10 text-blue-400 font-bold' 
-              : 'bg-green-500/10 text-green-400'
-        }`}>
+      {/* Sender Header */}
+      <div className="flex items-center gap-1.5 mb-1 px-1">
+        <span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 700, color: 'var(--ink2)' }}>
+          {msg.senderName}
+        </span>
+        <span
+          className="px-1 rounded text-[8px] font-bold uppercase tracking-wider"
+          style={{
+            fontFamily: MONO,
+            background:
+              msg.senderRole === 'Owner'
+                ? 'var(--danger-soft)'
+                : msg.senderRole === 'Co-Owner'
+                ? 'var(--accent-soft)'
+                : 'var(--rule)',
+            color:
+              msg.senderRole === 'Owner'
+                ? 'var(--danger)'
+                : msg.senderRole === 'Co-Owner'
+                ? 'var(--accent)'
+                : 'var(--ink3)',
+          }}
+        >
           {msg.senderRole}
         </span>
+
         {msg.recipientName && msg.recipientName !== 'All' && (
-          <span className="text-[8px] px-1 rounded-sm bg-purple-500/10 text-purple-400 font-bold flex items-center gap-0.5">
-            🔒 Direct to {msg.recipientName}
+          <span
+            className="text-[8px] font-semibold px-1 rounded"
+            style={{ fontFamily: MONO, background: 'var(--accent-soft)', color: 'var(--accent)' }}
+          >
+            Direct: {msg.recipientName}
           </span>
         )}
+
         {user?.username === 'developer' && decryptedText !== null && (
-          <span className="flex items-center gap-1.5 ml-2 border-l border-slate-700/40 pl-2">
+          <span className="flex items-center gap-1 ml-1.5 pl-1.5 border-l border-[var(--border2)]">
             {!billData && (
               <button
                 type="button"
                 onClick={handleStartEdit}
-                title="Edit message (Developer override)"
-                className="hover:text-purple-400 transition-colors cursor-pointer text-[8px]"
+                className="hover:underline cursor-pointer text-[9px]"
+                style={{ color: 'var(--ink3)' }}
               >
-                ✏️ Edit
+                Edit
               </button>
             )}
             <button
               type="button"
               onClick={() => {
-                if (window.confirm('Are you sure you want to delete this message?') && onDelete) {
+                if (window.confirm('Delete this message?') && onDelete) {
                   onDelete(msg.id);
                 }
               }}
-              title="Delete message (Developer override)"
-              className="hover:text-red-400 transition-colors cursor-pointer text-[8px]"
+              className="hover:underline cursor-pointer text-[9px]"
+              style={{ color: 'var(--danger)' }}
             >
-              🗑️ Delete
+              Delete
             </button>
           </span>
         )}
-      </span>
+      </div>
 
-      {/* Message Box */}
-      <div className={`p-3 rounded-2xl max-w-[85%] border shadow-sm transition-all ${
-        isMe
-          ? darkMode
-            ? 'bg-purple-600/30 border-purple-500/20 text-purple-100 rounded-tr-none'
-            : 'bg-purple-500 text-white border-purple-400 rounded-tr-none'
-          : darkMode
-            ? 'bg-slate-900 border-slate-800 text-slate-100 rounded-tl-none'
-            : 'bg-gray-100 border-gray-200 text-gray-800 rounded-tl-none'
-      }`}>
+      {/* Message Body Container */}
+      <div
+        style={{
+          maxWidth: '88%',
+          borderRadius: 8,
+          padding: billData ? 0 : '8px 12px',
+          overflow: 'hidden',
+          background: billData
+            ? 'var(--panel)'
+            : isMe
+            ? 'var(--ink)'
+            : 'var(--sub)',
+          color: billData
+            ? 'var(--ink)'
+            : isMe
+            ? 'var(--panel)'
+            : 'var(--ink)',
+          border: billData
+            ? '1px solid var(--border)'
+            : isMe
+            ? '1px solid var(--ink)'
+            : '1px solid var(--border2)',
+        }}
+      >
         {isEditing ? (
-          <div className="flex flex-col gap-1.5 min-w-[150px]">
+          <div className="flex flex-col gap-1.5 min-w-[160px] p-2">
             <input
               type="text"
               value={editText}
               onChange={(e) => setEditText(e.target.value)}
-              className={`w-full px-2 py-1 rounded text-xs focus:outline-none focus:ring-1 focus:ring-purple-500 bg-slate-950/60 border border-slate-800/80 text-white`}
+              className="w-full px-2 py-1 text-xs"
+              style={{ ...FIELD, height: 32 }}
               autoFocus
             />
-            <div className="flex justify-end gap-1">
+            <div className="flex justify-end gap-1.5">
               <button
                 type="button"
                 onClick={() => {
@@ -1019,14 +1219,16 @@ function MessageBubble({
                   }
                   setIsEditing(false);
                 }}
-                className="px-2 py-0.5 bg-purple-600 hover:bg-purple-500 rounded text-[9px] font-bold text-white transition-colors cursor-pointer"
+                className="px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer"
+                style={{ background: 'var(--ink)', color: 'var(--panel)', border: 0 }}
               >
                 Save
               </button>
               <button
                 type="button"
                 onClick={() => setIsEditing(false)}
-                className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 rounded text-[9px] font-bold text-slate-300 transition-colors cursor-pointer"
+                className="px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer"
+                style={{ ...FIELD }}
               >
                 Cancel
               </button>
@@ -1034,82 +1236,253 @@ function MessageBubble({
           </div>
         ) : decryptedText !== null ? (
           billData ? (
-            /* 🔄 Bill Transfer Card */
-            <div className="space-y-3 min-w-[200px] select-text">
-              <div className="flex items-center gap-1.5 border-b border-purple-500/20 pb-1.5">
-                <Receipt size={14} className={isMe ? 'text-purple-300' : 'text-purple-500'} />
-                <span className="text-[10px] font-black uppercase tracking-wider">Bill Transfer</span>
-              </div>
-              <div className="space-y-1 text-[11px] opacity-90">
-                <div className="flex justify-between">
-                  <span>Cart Items:</span>
-                  <span className="font-bold">{billData.items.length} items</span>
+            /* 🔄 Bill Transfer / Customer Reservation Card */
+            <div className="flex flex-col" style={{ width: 280 }}>
+              {/* Card Header */}
+              <div
+                className="flex items-center justify-between px-3 py-2 border-b"
+                style={{ borderColor: 'var(--rule)', background: 'var(--sub)' }}
+              >
+                <div className="flex items-center gap-1.5">
+                  <Receipt size={13} style={{ color: 'var(--accent)' }} />
+                  <span style={EYEBROW}>
+                    {billData.type === 'ONLINE_RESERVATION' || billData.requiresOtp
+                      ? 'Online Pickup Order'
+                      : 'Bill Transfer'}
+                  </span>
                 </div>
-                <div className="flex justify-between">
-                  <span>Total Value:</span>
-                  <span className="font-bold text-emerald-400">₹{billData.total.toFixed(2)}</span>
+                {isClaimed && (
+                  <button
+                    type="button"
+                    onClick={() => setIsDismissed(true)}
+                    title="Dismiss / hide completed bill"
+                    className="cursor-pointer hover:opacity-80 p-0.5 text-[10px] font-bold"
+                    style={{ color: 'var(--ink3)' }}
+                  >
+                    <EyeOff size={12} />
+                  </button>
+                )}
+              </div>
+
+              {/* Card Details */}
+              <div className="p-3 space-y-2 text-xs">
+                <div className="flex justify-between items-baseline">
+                  <span style={{ color: 'var(--ink3)' }}>Items:</span>
+                  <span style={{ fontFamily: MONO, fontWeight: 600 }}>
+                    {billData.items?.length || 0} units
+                  </span>
+                </div>
+                <div className="flex justify-between items-baseline">
+                  <span style={{ color: 'var(--ink3)' }}>Total value:</span>
+                  <span style={{ ...NUM, fontWeight: 700, color: 'var(--accent)' }}>
+                    {inr(billData.total || 0)}
+                  </span>
                 </div>
                 {(billData.customerName || billData.customerPhone) && (
-                  <div className="flex justify-between">
-                    <span>Customer:</span>
-                    <span className="font-semibold truncate max-w-[120px]">
+                  <div className="flex justify-between items-baseline">
+                    <span style={{ color: 'var(--ink3)' }}>Customer:</span>
+                    <span className="font-semibold truncate max-w-[140px]" style={{ color: 'var(--ink)' }}>
                       {billData.customerName || billData.customerPhone}
                     </span>
                   </div>
                 )}
+
+                {/* Handover & OTP State */}
+                {isClaimed ? (
+                  <div
+                    className="p-2.5 rounded-lg flex items-center justify-between mt-2"
+                    style={{
+                      background: 'var(--ok-soft)',
+                      border: '1px solid var(--ok-line)',
+                      color: 'var(--ok-hi)',
+                    }}
+                  >
+                    <div>
+                      <div className="font-bold flex items-center gap-1 text-[11px]">
+                        <CheckCircle2 size={13} />
+                        <span>Order Claimed</span>
+                      </div>
+                      <div className="text-[10px] mt-0.5" style={{ fontFamily: MONO }}>
+                        by {claimantName || 'Cashier'}
+                        {claimantTime ? ` · ${new Date(claimantTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsDismissed(true)}
+                      className="px-2 py-1 rounded text-[10px] font-bold cursor-pointer transition-opacity"
+                      style={{
+                        background: 'var(--panel)',
+                        border: '1px solid var(--ok-line)',
+                        color: 'var(--ok-hi)',
+                        fontFamily: MONO,
+                      }}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                ) : !isMe ? (
+                  billData.requiresOtp || billData.type === 'ONLINE_RESERVATION' ? (
+                    !isEnteringOtp ? (
+                      <button
+                        type="button"
+                        onClick={() => setIsEnteringOtp(true)}
+                        className="w-full h-8 mt-1 rounded text-xs font-bold cursor-pointer flex items-center justify-center gap-1.5 transition-opacity hover:opacity-90"
+                        style={{ background: 'var(--ink)', color: 'var(--panel)', border: 0 }}
+                      >
+                        <Lock size={12} />
+                        <span>Take Bill (Verify OTP)</span>
+                      </button>
+                    ) : (
+                      <div
+                        className="p-2.5 rounded-lg space-y-2 mt-1"
+                        style={{ background: 'var(--sub)', border: '1px solid var(--border2)' }}
+                      >
+                        <div className="text-[10px] font-bold" style={{ fontFamily: MONO, color: 'var(--ink2)' }}>
+                          Enter Customer 4-Digit OTP:
+                        </div>
+                        <input
+                          type="text"
+                          maxLength={6}
+                          value={enteredOtp}
+                          onChange={(e) => {
+                            setEnteredOtp(e.target.value);
+                            setOtpError(null);
+                          }}
+                          placeholder="4-digit OTP"
+                          className="w-full h-8 text-center text-sm font-bold"
+                          style={{ ...FIELD, ...NUM, letterSpacing: '0.2em' }}
+                          autoFocus
+                          onKeyDown={async (e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              const code = enteredOtp.trim();
+                              if (!code) return;
+                              if (code !== String(billData.otp || '').trim()) {
+                                setOtpError('Invalid OTP');
+                                toast.error('Invalid OTP');
+                                return;
+                              }
+                              try {
+                                if (billData.reservationId) {
+                                  await fetch(`/api/reservations/${billData.reservationId}/verify-otp`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ otp: code, cashierName: user?.name || 'Cashier' }),
+                                  });
+                                }
+                              } catch {}
+                              window.dispatchEvent(new CustomEvent('load-shared-cart-trigger', { detail: billData }));
+                              setIsClaimedLocally(true);
+                              setClaimedByInfo(user?.name || 'Cashier');
+                              setClaimedAtInfo(new Date().toISOString());
+                              setIsEnteringOtp(false);
+                              onClaim?.(billData.reservationId || msg.id, msg.id, user?.name || 'Cashier');
+                              toast.success('OTP Verified. Cart loaded into register.');
+                            }
+                          }}
+                        />
+                        {otpError && (
+                          <div className="text-[10px] font-semibold" style={{ color: 'var(--danger)' }}>
+                            {otpError}
+                          </div>
+                        )}
+                        <div className="flex gap-1.5">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const code = enteredOtp.trim();
+                              if (!code) {
+                                setOtpError('Please enter OTP');
+                                return;
+                              }
+                              if (code !== String(billData.otp || '').trim()) {
+                                setOtpError('Invalid OTP');
+                                toast.error('Invalid OTP');
+                                return;
+                              }
+                              try {
+                                if (billData.reservationId) {
+                                  await fetch(`/api/reservations/${billData.reservationId}/verify-otp`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ otp: code, cashierName: user?.name || 'Cashier' }),
+                                  });
+                                }
+                              } catch {}
+                              window.dispatchEvent(new CustomEvent('load-shared-cart-trigger', { detail: billData }));
+                              setIsClaimedLocally(true);
+                              setClaimedByInfo(user?.name || 'Cashier');
+                              setClaimedAtInfo(new Date().toISOString());
+                              setIsEnteringOtp(false);
+                              onClaim?.(billData.reservationId || msg.id, msg.id, user?.name || 'Cashier');
+                              toast.success('OTP Verified. Cart loaded into register.');
+                            }}
+                            className="flex-1 h-7 rounded text-[11px] font-bold cursor-pointer transition-opacity"
+                            style={{ background: 'var(--ink)', color: 'var(--panel)', border: 0 }}
+                          >
+                            Verify & Load
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsEnteringOtp(false);
+                              setOtpError(null);
+                            }}
+                            className="px-2.5 h-7 rounded text-[11px] font-bold cursor-pointer"
+                            style={{ ...FIELD }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        window.dispatchEvent(new CustomEvent('load-shared-cart-trigger', { detail: billData }));
+                        setIsClaimedLocally(true);
+                        setClaimedByInfo(user?.name || 'Cashier');
+                        setClaimedAtInfo(new Date().toISOString());
+                        onClaim?.(billData.reservationId || msg.id, msg.id, user?.name || 'Cashier');
+                        toast.success('Cart loaded into register.');
+                      }}
+                      className="w-full h-8 mt-1 rounded text-xs font-bold cursor-pointer transition-opacity hover:opacity-90"
+                      style={{ background: 'var(--ink)', color: 'var(--panel)', border: 0 }}
+                    >
+                      Accept Bill
+                    </button>
+                  )
+                ) : null}
               </div>
-              
-              {!isMe && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const event = new CustomEvent('load-shared-cart-trigger', { detail: billData });
-                    window.dispatchEvent(event);
-                  }}
-                  className="w-full mt-2.5 py-1.5 bg-green-500 hover:bg-green-600 text-white font-bold text-[10px] rounded-lg tracking-wider uppercase transition-all hover:scale-[1.02] active:scale-95 shadow cursor-pointer text-center"
-                >
-                  Accept Bill
-                </button>
-              )}
-              {isMe && (
-                <p className="text-[9px] opacity-45 italic text-right mt-1.5">📤 Shared on LAN register</p>
-              )}
             </div>
           ) : (
-            /* ✅ Decryption Success */
-            <p className="text-xs break-words leading-relaxed select-text font-medium">{decryptedText}</p>
+            <p className="text-xs leading-relaxed break-words font-medium select-text">{decryptedText}</p>
           )
         ) : decryptionError ? (
-          /* ❌ Decryption Failure (Key mismatch or missing key) */
-          <div className="space-y-1.5 select-text">
-            <p className="text-[10px] text-red-500 dark:text-red-400 font-black flex items-center gap-1">
+          <div className="space-y-1">
+            <div className="text-[10px] font-bold flex items-center gap-1" style={{ color: 'var(--danger)' }}>
               <ShieldAlert size={11} />
-              Decryption Failed (Key Mismatch)
-            </p>
-            <div className={`p-1.5 rounded text-[8px] font-mono break-all leading-normal ${
-              darkMode ? 'bg-slate-950/80 text-red-400/80' : 'bg-red-50 text-red-600/80'
-            }`}>
-              {msg.ciphertext.slice(0, 48)}...
+              <span>Decryption key mismatch</span>
             </div>
-            <p className="text-[8px] opacity-40 leading-normal">
-              Sender key: <code className="font-bold">{msg.fingerprint}</code>
-            </p>
+            <div className="font-mono text-[9px] opacity-60 break-all">{msg.ciphertext.slice(0, 36)}...</div>
           </div>
         ) : (
-          /* ⏳ Decrypting... */
-          <p className="text-xs italic opacity-55 animate-pulse">Decrypting package...</p>
+          <p className="text-xs italic opacity-60" style={{ fontFamily: MONO }}>Decrypting...</p>
         )}
       </div>
 
-      {/* Timestamp & E2EE badge */}
+      {/* Timestamp & E2EE Label */}
       <div className="flex items-center gap-1.5 mt-1 px-1">
-        <span className={`text-[8px] ${darkMode ? 'text-slate-500' : 'text-gray-400'}`}>{timeString}</span>
+        <span style={{ fontFamily: MONO, fontSize: 9.5, color: 'var(--ink3)' }}>{timeString}</span>
         {decryptedText !== null && (
-          <span 
-            title={`E2EE derived key: ${msg.fingerprint}`}
-            className="flex items-center gap-0.5 text-[8px] font-black text-emerald-500 dark:text-emerald-400 tracking-wider uppercase"
+          <span
+            className="flex items-center gap-0.5 text-[8.5px] font-bold tracking-wider uppercase"
+            style={{ fontFamily: MONO, color: 'var(--ok)' }}
+            title={`E2EE key: ${msg.fingerprint}`}
           >
-            <ShieldCheck size={10} />
+            <ShieldCheck size={9} />
             E2EE
           </span>
         )}

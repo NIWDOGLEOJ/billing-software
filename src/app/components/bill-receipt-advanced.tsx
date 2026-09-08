@@ -1,10 +1,8 @@
-import { X, Printer, Download, ShoppingCart, Sparkles, Package, TrendingUp, CheckCircle2, ShieldCheck, FileText, Check, Settings, Eye } from 'lucide-react';
-import { useEffect, useRef, useState, useMemo } from 'react';
-import { useTheme } from '../contexts/theme-context';
-import { api } from '../utils/api';
+import { useEffect, useState, useMemo } from 'react';
 import { toast } from 'sonner';
+import { useTheme } from '../contexts/theme-context';
 
-interface BillItem {
+export interface BillItem {
   code: string;
   name: string;
   price: number;
@@ -21,14 +19,86 @@ interface BillItem {
   tradeDiscountPercent?: number;
 }
 
-interface ShopDetails {
+export interface ShopDetails {
   name: string;
   address: string;
   phone: string;
   email: string;
+  gstin?: string;
 }
 
-interface BillReceiptProps {
+/** GST state codes for mapping state prefix to place of supply name. */
+const GST_STATE_NAMES: Record<string, string> = {
+  '01': 'Jammu & Kashmir', '02': 'Himachal Pradesh', '03': 'Punjab', '04': 'Chandigarh',
+  '05': 'Uttarakhand', '06': 'Haryana', '07': 'Delhi', '08': 'Rajasthan', '09': 'Uttar Pradesh',
+  '10': 'Bihar', '11': 'Sikkim', '12': 'Arunachal Pradesh', '13': 'Nagaland', '14': 'Manipur',
+  '15': 'Mizoram', '16': 'Tripura', '17': 'Meghalaya', '18': 'Assam', '19': 'West Bengal',
+  '20': 'Jharkhand', '21': 'Odisha', '22': 'Chhattisgarh', '23': 'Madhya Pradesh',
+  '24': 'Gujarat', '26': 'Dadra & Nagar Haveli and Daman & Diu', '27': 'Maharashtra',
+  '29': 'Karnataka', '30': 'Goa', '31': 'Lakshadweep', '32': 'Kerala', '33': 'Tamil Nadu',
+  '34': 'Puducherry', '35': 'Andaman & Nicobar Islands', '36': 'Telangana',
+  '37': 'Andhra Pradesh', '38': 'Ladakh', '97': 'Other Territory',
+};
+
+/** Convert a numeric rupee amount to Indian currency English words. */
+function amountInWords(num: number): string {
+  if (isNaN(num) || num < 0) return 'Zero rupees only';
+  const a = [
+    '', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
+    'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen',
+    'seventeen', 'eighteen', 'nineteen'
+  ];
+  const b = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+
+  function convertGroup(n: number): string {
+    let out = '';
+    if (n >= 100) {
+      out += a[Math.floor(n / 100)] + ' hundred ';
+      n %= 100;
+    }
+    if (n >= 20) {
+      out += b[Math.floor(n / 10)] + (n % 10 !== 0 ? ' ' + a[n % 10] : '') + ' ';
+    } else if (n > 0) {
+      out += a[n] + ' ';
+    }
+    return out.trim();
+  }
+
+  const intPart = Math.floor(num);
+  const decPart = Math.round((num - intPart) * 100);
+
+  if (intPart === 0 && decPart === 0) return 'Zero rupees only';
+
+  let words = '';
+  const crore = Math.floor(intPart / 10000000);
+  const lakh = Math.floor((intPart % 10000000) / 100000);
+  const thousand = Math.floor((intPart % 100000) / 1000);
+  const hundred = intPart % 1000;
+
+  if (crore > 0) words += convertGroup(crore) + ' crore ';
+  if (lakh > 0) words += convertGroup(lakh) + ' lakh ';
+  if (thousand > 0) words += convertGroup(thousand) + ' thousand ';
+  if (hundred > 0) words += convertGroup(hundred) + ' ';
+
+  words = words.trim();
+  if (words) {
+    words += ' rupees';
+  }
+
+  if (decPart > 0) {
+    const paiseWords = convertGroup(decPart);
+    if (words) {
+      words += ' and ' + paiseWords + ' paise';
+    } else {
+      words = paiseWords + ' paise';
+    }
+  }
+
+  words += ' only';
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+export interface BillReceiptProps {
   items: BillItem[];
   total: number;
   subtotal: number;
@@ -48,9 +118,15 @@ interface BillReceiptProps {
   roundedTotal?: number;
   roundingAdjustment?: number;
   onClose: () => void;
+  onFinalizeBill?: () => Promise<void>;
   customerGstin?: string;
   igst?: number;
   pricingTier?: string;
+  billLocked?: boolean;
+  billDiscount?: number;
+  loyaltyDiscount?: number;
+  couponDiscount?: number;
+  couponCode?: string;
 }
 
 export function BillReceipt({
@@ -73,988 +149,810 @@ export function BillReceipt({
   roundedTotal,
   roundingAdjustment,
   onClose,
+  onFinalizeBill,
   customerGstin,
   igst,
-  pricingTier,
+  billLocked,
+  billDiscount,
+  loyaltyDiscount,
+  couponDiscount,
+  couponCode,
 }: BillReceiptProps) {
-  const { darkMode } = useTheme();
+  const [selectedTemplate, setSelectedTemplate] = useState<'thermal' | 'invoice'>('thermal');
+  const [isFinalizing, setIsFinalizing] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState<string>('');
 
+  const { theme, setTheme } = useTheme();
+
+  // Extract store state code (first 2 digits of GSTIN)
+  const storeState = (shopDetails.gstin || '').substring(0, 2);
+
+  // Interstate supply requires both GSTINs and differing state codes
   const isInterState = useMemo(() => {
-    if (!customerGstin) return false;
-    const storeState = '27'; // Maharashtra State Code
-    const customerState = customerGstin.substring(0, 2);
-    return storeState !== customerState;
-  }, [customerGstin]);
+    if (!customerGstin || !storeState) return false;
+    return storeState !== customerGstin.substring(0, 2);
+  }, [customerGstin, storeState]);
 
-  // Template customizer state variables
-  const [selectedTemplate, setSelectedTemplate] = useState<'invoice' | 'thermal'>('invoice');
-  const [storeLogo, setStoreLogo] = useState<'standard' | 'grocery' | 'tech' | 'apparel'>('standard');
-  const [signatoryName, setSignatoryName] = useState(cashierName || 'Store Manager');
-  const [customFooter, setCustomFooter] = useState('Thank you for shopping with us! Visit again.');
-  const [showGstBreakup, setShowGstBreakup] = useState(true);
-  const [showVerificationStamp, setShowVerificationStamp] = useState(true);
-  const [showQrCode, setShowQrCode] = useState(true);
-  const [customInvoiceNote, setCustomInvoiceNote] = useState('Terms: 1. Goods once sold will not be taken back. 2. Any disputes subject to local jurisdiction.');
-
-  // Load receipt customizer settings from backend upon mount
-  useEffect(() => {
-    const loadReceiptSettings = async () => {
-      try {
-        const settings = await api.get<any>('/settings');
-        if (settings) {
-          if (settings.receiptTemplate !== undefined) setSelectedTemplate(settings.receiptTemplate as any);
-          if (settings.receiptLogo !== undefined) setStoreLogo(settings.receiptLogo as any);
-          if (settings.receiptSignatory !== undefined) setSignatoryName(settings.receiptSignatory);
-          if (settings.receiptFooter !== undefined) setCustomFooter(settings.receiptFooter);
-          if (settings.showGstBreakup !== undefined) setShowGstBreakup(settings.showGstBreakup === 'true');
-          if (settings.showVerificationStamp !== undefined) setShowVerificationStamp(settings.showVerificationStamp === 'true');
-          if (settings.showQrCode !== undefined) setShowQrCode(settings.showQrCode === 'true');
-          if (settings.customInvoiceNote !== undefined) setCustomInvoiceNote(settings.customInvoiceNote);
-        }
-      } catch (err) {
-        console.warn('Failed to load receipt customizer settings:', err);
-      }
-    };
-    loadReceiptSettings();
-  }, []);
-
-  const updateSetting = async (key: string, value: string) => {
-    try {
-      await api.put('/settings', { [key]: value });
-    } catch (err) {
-      console.warn(`Failed to save receipt setting: ${key} = ${value}`, err);
-    }
-  };
-
-  // Date and time formatter
-  const currentDate = useMemo(() => {
-    return new Date().toLocaleString('en-IN', {
-      year: 'numeric',
-      month: 'long',
+  // Formatted date
+  const formattedDate = useMemo(() => {
+    return new Date().toLocaleDateString('en-IN', {
       day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    }) + ' \u00b7 ' + new Date().toLocaleTimeString('en-IN', {
       hour: '2-digit',
       minute: '2-digit',
-      second: '2-digit',
+      hour12: false,
     });
   }, []);
 
-  const qrCanvasRef = useRef<HTMLCanvasElement>(null);
-  const [qrError, setQrError] = useState(false);
-  const [qrDataUrl, setQrDataUrl] = useState<string>('');
+  // PAN derived from 15-character GSTIN (characters 3-12)
+  const pan = useMemo(() => {
+    const gstin = shopDetails.gstin || '';
+    if (gstin.length === 15) return gstin.slice(2, 12);
+    return 'ABCDE1234F';
+  }, [shopDetails.gstin]);
 
-  // Generate QR Code dynamically
+  // Place of supply
+  const placeOfSupply = useMemo(() => {
+    if (isInterState && customerGstin) {
+      const code = customerGstin.substring(0, 2);
+      return GST_STATE_NAMES[code] ? `${GST_STATE_NAMES[code]} (${code})` : code;
+    }
+    if (storeState && GST_STATE_NAMES[storeState]) {
+      return `${GST_STATE_NAMES[storeState]} (${storeState})`;
+    }
+    return 'Karnataka (29)';
+  }, [isInterState, customerGstin, storeState]);
+
+  // Total units across all items
+  const totalUnits = useMemo(() => {
+    return items.reduce((sum, it) => sum + (Number(it.quantity) || 1), 0);
+  }, [items]);
+
+  // Rate-wise GST extraction breakdown
+  const rateWiseBreakdown = useMemo(() => {
+    const map = new Map<number, { rate: number; taxable: number; cgst: number; sgst: number; igst: number; totalTax: number }>();
+    items.forEach(item => {
+      const lineInclusive = item.price * item.quantity;
+      const rate = gstEnabled ? (item.gstRate || 0) : 0;
+      const lineTaxable = rate > 0 ? lineInclusive / (1 + rate / 100) : lineInclusive;
+      const lineTax = lineInclusive - lineTaxable;
+      const lineCgst = isInterState ? 0 : lineTax / 2;
+      const lineSgst = isInterState ? 0 : lineTax / 2;
+      const lineIgst = isInterState ? lineTax : 0;
+
+      const curr = map.get(rate) || { rate, taxable: 0, cgst: 0, sgst: 0, igst: 0, totalTax: 0 };
+      curr.taxable += lineTaxable;
+      curr.cgst += lineCgst;
+      curr.sgst += lineSgst;
+      curr.igst += lineIgst;
+      curr.totalTax += lineTax;
+      map.set(rate, curr);
+    });
+
+    return Array.from(map.values()).sort((a, b) => a.rate - b.rate);
+  }, [items, gstEnabled, isInterState]);
+
+  // Reconciled totals
+  const taxableSum = useMemo(() => {
+    return rateWiseBreakdown.reduce((sum, r) => sum + r.taxable, 0);
+  }, [rateWiseBreakdown]);
+
+  const cgstSum = useMemo(() => {
+    return rateWiseBreakdown.reduce((sum, r) => sum + r.cgst, 0);
+  }, [rateWiseBreakdown]);
+
+  const sgstSum = useMemo(() => {
+    return rateWiseBreakdown.reduce((sum, r) => sum + r.sgst, 0);
+  }, [rateWiseBreakdown]);
+
+  const igstSum = useMemo(() => {
+    return rateWiseBreakdown.reduce((sum, r) => sum + r.igst, 0);
+  }, [rateWiseBreakdown]);
+
+  const finalTotal = roundedTotal !== undefined ? roundedTotal : total;
+  const rounding = roundingAdjustment !== undefined
+    ? roundingAdjustment
+    : Number((finalTotal - (taxableSum + cgstSum + sgstSum + igstSum)).toFixed(2));
+
+  const tendered = amountReceived !== undefined && amountReceived > 0 ? amountReceived : finalTotal;
+  const change = changeAmount !== undefined && changeAmount > 0 ? changeAmount : 0;
+
+  // Generate real QR code for the bill
   useEffect(() => {
+    let isMounted = true;
     const generateQR = async () => {
       try {
         const QRCode = await import('qrcode');
-        if (qrCanvasRef.current) {
-          const billData = JSON.stringify({
-            billNumber,
-            date: currentDate,
-            total: total.toFixed(2),
-            items: items.length,
-            shop: shopDetails.name,
-            customer: customerName || 'Walk-in',
-            payment: paymentMode?.toUpperCase(),
-          });
-
-          await QRCode.toCanvas(qrCanvasRef.current, billData, {
-            width: 130,
-            margin: 1,
-          });
-
-          // Convert canvas to data URL for high-fidelity printing image
-          const dataUrl = qrCanvasRef.current.toDataURL();
-          setQrDataUrl(dataUrl);
-        }
-      } catch (error) {
-        console.error('Error generating QR code:', error);
-        setQrError(true);
+        const qrPayload = JSON.stringify({
+          bill: billNumber,
+          date: formattedDate,
+          total: finalTotal.toFixed(2),
+          items: items.length,
+          gstin: shopDetails.gstin || '',
+          till: 'T-02',
+        });
+        const url = await QRCode.toDataURL(qrPayload, {
+          width: 144,
+          margin: 1,
+          color: {
+            dark: '#16150f',
+            light: '#fffefb',
+          },
+        });
+        if (isMounted) setQrDataUrl(url);
+      } catch (err) {
+        console.error('Failed to generate bill QR code:', err);
       }
     };
-
     generateQR();
-  }, [billNumber, currentDate, total, items.length, shopDetails.name, customerName, paymentMode]);
+    return () => { isMounted = false; };
+  }, [billNumber, formattedDate, finalTotal, items.length, shopDetails.gstin]);
 
-  // Aggregate items by GST tax rate slab for compliant regional GST audits
-  interface TaxSlabSummary {
-    rate: number;
-    taxableValue: number;
-    cgstAmount: number;
-    sgstAmount: number;
-    igstAmount: number;
-    totalTax: number;
-  }
-
-  const taxSlabList = useMemo(() => {
-    const taxSlabs: { [rate: number]: TaxSlabSummary } = {};
-    items.forEach((item) => {
-      if (!gstEnabled || !item.gstRate || item.gstRate <= 0) return;
-      const taxableValue = item.price * item.quantity;
-      const totalTax = (taxableValue * item.gstRate) / 100;
-      const cgstAmount = isInterState ? 0 : totalTax / 2;
-      const sgstAmount = isInterState ? 0 : totalTax / 2;
-      const igstAmount = isInterState ? totalTax : 0;
-
-      if (!taxSlabs[item.gstRate]) {
-        taxSlabs[item.gstRate] = {
-          rate: item.gstRate,
-          taxableValue: 0,
-          cgstAmount: 0,
-          sgstAmount: 0,
-          igstAmount: 0,
-          totalTax: 0
-        };
+  // Print function
+  const handlePrint = async (template: 'thermal' | 'invoice') => {
+    if (isFinalizing) return;
+    if (onFinalizeBill && !billLocked) {
+      setIsFinalizing(true);
+      try {
+        await onFinalizeBill();
+      } catch (err) {
+        console.error('Failed to finalize bill before printing:', err);
+        toast.error('Could not save bill before printing');
+        return;
+      } finally {
+        setIsFinalizing(false);
       }
-
-      taxSlabs[item.gstRate].taxableValue += taxableValue;
-      taxSlabs[item.gstRate].cgstAmount += cgstAmount;
-      taxSlabs[item.gstRate].sgstAmount += sgstAmount;
-      taxSlabs[item.gstRate].igstAmount += igstAmount;
-      taxSlabs[item.gstRate].totalTax += totalTax;
-    });
-    return Object.values(taxSlabs);
-  }, [items, gstEnabled, isInterState]);
-
-  // Dynamic HSN slab summary for full corporate invoices
-  const hsnSlabList = useMemo(() => {
-    const hsnSlabs: {
-      [key: string]: {
-        hsnCode: string;
-        taxableValue: number;
-        gstRate: number;
-        cgstAmount: number;
-        sgstAmount: number;
-        igstAmount: number;
-        totalTax: number;
-      }
-    } = {};
-
-    items.forEach((item) => {
-      const hsn = item.hsnCode || '8517';
-      const rate = gstEnabled ? (item.gstRate || 0) : 0;
-      const key = `${hsn}_${rate}`;
-      const taxableValue = item.price * item.quantity;
-      const totalTax = (taxableValue * rate) / 100;
-      const cgstAmount = isInterState ? 0 : totalTax / 2;
-      const sgstAmount = isInterState ? 0 : totalTax / 2;
-      const igstAmount = isInterState ? totalTax : 0;
-
-      if (!hsnSlabs[key]) {
-        hsnSlabs[key] = {
-          hsnCode: hsn,
-          taxableValue: 0,
-          gstRate: rate,
-          cgstAmount: 0,
-          sgstAmount: 0,
-          igstAmount: 0,
-          totalTax: 0
-        };
-      }
-
-      hsnSlabs[key].taxableValue += taxableValue;
-      hsnSlabs[key].cgstAmount += cgstAmount;
-      hsnSlabs[key].sgstAmount += sgstAmount;
-      hsnSlabs[key].igstAmount += igstAmount;
-      hsnSlabs[key].totalTax += totalTax;
-    });
-
-    return Object.values(hsnSlabs).sort((a, b) => a.hsnCode.localeCompare(b.hsnCode));
-  }, [items, gstEnabled, isInterState]);
-
-  // Print function injecting customized overrides for A4 or thermal widths
-  const handlePrint = (template: 'invoice' | 'thermal') => {
-    const styleElement = document.createElement('style');
-    styleElement.id = 'print-style-override';
-    
-    if (template === 'thermal') {
-      styleElement.innerHTML = `
-        @media print {
-          body * {
-            visibility: hidden !important;
-          }
-          #thermal-print-target, #thermal-print-target * {
-            visibility: visible !important;
-          }
-          #thermal-print-target {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 80mm !important;
-            margin: 0 !important;
-            padding: 4mm !important;
-            background: white !important;
-            color: black !important;
-            box-shadow: none !important;
-            border: none !important;
-          }
-          @page {
-            size: 80mm auto !important;
-            margin: 0 !important;
-          }
-        }
-      `;
-    } else {
-      styleElement.innerHTML = `
-        @media print {
-          body * {
-            visibility: hidden !important;
-          }
-          #invoice-print-target, #invoice-print-target * {
-            visibility: visible !important;
-          }
-          #invoice-print-target {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
-            max-width: 100% !important;
-            margin: 0 !important;
-            padding: 10mm !important;
-            background: white !important;
-            color: black !important;
-            box-shadow: none !important;
-            border: none !important;
-          }
-          @page {
-            size: A4 portrait !important;
-            margin: 10mm !important;
-          }
-        }
-      `;
     }
-    
-    document.head.appendChild(styleElement);
     window.print();
-    
-    // Cleanup styles
-    setTimeout(() => {
-      const el = document.getElementById('print-style-override');
-      if (el) el.remove();
-    }, 1000);
   };
 
-  // Render customized shop logo
-  const renderStoreLogo = () => {
-    switch (storeLogo) {
-      case 'grocery':
-        return <ShoppingCart className="w-10 h-10 text-emerald-500" />;
-      case 'tech':
-        return <Sparkles className="w-10 h-10 text-blue-500 animate-pulse" />;
-      case 'apparel':
-        return <Package className="w-10 h-10 text-pink-500" />;
-      default:
-        return <TrendingUp className="w-10 h-10 text-indigo-500" />;
-    }
-  };
+  // Keyboard shortcut listener: F9 prints, Escape closes
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F9') {
+        e.preventDefault();
+        e.stopPropagation();
+        handlePrint(selectedTemplate);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedTemplate, onClose, isFinalizing]);
+
+  const isThermal = selectedTemplate === 'thermal';
 
   return (
-    <div className="fixed inset-0 bg-black/75 backdrop-blur-md flex items-center justify-center z-50 p-4 transition-all duration-300">
-      <div className={`w-full max-w-6xl h-[92vh] flex flex-col md:flex-row rounded-3xl border overflow-hidden shadow-2xl transition-all ${
-        darkMode 
-          ? 'bg-slate-900/98 border-slate-800 text-white shadow-indigo-950/20' 
-          : 'bg-white text-gray-900 border-gray-250 shadow-2xl'
-      }`}>
-        
-        {/* LEFT COLUMN: INTERACTIVE CUSTOMIZATION SIDEBAR */}
-        <div className={`w-full md:w-80 lg:w-[350px] flex-shrink-0 flex flex-col border-b md:border-b-0 md:border-r p-5 overflow-y-auto ${
-          darkMode ? 'bg-slate-950/40 border-slate-800' : 'bg-gray-50 border-gray-200'
-        }`}>
-          <div className="flex items-center gap-2 mb-5">
-            <Settings className="w-5 h-5 text-blue-500" />
-            <div>
-              <h3 className="font-extrabold text-sm uppercase tracking-wider">Reconciliation & Layout</h3>
-              <p className="text-[10px] opacity-60">Customize templates and fields live</p>
-            </div>
-          </div>
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-[var(--bg)] text-[var(--ink)] flex flex-col font-sans">
+      {/* Dynamic print stylesheet */}
+      <style>{`
+        @media print {
+          body * {
+            visibility: hidden !important;
+          }
+          #receipt-print-area, #receipt-print-area * {
+            visibility: visible !important;
+          }
+          #receipt-print-area {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #fffefb !important;
+            color: #16150f !important;
+            box-shadow: none !important;
+            border: none !important;
+          }
+          .no-print {
+            display: none !important;
+          }
+          ${isThermal ? `
+            @page {
+              size: 80mm auto !important;
+              margin: 0 !important;
+            }
+            #receipt-print-area {
+              width: 72mm !important;
+              max-width: 72mm !important;
+              padding: 2mm 1mm !important;
+            }
+          ` : `
+            @page {
+              size: A4 portrait !important;
+              margin: 10mm !important;
+            }
+            #receipt-print-area {
+              width: 100% !important;
+              max-width: 100% !important;
+              padding: 0 !important;
+            }
+          `}
+        }
+      `}</style>
 
-          <div className="space-y-5 flex-1">
-            {/* Template Selector */}
-            <div>
-              <label className="text-[10px] font-black uppercase opacity-65 tracking-wider block mb-2">Select Print Template</label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => { setSelectedTemplate('invoice'); updateSetting('receiptTemplate', 'invoice'); }}
-                  className={`flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border font-bold text-xs transition-all ${
-                    selectedTemplate === 'invoice'
-                      ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-500/10'
-                      : darkMode
-                      ? 'bg-slate-900 border-slate-800 hover:bg-slate-850 text-slate-300'
-                      : 'bg-white border-gray-200 hover:bg-gray-100 text-gray-700'
-                  }`}
-                >
-                  <FileText size={16} />
-                  Tax Invoice
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setSelectedTemplate('thermal'); updateSetting('receiptTemplate', 'thermal'); }}
-                  className={`flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border font-bold text-xs transition-all ${
-                    selectedTemplate === 'thermal'
-                      ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-500/10'
-                      : darkMode
-                      ? 'bg-slate-900 border-slate-800 hover:bg-slate-850 text-slate-300'
-                      : 'bg-white border-gray-200 hover:bg-gray-100 text-gray-700'
-                  }`}
-                >
-                  <Printer size={16} />
-                  POS Receipt
-                </button>
-              </div>
-            </div>
+      {/* Top Header Bar per Receipt.dc.html */}
+      <div className="no-print flex flex-wrap items-center gap-2 sm:gap-5 px-5 min-h-[58px] bg-[var(--panel)] border-b border-[var(--border)] shrink-0 z-20">
+        <div className="flex items-baseline gap-2.5">
+          <span className="text-[16px] font-extrabold tracking-[-0.02em]">{shopDetails.name || 'Sunrise Provisions'}</span>
+          <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ink3)]">
+            Bill output
+          </span>
+        </div>
 
-            {/* Logo Customization */}
-            <div>
-              <label className="text-[10px] font-black uppercase opacity-65 tracking-wider block mb-2">Supplier Corporate Icon</label>
-              <div className="grid grid-cols-4 gap-1.5">
-                {(['standard', 'grocery', 'tech', 'apparel'] as const).map((logo) => (
-                  <button
-                    key={logo}
-                    type="button"
-                    onClick={() => { setStoreLogo(logo); updateSetting('receiptLogo', logo); }}
-                    className={`p-2 rounded-lg border flex items-center justify-center transition-all ${
-                      storeLogo === logo
-                        ? 'bg-blue-600/10 border-blue-500 text-blue-500'
-                        : darkMode
-                        ? 'bg-slate-900 border-slate-800 hover:bg-slate-850 text-slate-400 hover:text-slate-200'
-                        : 'bg-white border-gray-200 hover:bg-gray-100 text-gray-500 hover:text-gray-800'
-                    }`}
-                  >
-                    {logo === 'grocery' && <ShoppingCart size={15} />}
-                    {logo === 'tech' && <Sparkles size={15} />}
-                    {logo === 'apparel' && <Package size={15} />}
-                    {logo === 'standard' && <TrendingUp size={15} />}
-                  </button>
-                ))}
-              </div>
-            </div>
+        {/* View toggle segmented control */}
+        <div className="flex items-center gap-0.5 p-[3px] border border-[var(--border)] rounded-lg bg-[var(--sub)]">
+          <button
+            type="button"
+            onClick={() => setSelectedTemplate('thermal')}
+            className={`px-3 py-1.5 border-0 rounded-[5px] text-[12px] font-semibold transition-colors ${
+              isThermal
+                ? 'bg-[var(--accent-soft)] text-[var(--accent-hi)]'
+                : 'bg-transparent text-[var(--ink3)] hover:text-[var(--ink)]'
+            }`}
+          >
+            Thermal 80&thinsp;mm
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedTemplate('invoice')}
+            className={`px-3 py-1.5 border-0 rounded-[5px] text-[12px] font-semibold transition-colors ${
+              !isThermal
+                ? 'bg-[var(--accent-soft)] text-[var(--accent-hi)]'
+                : 'bg-transparent text-[var(--ink3)] hover:text-[var(--ink)]'
+            }`}
+          >
+            A4 tax invoice
+          </button>
+        </div>
 
-            {/* Custom Inputs */}
-            <div className="space-y-3.5">
-              <div>
-                <label className="text-[10px] font-black uppercase opacity-65 tracking-wider block mb-1">Authorized Signatory Name</label>
-                <input
-                  type="text"
-                  value={signatoryName}
-                  onChange={(e) => { setSignatoryName(e.target.value); updateSetting('receiptSignatory', e.target.value); }}
-                  className={`w-full px-3 py-2 text-xs border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                    darkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-gray-300 text-gray-900'
-                  }`}
-                />
-              </div>
+        <div className="flex-1 min-w-[12px]" />
 
-              {selectedTemplate === 'invoice' ? (
-                <div>
-                  <label className="text-[10px] font-black uppercase opacity-65 tracking-wider block mb-1">Invoice Notes / Terms</label>
-                  <textarea
-                    rows={3}
-                    value={customInvoiceNote}
-                    onChange={(e) => { setCustomInvoiceNote(e.target.value); updateSetting('customInvoiceNote', e.target.value); }}
-                    className={`w-full px-3 py-2 text-[11px] border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                      darkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-gray-300 text-gray-900'
-                    }`}
-                  />
-                </div>
-              ) : (
-                <div>
-                  <label className="text-[10px] font-black uppercase opacity-65 tracking-wider block mb-1">POS Receipt Greeting</label>
-                  <textarea
-                    rows={2}
-                    value={customFooter}
-                    onChange={(e) => { setCustomFooter(e.target.value); updateSetting('receiptFooter', e.target.value); }}
-                    className={`w-full px-3 py-2 text-[11px] border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                      darkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-gray-300 text-gray-900'
-                    }`}
-                  />
-                </div>
-              )}
-            </div>
+        {/* Action buttons */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              toast.success(`Bill ${billNumber} sent to ${customerName || 'customer email'}`);
+            }}
+            className="h-8 px-3.5 border border-[var(--border2)] rounded-[7px] bg-[var(--sub)] text-[12px] font-semibold text-[var(--ink)] hover:bg-[var(--rule)] transition-colors cursor-pointer"
+          >
+            Email bill
+          </button>
 
-            {/* Feature Toggles */}
-            <div className="space-y-2.5 pt-2 border-t border-dashed dark:border-slate-800 border-gray-250">
-              <label className="text-[10px] font-black uppercase opacity-65 tracking-wider block mb-1">Toggle Invoice Sections</label>
-              
-              <label className="flex items-center justify-between text-xs font-semibold select-none cursor-pointer">
-                <span>GST breakups summary</span>
-                <input
-                  type="checkbox"
-                  checked={showGstBreakup}
-                  onChange={(e) => { setShowGstBreakup(e.target.checked); updateSetting('showGstBreakup', String(e.target.checked)); }}
-                  className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4"
-                />
-              </label>
+          <button
+            type="button"
+            disabled={isFinalizing}
+            onClick={() => handlePrint(selectedTemplate)}
+            className="h-8 px-3.5 border border-[var(--accent-line)] rounded-[7px] bg-[var(--accent-soft)] text-[var(--accent-hi)] text-[12px] font-bold hover:bg-[var(--accent-soft2)] transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+          >
+            <span>{isFinalizing ? 'Recording…' : 'Print'}</span>
+            <span className="font-mono text-[10px] opacity-75">F9</span>
+          </button>
 
-              <label className="flex items-center justify-between text-xs font-semibold select-none cursor-pointer">
-                <span>Cryptographic Stamp Verified</span>
-                <input
-                  type="checkbox"
-                  checked={showVerificationStamp}
-                  onChange={(e) => { setShowVerificationStamp(e.target.checked); updateSetting('showVerificationStamp', String(e.target.checked)); }}
-                  className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4"
-                />
-              </label>
+          <div className="w-px h-[22px] bg-[var(--border)] mx-1" />
 
-              <label className="flex items-center justify-between text-xs font-semibold select-none cursor-pointer">
-                <span>Interactive QR Code</span>
-                <input
-                  type="checkbox"
-                  checked={showQrCode}
-                  onChange={(e) => { setShowQrCode(e.target.checked); updateSetting('showQrCode', String(e.target.checked)); }}
-                  className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4"
-                />
-              </label>
-            </div>
-          </div>
-
-          <div className="pt-4 border-t dark:border-slate-800 border-gray-250 mt-5">
+          {/* Light/Dark Toggle */}
+          <div className="flex items-center gap-0.5 p-[3px] border border-[var(--border)] rounded-full bg-[var(--sub)]">
             <button
-              onClick={onClose}
-              className={`w-full py-2.5 rounded-xl font-extrabold text-xs transition-all uppercase tracking-wider ${
-                darkMode ? 'bg-slate-850 hover:bg-slate-800 text-slate-300' : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+              type="button"
+              onClick={() => setTheme('light')}
+              className={`px-2.5 py-1 border-0 rounded-full font-mono text-[10px] font-bold tracking-[0.08em] transition-colors cursor-pointer ${
+                theme === 'light'
+                  ? 'bg-[var(--accent-soft)] text-[var(--accent-hi)]'
+                  : 'bg-transparent text-[var(--ink3)]'
               }`}
             >
-              Close Previewer
+              LIGHT
+            </button>
+            <button
+              type="button"
+              onClick={() => setTheme('dark')}
+              className={`px-2.5 py-1 border-0 rounded-full font-mono text-[10px] font-bold tracking-[0.08em] transition-colors cursor-pointer ${
+                theme === 'dark'
+                  ? 'bg-[var(--accent-soft)] text-[var(--accent-hi)]'
+                  : 'bg-transparent text-[var(--ink3)]'
+              }`}
+            >
+              DARK
             </button>
           </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="ml-2 text-[12px] font-semibold text-[var(--accent)] hover:text-[var(--accent-hi)] transition-colors cursor-pointer"
+          >
+            Register &rarr;
+          </button>
         </div>
+      </div>
 
-        {/* RIGHT COLUMN: LIVE INTERACTIVE PREVIEW & ACTIONS */}
-        <div className={`flex-1 flex flex-col min-w-0 ${
-          darkMode ? 'bg-slate-950/20' : 'bg-gray-100'
-        }`}>
-          {/* Action Header */}
-          <div className={`flex justify-between items-center px-6 py-4 border-b print:hidden transition-colors ${
-            darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200'
-          }`}>
-            <div className="flex items-center gap-2">
-              <Eye className="w-5 h-5 text-blue-500" />
-              <span className="font-bold text-sm">Interactive Live preview ({selectedTemplate === 'invoice' ? 'Tax Invoice A4' : 'Compact POS Receipt 80mm'})</span>
-            </div>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => handlePrint(selectedTemplate)}
-                className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-extrabold text-xs shadow-lg shadow-blue-500/10 transition-all select-none cursor-pointer transform active:scale-95"
-              >
-                <Printer size={15} />
-                Print / Save PDF
-              </button>
-              <button
-                type="button"
-                onClick={onClose}
-                className={`p-2 rounded-xl transition-colors cursor-pointer border ${
-                  darkMode 
-                    ? 'hover:bg-slate-800 border-slate-800 text-slate-400 hover:text-white' 
-                    : 'hover:bg-gray-50 border-gray-250 text-gray-500 hover:text-gray-800 bg-white'
-                }`}
-              >
-                <X size={20} />
-              </button>
-            </div>
-          </div>
+      {/* Main Content Area */}
+      <div className="flex-1 flex items-start justify-center gap-10 p-8 sm:p-10 pb-20 overflow-auto">
+        {isThermal ? (
+          <>
+            {/* THERMAL 80MM VIEW */}
+            <div className="flex flex-col items-center gap-3.5">
+              <div className="no-print font-mono text-[10px] font-semibold tracking-[0.14em] uppercase text-[var(--ink4)]">
+                72&thinsp;mm printable &middot; ESC/POS graphic mode
+              </div>
 
-          {/* Live Preview Container */}
-          <div className="flex-1 overflow-y-auto p-6 flex justify-center items-start min-h-0">
-            {selectedTemplate === 'invoice' ? (
-              
-              /* ========================================================================= */
-              /* A4 CORPORATE TAX INVOICE TEMPLATE                                         */
-              /* ========================================================================= */
-              <div 
-                id="invoice-print-target" 
-                className="w-full max-w-[800px] bg-white text-gray-900 border border-gray-300 rounded-2xl shadow-2xl p-8 my-4 print:my-0 print:border-none print:shadow-none animate-scale-in"
+              {/* Printable Thermal Paper */}
+              <div
+                id="receipt-print-area"
+                className="w-[300px] bg-[#fffefb] text-[#16150f] shadow-[0_24px_48px_-18px_var(--paper-shadow)] p-[20px_18px_0] select-text"
               >
-                {/* Invoice Header */}
-                <div className="flex justify-between items-start border-b-2 border-gray-200 pb-5 mb-5">
-                  <div className="flex items-start gap-4">
-                    <div className="p-3 bg-gray-50 border border-gray-150 rounded-xl mt-1 print:p-0 print:border-none">
-                      {renderStoreLogo()}
-                    </div>
-                    <div>
-                      <h1 className="text-2xl font-black tracking-tight text-slate-800">{shopDetails.name}</h1>
-                      <p className="text-[11px] text-gray-500 leading-relaxed max-w-sm mt-1">{shopDetails.address}</p>
-                      <p className="text-[11px] text-gray-500 mt-1">Phone: <span className="font-semibold text-gray-800">{shopDetails.phone}</span> | Email: <span className="font-semibold text-gray-800">{shopDetails.email}</span></p>
-                      <p className="text-[10px] text-gray-400 mt-0.5 font-bold font-mono">GSTIN: 27AAAAA1111A1Z1</p>
-                    </div>
+                {/* Store Masthead */}
+                <div className="text-center pb-3">
+                  <div className="text-[17px] font-extrabold tracking-[0.04em]">
+                    {(shopDetails.name || 'SUNRISE PROVISIONS').toUpperCase()}
                   </div>
-                  <div className="text-right">
-                    <span className="px-3 py-1 bg-slate-100 text-slate-800 rounded-full font-black text-[10px] uppercase tracking-wider">Tax Invoice</span>
-                    <h2 className="text-lg font-mono font-black text-blue-600 mt-2">#{billNumber}</h2>
-                    <p className="text-[10px] text-gray-500 font-semibold mt-1">Date: {currentDate}</p>
-                    <p className="text-[10px] text-gray-500 font-semibold uppercase mt-0.5">Mode: <span className="text-emerald-600">{paymentMode || 'Cash'}</span></p>
+                  <div className="text-[10.5px] leading-relaxed text-[#55524a] pt-1">
+                    {shopDetails.address || '123 Main Street, City, State 12345'}
+                    <br />
+                    Tel {shopDetails.phone || '(555) 123-4567'}
+                  </div>
+                  <div className="font-mono text-[10px] font-semibold text-[#16150f] pt-1">
+                    GSTIN {shopDetails.gstin || '29ABCDE1234F1Z5'}
                   </div>
                 </div>
 
-                {/* Billed To Address Block */}
-                <div className="grid grid-cols-2 gap-6 bg-slate-50 border border-gray-200 rounded-xl p-4 mb-5 text-xs">
-                  <div>
-                    <h4 className="font-black text-[10px] uppercase tracking-wider text-gray-400 mb-2">Billed To (Customer Details)</h4>
-                    <p className="font-black text-sm text-slate-850">{customerName || 'Cash Customer'}</p>
-                    <p className="text-gray-500 font-medium mt-1">Phone: {customerPhone || 'N/A'}</p>
-                    {customerGstin && (
-                      <p className="text-emerald-600 font-extrabold mt-1 text-[10px] uppercase tracking-wide font-mono select-all">
-                        GSTIN: {customerGstin}
-                      </p>
-                    )}
-                    {customerPhone && !customerGstin && <p className="text-[9px] text-purple-600 font-bold mt-1 uppercase tracking-wide">NexusFlow Loyalty Program Member</p>}
+                {/* TAX INVOICE Band */}
+                <div className="border-t border-[#16150f] border-b border-[#d9d5cb] py-1.5 text-center font-mono text-[10px] font-bold tracking-[0.18em]">
+                  TAX INVOICE
+                </div>
+
+                {/* Meta Grid */}
+                <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-[3px] py-2.5 font-mono text-[10.5px] border-b border-[#d9d5cb]">
+                  <span className="text-[#7d7a71]">BILL</span>
+                  <span className="font-semibold text-right">{billNumber}</span>
+
+                  <span className="text-[#7d7a71]">DATE</span>
+                  <span className="text-right">{formattedDate}</span>
+
+                  <span className="text-[#7d7a71]">TILL</span>
+                  <span className="text-right">T-02 &middot; {cashierName}</span>
+
+                  <span className="text-[#7d7a71]">CUST</span>
+                  <span className="text-right">{customerPhone || customerName || 'Walk-in'}</span>
+                </div>
+
+                {/* Items Column Header */}
+                <div className="flex justify-between py-2 pb-1.5 font-mono text-[9px] font-bold tracking-[0.1em] text-[#7d7a71]">
+                  <span>ITEM</span>
+                  <span>AMOUNT</span>
+                </div>
+
+                {/* Items List */}
+                <div className="border-t border-[#d9d5cb] flex flex-col">
+                  {items.map((item, idx) => {
+                    const lineAmount = item.price * item.quantity;
+                    return (
+                      <div key={idx} className="flex flex-col gap-0.5 py-2 border-b border-[#ece9e0]">
+                        <div className="flex justify-between items-baseline gap-2.5">
+                          <span className="text-[12.5px] font-semibold leading-tight">
+                            {item.name}
+                          </span>
+                          <span className="font-mono text-[12.5px] font-bold tabular-nums whitespace-nowrap">
+                            {lineAmount.toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between font-mono text-[10px] text-[#7d7a71]">
+                          <span>
+                            {item.quantity} &times; {item.price.toFixed(2)}
+                          </span>
+                          <span>GST {item.gstRate || 0}%</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Counts Row */}
+                <div className="flex justify-between py-2.5 font-mono text-[10px] text-[#7d7a71] border-b border-[#d9d5cb]">
+                  <span>{items.length} ITEMS</span>
+                  <span>{totalUnits} UNITS</span>
+                </div>
+
+                {/* Tax Breakdown Grid */}
+                <div className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 py-2.5 font-mono text-[11px] tabular-nums">
+                  <span className="text-[#55524a]">Taxable value</span>
+                  <span>{taxableSum.toFixed(2)}</span>
+
+                  {isInterState ? (
+                    <>
+                      <span className="text-[#55524a]">IGST</span>
+                      <span>{igstSum.toFixed(2)}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-[#55524a]">CGST</span>
+                      <span>{cgstSum.toFixed(2)}</span>
+                      <span className="text-[#55524a]">SGST</span>
+                      <span>{sgstSum.toFixed(2)}</span>
+                    </>
+                  )}
+
+                  {billDiscount !== undefined && billDiscount > 0 && (
+                    <>
+                      <span className="text-[#55524a]">Bill discount</span>
+                      <span className="text-[#b91c1c]">-₹{billDiscount.toFixed(2)}</span>
+                    </>
+                  )}
+
+                  {couponDiscount !== undefined && couponDiscount > 0 && (
+                    <>
+                      <span className="text-[#55524a]">Coupon ({couponCode || 'PROMO'})</span>
+                      <span className="text-[#b91c1c]">-₹{couponDiscount.toFixed(2)}</span>
+                    </>
+                  )}
+
+                  {loyaltyDiscount !== undefined && loyaltyDiscount > 0 && (
+                    <>
+                      <span className="text-[#55524a]">Loyalty redeemed</span>
+                      <span className="text-[#b91c1c]">-₹{loyaltyDiscount.toFixed(2)}</span>
+                    </>
+                  )}
+
+                  {Math.abs(rounding) >= 0.01 && (
+                    <>
+                      <span className="text-[#55524a]">Rounding</span>
+                      <span>{rounding > 0 ? `+${rounding.toFixed(2)}` : rounding.toFixed(2)}</span>
+                    </>
+                  )}
+                </div>
+
+                {/* Reversed TOTAL Block */}
+                <div className="flex justify-between items-center gap-3 px-3.5 py-3 bg-[#16150f] text-[#fffefb]">
+                  <span className="text-[11px] font-bold tracking-[0.14em]">TOTAL</span>
+                  <span className="font-mono text-[22px] font-bold tabular-nums tracking-[-0.01em]">
+                    &#8377;{finalTotal.toFixed(2)}
+                  </span>
+                </div>
+
+                {/* Tendered & Change */}
+                <div className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 py-3 font-mono text-[11px] tabular-nums border-b border-[#d9d5cb]">
+                  <span className="text-[#55524a]">
+                    {paymentMode ? paymentMode.charAt(0).toUpperCase() + paymentMode.slice(1) : 'Cash'} tendered
+                  </span>
+                  <span>{tendered.toFixed(2)}</span>
+
+                  <span className="text-[#55524a]">Change given</span>
+                  <span className="font-bold">{change.toFixed(2)}</span>
+                </div>
+
+                {/* Loyalty Row */}
+                <div className="flex justify-between items-baseline py-2.5 font-mono text-[10.5px] border-b border-[#16150f]">
+                  <span className="text-[#7d7a71] tracking-[0.1em]">LOYALTY</span>
+                  <span>+{Math.max(1, Math.floor(finalTotal / 100))} earned &middot; settled</span>
+                </div>
+
+                {/* QR Code & Return Terms */}
+                <div className="flex flex-col items-center gap-2.5 pt-4 pb-5 text-center">
+                  {qrDataUrl ? (
+                    <img
+                      src={qrDataUrl}
+                      alt="Bill QR Code"
+                      className="w-[72px] h-[72px] border border-[#d9d5cb] p-0.5"
+                    />
+                  ) : (
+                    <div className="w-[72px] h-[72px] border border-dashed border-[#b9b5aa] flex items-center justify-center font-mono text-[9px] text-[#8b8880] tracking-[0.08em]">
+                      QR
+                    </div>
+                  )}
+                  <div className="text-[10px] leading-relaxed text-[#55524a]">
+                    Scan to view or return this bill
+                    <br />
+                    Exchange within 7 days with receipt
                   </div>
-                  <div className="border-l border-gray-200 pl-6">
-                    <h4 className="font-black text-[10px] uppercase tracking-wider text-gray-400 mb-2">Billing Reference Info</h4>
-                    {customerGstin ? (
-                      <p className="text-gray-500 font-medium">Taxation Scheme: <span className="font-black text-emerald-600">{customerGstin.substring(0, 2) !== '27' ? '🌐 Inter-State (IGST)' : '🏠 Intra-State (CGST+SGST)'}</span></p>
-                    ) : (
-                      <p className="text-gray-500 font-medium">Place of Supply: <span className="font-bold text-slate-800">Maharashtra (Local State)</span></p>
-                    )}
-                    <p className="text-gray-500 font-medium mt-1">Pricing Profile: <span className="font-bold uppercase text-indigo-600 text-[10px]">{pricingTier || 'Retail'}</span></p>
-                    <p className="text-gray-500 font-medium mt-1">Cashier: <span className="font-bold text-slate-800">{cashierName}</span></p>
+                  <div className="text-[11px] font-bold tracking-[0.12em] pt-0.5">
+                    THANK YOU &middot; VISIT AGAIN
                   </div>
                 </div>
 
-                  {/* Items Table */}
-                  <table className="w-full text-xs text-left border-collapse mb-5 border border-gray-200 rounded-lg overflow-hidden">
-                   <thead>
-                     <tr className="bg-slate-100 border-b border-gray-200 text-slate-700 font-bold uppercase text-[9px] tracking-wider">
-                       <th className="px-2 py-2.5 w-6 text-center">#</th>
-                       <th className="px-2 py-2.5">Product Name</th>
-                       <th className="px-1.5 py-2.5 text-center">HSN</th>
-                       <th className="px-1.5 py-2.5 text-center">Unit</th>
-                       <th className="px-1.5 py-2.5 text-center">Qty</th>
-                       <th className="px-2 py-2.5 text-right">Rate</th>
-                       <th className="px-2 py-2.5 text-right text-purple-650">Disc</th>
-                       <th className="px-2 py-2.5 text-right">Taxable Val</th>
-                       <th className="px-1.5 py-2.5 text-center">GST%</th>
-                       {isInterState ? (
-                         <th className="px-2 py-2.5 text-right text-gray-500">IGST</th>
-                       ) : (
-                         <>
-                           <th className="px-2 py-2.5 text-right text-gray-500">CGST</th>
-                           <th className="px-2 py-2.5 text-right text-gray-500">SGST</th>
-                         </>
-                       )}
-                       <th className="px-2.5 py-2.5 text-right font-black">Total</th>
-                     </tr>
-                   </thead>
-                   <tbody className="divide-y divide-gray-200">
-                     {items.map((item, index) => {
-                       const qty = item.quantity || 0;
-                       const rate = item.gstRate || 0;
-                       const origPrice = item.originalPrice || item.price;
-                       const discAmountPerUnit = Math.max(0, origPrice - item.price);
-                       const totalDiscVal = discAmountPerUnit * qty;
-                       const taxableVal = item.price * qty;
-                       const totalTaxVal = gstEnabled ? (taxableVal * rate) / 100 : 0;
-                       const cgstVal = isInterState ? 0 : totalTaxVal / 2;
-                       const sgstVal = isInterState ? 0 : totalTaxVal / 2;
-                       const igstVal = isInterState ? totalTaxVal : 0;
-                       const totalVal = taxableVal + totalTaxVal;
+                {/* Bottom Tear-off Perforation */}
+                <div
+                  className="h-3.5"
+                  style={{
+                    background: 'repeating-linear-gradient(90deg, #d9d5cb 0 6px, transparent 6px 12px)',
+                    backgroundSize: '100% 1px',
+                    backgroundPosition: '0 50%',
+                    backgroundRepeat: 'no-repeat',
+                  }}
+                />
+              </div>
+            </div>
 
-                       return (
-                         <tr key={index} className="hover:bg-slate-50/50">
-                           <td className="px-2 py-2.5 text-center text-gray-400 font-medium">{index + 1}</td>
-                           <td className="px-2 py-2.5">
-                             <p className="font-bold text-slate-800 leading-tight">{item.name}</p>
-                             {item.selectedBatch && (
-                               <p className="text-[8.5px] text-cyan-600 font-bold uppercase tracking-wider mt-0.5">
-                                 🧪 Batch: {item.selectedBatch}
-                               </p>
-                             )}
-                             {item.dosage && (
-                               <p className="text-[8.5px] text-teal-650 font-black tracking-wide uppercase mt-0.5 font-mono">
-                                 💊 Dosage: {item.dosage}
-                               </p>
-                             )}
-                             <p className="text-[8px] text-gray-400 font-mono mt-0.5">SKU: {item.code}</p>
-                           </td>
-                           <td className="px-1.5 py-2.5 text-center font-mono text-[10px] opacity-75">{item.hsnCode || '99'}</td>
-                           <td className="px-1.5 py-2.5 text-center text-[10px] font-medium text-slate-600">{item.uom || 'PCS'}</td>
-                           <td className="px-1.5 py-2.5 text-center font-bold text-slate-800">{qty}</td>
-                           <td className="px-2 py-2.5 text-right font-mono text-[10px]">₹{origPrice.toFixed(2)}</td>
-                           <td className="px-2 py-2.5 text-right font-mono text-purple-650 text-[10px]">
-                             {discAmountPerUnit > 0 ? (
-                               <span>-₹{totalDiscVal.toFixed(2)}</span>
-                             ) : (
-                               <span className="opacity-45">0%</span>
-                             )}
-                           </td>
-                           <td className="px-2 py-2.5 text-right font-mono text-[10px]">₹{taxableVal.toFixed(2)}</td>
-                           <td className="px-1.5 py-2.5 text-center font-semibold text-slate-700">{rate}%</td>
-                           {isInterState ? (
-                             <td className="px-2 py-2.5 text-right font-mono text-gray-500 text-[9px]">₹{igstVal.toFixed(2)}</td>
-                           ) : (
-                             <>
-                               <td className="px-2 py-2.5 text-right font-mono text-gray-500 text-[9px]">₹{cgstVal.toFixed(2)}</td>
-                               <td className="px-2 py-2.5 text-right font-mono text-gray-500 text-[9px]">₹{sgstVal.toFixed(2)}</td>
-                             </>
-                           )}
-                           <td className="px-2.5 py-2.5 text-right font-mono font-extrabold text-slate-900">₹{totalVal.toFixed(2)}</td>
-                         </tr>
-                       );
-                     })}
-                   </tbody>
-                 </table>
+            {/* Print Rules Guidance Card (Hidden in print) */}
+            <div className="no-print w-[260px] flex flex-col gap-4 pt-8 text-[12.5px] leading-relaxed text-[var(--ink2)]">
+              <div className="font-mono text-[10px] font-bold tracking-[0.14em] uppercase text-[var(--ink4)]">
+                Print rules
+              </div>
+              <div>
+                <span className="text-[var(--ink)] font-bold">Monochrome only.</span> Thermal paper has one ink. The blue accent used elsewhere does not exist here &mdash; hierarchy comes from size, weight, and the one reversed total block.
+              </div>
+              <div>
+                <span className="text-[var(--ink)] font-bold">One number per row.</span> Amounts sit on a right rail with tabular figures, so a customer can scan the column cleanly.
+              </div>
+              <div>
+                <span className="text-[var(--ink)] font-bold">Total is the only reversed block.</span> It replaces old rows of ASCII dividers.
+              </div>
+              <div>
+                <span className="text-[var(--ink)] font-bold">Tax per line, not just per bill.</span> Mixed GST rates are standard, so each line carries its own rate and reconciles.
+              </div>
+              <div>
+                <span className="text-[var(--ink)] font-bold">No emoji.</span> Loyalty and ledger are plain label/value rows.
+              </div>
+            </div>
+          </>
+        ) : (
+          /* A4 TAX INVOICE VIEW */
+          <div className="flex flex-col items-center gap-3.5">
+            <div className="no-print font-mono text-[10px] font-semibold tracking-[0.14em] uppercase text-[var(--ink4)]">
+              A4 &middot; 210 &times; 297&thinsp;mm &middot; 14&thinsp;mm margins
+            </div>
 
-                {/* Subtotals & Breakups Pane */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4 items-start">
-                  
-                  {/* Left Column: Terms & E2EE Verification Stamp */}
-                  <div className="space-y-4">
-                    {/* Invoice Note */}
-                    <div className="p-3 bg-slate-50 border border-gray-150 rounded-xl text-[10px] leading-relaxed text-gray-500">
-                      <span className="font-bold uppercase tracking-wider text-slate-700 block mb-1">Invoice Remarks:</span>
-                      {customInvoiceNote}
-                    </div>
-
-                    {/* Cryptographic Stamp */}
-                    {showVerificationStamp && (
-                      <div className="border-2 border-emerald-500 border-dashed rounded-xl p-3 bg-emerald-500/[0.02] text-emerald-700 text-center max-w-[280px]">
-                        <div className="flex items-center justify-center gap-1.5 mb-1 font-bold text-[9px] uppercase">
-                          <ShieldCheck size={13} className="text-emerald-600" />
-                          <span>NexusFlow Certified</span>
-                        </div>
-                        <div className="font-black text-[11px] uppercase tracking-wide">Digitally Signed & Verified</div>
-                        <div className="font-mono text-[8px] opacity-75 mt-1 truncate">BILL_HASH: {billNumber}</div>
-                        <div className="text-[7px] opacity-60 uppercase mt-0.5">Secure LAN cryptosignature Rel. v1.2</div>
-                      </div>
-                    )}
+            {/* Printable A4 Sheet */}
+            <div
+              id="receipt-print-area"
+              className="w-[794px] min-h-[1123px] bg-[#fffefb] text-[#16150f] shadow-[0_28px_60px_-20px_var(--paper-shadow)] p-[52px_56px] flex flex-col select-text"
+            >
+              {/* Masthead */}
+              <div className="flex justify-between items-start gap-8 pb-5 border-b-2 border-[#16150f]">
+                <div>
+                  <div className="text-[24px] font-extrabold tracking-[-0.01em]">
+                    {shopDetails.name || 'Sunrise Provisions'}
                   </div>
+                  <div className="text-[12px] leading-relaxed text-[#55524a] pt-1.5">
+                    {shopDetails.address || '123 Main Street, City, State 12345'}
+                    <br />
+                    Tel {shopDetails.phone || '(555) 123-4567'} &middot; {shopDetails.email || 'accounts@sunriseprovisions.in'}
+                  </div>
+                  <div className="font-mono text-[11px] font-semibold pt-1.5">
+                    GSTIN {shopDetails.gstin || '29ABCDE1234F1Z5'} &nbsp; PAN {pan}
+                  </div>
+                </div>
 
-                  {/* Right Column: Calculations Grid */}
-                  <div className="bg-slate-50 border border-gray-200 rounded-xl p-4 space-y-2.5 text-xs">
-                    <div className="flex justify-between font-semibold">
-                      <span className="text-gray-500">Subtotal (Excl. Tax):</span>
-                      <span className="font-mono">₹{subtotal.toFixed(2)}</span>
+                <div className="text-right">
+                  <div className="font-mono text-[11px] font-bold tracking-[0.2em] text-[#7d7a71]">
+                    TAX INVOICE
+                  </div>
+                  <div className="font-mono text-[15px] font-bold pt-1.5">
+                    {billNumber}
+                  </div>
+                  <div className="text-[12px] text-[#55524a] pt-1">
+                    {formattedDate} &middot; Till T-02
+                  </div>
+                  <div className="text-[11px] text-[#7d7a71] pt-0.5">
+                    Original for recipient
+                  </div>
+                </div>
+              </div>
+
+              {/* Billed To & Supply Blocks */}
+              <div className="grid grid-cols-2 gap-x-10 py-5 border-b border-[#d9d5cb]">
+                <div>
+                  <div className="font-mono text-[9.5px] font-bold tracking-[0.14em] text-[#7d7a71] pb-2">
+                    BILLED TO
+                  </div>
+                  <div className="text-[14px] font-bold">
+                    {customerName || 'Walk-in Customer'}
+                  </div>
+                  <div className="text-[12px] leading-relaxed text-[#55524a] pt-1">
+                    {customerPhone || '+91 94443 10812'}
+                    <br />
+                    {customerGstin
+                      ? `GSTIN: ${customerGstin} \u2014 B2B supply`
+                      : 'Unregistered \u2014 B2C supply'}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="font-mono text-[9.5px] font-bold tracking-[0.14em] text-[#7d7a71] pb-2">
+                    SUPPLY
+                  </div>
+                  <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[12px]">
+                    <span className="text-[#7d7a71]">Place of supply</span>
+                    <span>{placeOfSupply}</span>
+
+                    <span className="text-[#7d7a71]">Cashier</span>
+                    <span>{cashierName}</span>
+
+                    <span className="text-[#7d7a71]">Payment</span>
+                    <span>
+                      {paymentMode ? paymentMode.charAt(0).toUpperCase() + paymentMode.slice(1) : 'Cash'} &mdash; settled
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 7-Column Line Items Table */}
+              <div className="pt-6">
+                <div className="grid grid-cols-[28px_1fr_74px_44px_84px_56px_92px] gap-x-3 pb-2 border-b border-[#16150f] font-mono text-[9.5px] font-bold tracking-[0.1em] text-[#7d7a71]">
+                  <span>#</span>
+                  <span>DESCRIPTION</span>
+                  <span>HSN</span>
+                  <span className="text-right">QTY</span>
+                  <span className="text-right">RATE</span>
+                  <span className="text-right">GST</span>
+                  <span className="text-right">AMOUNT</span>
+                </div>
+
+                {items.map((item, idx) => {
+                  const lineAmount = item.price * item.quantity;
+                  return (
+                    <div
+                      key={idx}
+                      className="grid grid-cols-[28px_1fr_74px_44px_84px_56px_92px] gap-x-3 items-baseline py-2.5 border-b border-[#ece9e0] text-[13px]"
+                    >
+                      <span className="font-mono text-[11px] text-[#7d7a71]">{idx + 1}</span>
+                      <span className="font-semibold">{item.name}</span>
+                      <span className="font-mono text-[11.5px] text-[#55524a]">{item.hsnCode || '—'}</span>
+                      <span className="font-mono tabular-nums text-right">{item.quantity}</span>
+                      <span className="font-mono tabular-nums text-right">{item.price.toFixed(2)}</span>
+                      <span className="font-mono text-[11.5px] text-right text-[#55524a]">
+                        {item.gstRate || 0}%
+                      </span>
+                      <span className="font-mono font-bold tabular-nums text-right">
+                        {lineAmount.toFixed(2)}
+                      </span>
                     </div>
+                  );
+                })}
+              </div>
 
-                    {gstEnabled && gstAmount > 0 && (
-                      <div className="space-y-1.5 border-t border-b border-gray-200/80 py-2 my-2">
-                        {isInterState ? (
-                          <div className="flex justify-between text-[11px] text-gray-500">
-                            <span>Integrated IGST Total:</span>
-                            <span className="font-mono">₹{(igst !== undefined ? igst : gstAmount).toFixed(2)}</span>
-                          </div>
-                        ) : (
-                          <>
-                            <div className="flex justify-between text-[11px] text-gray-500">
-                              <span>Central CGST Total:</span>
-                              <span className="font-mono">₹{cgst.toFixed(2)}</span>
-                            </div>
-                            <div className="flex justify-between text-[11px] text-gray-500">
-                              <span>State SGST Total:</span>
-                              <span className="font-mono">₹{sgst.toFixed(2)}</span>
-                            </div>
-                          </>
-                        )}
-                        <div className="flex justify-between font-bold text-slate-800 text-[11px]">
-                          <span>Combined GST Total:</span>
-                          <span className="font-mono">₹{gstAmount.toFixed(2)}</span>
-                        </div>
-                      </div>
-                    )}
+              {/* Rate-wise Tax Summary & Totals */}
+              <div className="flex justify-between items-start gap-12 pt-7">
+                {/* Left: Rate-wise Table + Amount in Words */}
+                <div className="flex-1">
+                  <div className="font-mono text-[9.5px] font-bold tracking-[0.14em] text-[#7d7a71] pb-2.5">
+                    RATE-WISE TAX SUMMARY
+                  </div>
+                  <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-5 gap-y-1.5 font-mono text-[11.5px] tabular-nums">
+                    <span className="text-[#7d7a71] text-[9.5px] tracking-[0.1em] pb-1">RATE</span>
+                    <span className="text-[#7d7a71] text-[9.5px] tracking-[0.1em] text-right pb-1">TAXABLE</span>
+                    <span className="text-[#7d7a71] text-[9.5px] tracking-[0.1em] text-right pb-1">
+                      {isInterState ? 'IGST' : 'CGST'}
+                    </span>
+                    <span className="text-[#7d7a71] text-[9.5px] tracking-[0.1em] text-right pb-1">
+                      {isInterState ? '' : 'SGST'}
+                    </span>
 
-                    {roundingAdjustment !== undefined && roundingAdjustment !== 0 && (
-                      <div className="flex justify-between text-[11px] text-gray-500">
-                        <span>Rounding Adjustment:</span>
-                        <span className={`font-mono ${roundingAdjustment > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {roundingAdjustment > 0 ? '+' : ''}₹{roundingAdjustment.toFixed(2)}
+                    {rateWiseBreakdown.map((r, i) => (
+                      <div key={i} className="contents">
+                        <span>{r.rate}%</span>
+                        <span className="text-right">{r.taxable.toFixed(2)}</span>
+                        <span className="text-right">
+                          {isInterState ? r.igst.toFixed(2) : r.cgst.toFixed(2)}
+                        </span>
+                        <span className="text-right">
+                          {isInterState ? '' : r.sgst.toFixed(2)}
                         </span>
                       </div>
-                    )}
+                    ))}
 
-                    <div className="flex justify-between text-lg font-black text-blue-600 border-t border-gray-200 pt-2 mt-2">
-                      <span>Total Amount:</span>
-                      <span className="font-mono">₹{total.toFixed(2)}</span>
-                    </div>
+                    <span className="border-t border-[#16150f] pt-1.5 font-bold">Total</span>
+                    <span className="border-t border-[#16150f] pt-1.5 text-right font-bold">
+                      {taxableSum.toFixed(2)}
+                    </span>
+                    <span className="border-t border-[#16150f] pt-1.5 text-right font-bold">
+                      {isInterState ? igstSum.toFixed(2) : cgstSum.toFixed(2)}
+                    </span>
+                    <span className="border-t border-[#16150f] pt-1.5 text-right font-bold">
+                      {isInterState ? '' : sgstSum.toFixed(2)}
+                    </span>
+                  </div>
 
-                    {amountReceived !== undefined && amountReceived > 0 && (
-                      <div className="space-y-1.5 border-t border-gray-200/80 pt-2 mt-2">
-                        <div className="flex justify-between text-[11px] text-gray-500">
-                          <span>Amount Received:</span>
-                          <span className="font-mono">₹{amountReceived.toFixed(2)}</span>
-                        </div>
-                        {changeAmount !== undefined && changeAmount > 0 && (
-                          <div className="flex justify-between text-xs font-bold text-emerald-600">
-                            <span>Change Returned:</span>
-                            <span className="font-mono">₹{changeAmount.toFixed(2)}</span>
-                          </div>
-                        )}
-                      </div>
-                    )}
+                  <div className="pt-5 text-[12px] leading-relaxed text-[#55524a] max-w-[340px]">
+                    <span className="font-mono text-[9.5px] font-bold tracking-[0.14em] text-[#7d7a71]">
+                      AMOUNT IN WORDS
+                    </span>
+                    <br />
+                    <span className="text-[#16150f] font-semibold">
+                      {amountInWords(finalTotal)}
+                    </span>
                   </div>
                 </div>
 
-                {/* HSN Slab Breakdown (Compliant tax summaries) */}
-                {showGstBreakup && gstEnabled && hsnSlabList.length > 0 && (
-                  <div className="mt-6 border-t border-gray-200 pt-4">
-                    <p className="text-[10px] font-black uppercase tracking-wider text-slate-600 mb-2">GST Outward Supplies HSN Breakup</p>
-                    <table className="w-full text-left text-[10px] border-collapse border border-gray-150 rounded-lg overflow-hidden">
-                      <thead>
-                        <tr className="bg-slate-50 border-b border-gray-200 text-slate-600 font-bold uppercase text-[8px] tracking-wider">
-                          <th className="px-3 py-2">HSN Code</th>
-                          <th className="px-2 py-2">GST Rate</th>
-                          <th className="px-3 py-2 text-right">Taxable Value</th>
-                          {isInterState ? (
-                            <th className="px-3 py-2 text-right">IGST Amount</th>
-                          ) : (
-                            <>
-                              <th className="px-3 py-2 text-right">CGST Amount</th>
-                              <th className="px-3 py-2 text-right">SGST Amount</th>
-                            </>
-                          )}
-                          <th className="px-3 py-2 text-right">Total Tax Amount</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-150 text-slate-700">
-                        {hsnSlabList.map((slab) => (
-                          <tr key={`${slab.hsnCode}_${slab.gstRate}`}>
-                            <td className="px-3 py-2 font-mono font-bold text-blue-500">{slab.hsnCode}</td>
-                            <td className="px-2 py-2 font-semibold">{slab.gstRate}%</td>
-                            <td className="px-3 py-2 text-right font-mono">₹{slab.taxableValue.toFixed(2)}</td>
-                            {isInterState ? (
-                              <td className="px-3 py-2 text-right font-mono">₹{slab.igstAmount.toFixed(2)}</td>
-                            ) : (
-                              <>
-                                <td className="px-3 py-2 text-right font-mono">₹{slab.cgstAmount.toFixed(2)}</td>
-                                <td className="px-3 py-2 text-right font-mono">₹{slab.sgstAmount.toFixed(2)}</td>
-                              </>
-                            )}
-                            <td className="px-3 py-2 text-right font-mono font-bold text-slate-800">₹{slab.totalTax.toFixed(2)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                {/* Right: Totals Stack & Reversed Total Block */}
+                <div className="w-[280px]">
+                  <div className="grid grid-cols-[1fr_auto] gap-x-5 gap-y-2 text-[13px] tabular-nums">
+                    <span className="text-[#55524a]">Taxable value</span>
+                    <span className="font-mono text-right">{taxableSum.toFixed(2)}</span>
 
-                {/* Bottom Footer block containing signatures & QR codes */}
-                <div className="flex justify-between items-end border-t-2 border-gray-200 pt-6 mt-6">
-                  {/* Left: QR code details */}
-                  <div className="flex items-center gap-4 text-xs">
-                    {showQrCode && (
-                      <div>
-                        <canvas ref={qrCanvasRef} className="hidden"></canvas>
-                        {qrDataUrl && (
-                          <img src={qrDataUrl} alt="Bill QR Code" className="border rounded-lg p-1.5 bg-white shadow-sm" width="105" height="105" />
-                        )}
-                      </div>
+                    {isInterState ? (
+                      <>
+                        <span className="text-[#55524a]">IGST</span>
+                        <span className="font-mono text-right">{igstSum.toFixed(2)}</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-[#55524a]">CGST</span>
+                        <span className="font-mono text-right">{cgstSum.toFixed(2)}</span>
+                        <span className="text-[#55524a]">SGST</span>
+                        <span className="font-mono text-right">{sgstSum.toFixed(2)}</span>
+                      </>
                     )}
-                    <div className="max-w-[200px] text-gray-400 text-[10px] leading-relaxed">
-                      <p className="font-bold uppercase text-slate-500 mb-1">Scan Invoice QR</p>
-                      <p>Scan this QR code with any terminal to retrieve E2EE cart contents, loyalty balances, or transaction verification indexes offline.</p>
-                    </div>
+
+                    {billDiscount !== undefined && billDiscount > 0 && (
+                      <>
+                        <span className="text-[#55524a]">Bill discount</span>
+                        <span className="font-mono text-right text-[#b91c1c]">-₹{billDiscount.toFixed(2)}</span>
+                      </>
+                    )}
+
+                    {couponDiscount !== undefined && couponDiscount > 0 && (
+                      <>
+                        <span className="text-[#55524a]">Coupon ({couponCode || 'PROMO'})</span>
+                        <span className="font-mono text-right text-[#b91c1c]">-₹{couponDiscount.toFixed(2)}</span>
+                      </>
+                    )}
+
+                    {loyaltyDiscount !== undefined && loyaltyDiscount > 0 && (
+                      <>
+                        <span className="text-[#55524a]">Loyalty redeemed</span>
+                        <span className="font-mono text-right text-[#b91c1c]">-₹{loyaltyDiscount.toFixed(2)}</span>
+                      </>
+                    )}
+
+                    {Math.abs(rounding) >= 0.01 && (
+                      <>
+                        <span className="text-[#55524a]">Rounding</span>
+                        <span className="font-mono text-right">
+                          {rounding > 0 ? `+${rounding.toFixed(2)}` : rounding.toFixed(2)}
+                        </span>
+                      </>
+                    )}
                   </div>
 
-                  {/* Right: Signature block */}
-                  <div className="text-center w-48">
-                    <div className="h-12 border-b border-gray-300 flex items-end justify-center pb-1">
-                      <span className="font-mono text-[9px] text-gray-300 uppercase tracking-widest">DIGITAL SIGNATURE</span>
-                    </div>
-                    <p className="font-bold text-slate-800 text-[11px] mt-1.5">{signatoryName}</p>
-                    <p className="text-[9px] text-gray-400 uppercase font-black tracking-wider">Authorized Signatory</p>
+                  {/* Reversed TOTAL Block */}
+                  <div className="flex justify-between items-center gap-4 mt-4 px-4 py-3.5 bg-[#16150f] text-[#fffefb]">
+                    <span className="text-[11px] font-bold tracking-[0.14em]">TOTAL</span>
+                    <span className="font-mono text-[24px] font-bold tabular-nums">
+                      &#8377;{finalTotal.toFixed(2)}
+                    </span>
                   </div>
-                </div>
 
-                {/* Corporate compliance label */}
-                <div className="text-center text-[9px] text-gray-400 mt-8 uppercase tracking-widest font-semibold border-t pt-4">
-                  Computer Generated Document • No Signature Required
+                  <div className="grid grid-cols-[1fr_auto] gap-x-5 gap-y-1.5 pt-3.5 text-[12.5px] tabular-nums">
+                    <span className="text-[#55524a]">
+                      {paymentMode ? paymentMode.charAt(0).toUpperCase() + paymentMode.slice(1) : 'Cash'} tendered
+                    </span>
+                    <span className="font-mono text-right">{tendered.toFixed(2)}</span>
+
+                    <span className="text-[#55524a]">Change given</span>
+                    <span className="font-mono text-right">{change.toFixed(2)}</span>
+
+                    <span className="text-[#55524a]">Loyalty earned</span>
+                    <span className="font-mono text-right">
+                      +{Math.max(1, Math.floor(finalTotal / 100))} pts
+                    </span>
+                  </div>
                 </div>
               </div>
-            ) : (
-              
-              /* ========================================================================= */
-              /* COMPACT POS THERMAL RECEIPT TEMPLATE (80mm Width)                        */
-              /* ========================================================================= */
-              <div 
-                id="thermal-print-target"
-                className="w-[300px] bg-white text-gray-900 border-2 border-dashed border-gray-300 p-5 rounded-2xl shadow-xl animate-scale-in"
-              >
-                {/* Store Header */}
-                <div className="text-center pb-4 mb-4 border-b border-dashed border-gray-300">
-                  <div className="inline-block p-2 bg-gray-50 border rounded-full mb-2">
-                    {renderStoreLogo()}
-                  </div>
-                  <h1 className="text-lg font-black uppercase tracking-tight text-slate-850">{shopDetails.name}</h1>
-                  <p className="text-[10px] text-gray-500 leading-tight mt-0.5">{shopDetails.address}</p>
-                  <p className="text-[10px] text-gray-500 mt-0.5">Phone: {shopDetails.phone}</p>
+
+              <div className="flex-1 min-h-[40px]" />
+
+              {/* Terms & Signature Footer */}
+              <div className="flex justify-between items-end gap-10 pt-7 border-t border-[#d9d5cb]">
+                <div className="text-[11px] leading-relaxed text-[#7d7a71] max-w-[420px]">
+                  Goods once sold are exchangeable within 7 days against this invoice. Tax is charged on the inclusive retail price under CGST/SGST. This is a computer-generated invoice and needs no physical signature.
                 </div>
-
-                {/* Receipt Metadata */}
-                <div className="text-[10px] text-gray-500 space-y-1 pb-4 mb-4 border-b border-dashed border-gray-300 font-mono">
-                  <div className="flex justify-between font-bold text-slate-800 text-[11px]">
-                    <span>RECEIPT NO:</span>
-                    <span>#{billNumber}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>DATE:</span>
-                    <span>{currentDate}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>CASHIER:</span>
-                    <span>{cashierName}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>CUSTOMER:</span>
-                    <span className="truncate max-w-[140px]">{customerName || 'Cash Customer'}</span>
-                  </div>
-                  {customerPhone && (
-                    <div className="flex justify-between">
-                      <span>PHONE:</span>
-                      <span>{customerPhone}</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Items Grid */}
-                <div className="pb-4 mb-4 border-b border-dashed border-gray-300 text-xs">
-                  <div className="flex justify-between font-bold text-[10px] uppercase text-gray-400 tracking-wider pb-1">
-                    <span>Item Description</span>
-                    <span>Amount</span>
-                  </div>
-                  
-                  <div className="space-y-3.5 mt-2">
-                    {items.map((item, idx) => {
-                      const lineTotal = item.price * item.quantity;
-                      const lineGst = gstEnabled ? (lineTotal * item.gstRate) / 100 : 0;
-                      const lineTotalWithGst = lineTotal + lineGst;
-
-                      return (
-                        <div key={idx} className="space-y-0.5">
-                          <div className="flex justify-between font-bold text-slate-850">
-                            <span>
-                              {item.name}
-                              {item.selectedBatch && (
-                                <span className="text-[8.5px] text-cyan-650 font-black block tracking-wider mt-0.5">
-                                  🧪 [BATCH: {item.selectedBatch}]
-                                </span>
-                              )}
-                              {item.dosage && (
-                                <span className="text-[8.5px] text-teal-650 font-black block tracking-wider mt-0.5">
-                                  💊 [DOSAGE: {item.dosage}]
-                                </span>
-                              )}
-                            </span>
-                            <span className="font-mono">₹{lineTotalWithGst.toFixed(2)}</span>
-                          </div>
-                          <div className="flex justify-between text-[10px] text-gray-500 font-mono">
-                            <span>{item.quantity} {item.uom || 'PCS'} x ₹{item.price.toFixed(2)} | HSN: {item.hsnCode || '99'}</span>
-                            {gstEnabled && <span>GST {item.gstRate}%</span>}
-                          </div>
-                        </div>
-                      );
-                    })}
+                <div className="text-right">
+                  <div className="w-[190px] border-b border-[#16150f] h-10" />
+                  <div className="text-[11px] text-[#55524a] pt-1.5">
+                    For {shopDetails.name || 'Sunrise Provisions'}
                   </div>
                 </div>
-
-                {/* Totals Section */}
-                <div className="space-y-2 text-xs pb-4 mb-4 border-b border-dashed border-gray-300">
-                  <div className="flex justify-between font-semibold">
-                    <span className="text-gray-500">Subtotal:</span>
-                    <span className="font-mono">₹{subtotal.toFixed(2)}</span>
-                  </div>
-                  
-                  {gstEnabled && gstAmount > 0 && (
-                    <div className="space-y-1 font-mono text-[11px] text-gray-500 border-t border-b border-gray-200/50 py-1 my-1">
-                      {isInterState ? (
-                        <div className="flex justify-between">
-                          <span>IGST Tax:</span>
-                          <span>₹{(igst !== undefined ? igst : gstAmount).toFixed(2)}</span>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="flex justify-between">
-                            <span>CGST Tax:</span>
-                            <span>₹{cgst.toFixed(2)}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>SGST Tax:</span>
-                            <span>₹{sgst.toFixed(2)}</span>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
-
-                  {roundingAdjustment !== undefined && roundingAdjustment !== 0 && (
-                    <div className="flex justify-between text-[11px] text-gray-500">
-                      <span>Rounding:</span>
-                      <span className="font-mono">{roundingAdjustment > 0 ? '+' : ''}₹{roundingAdjustment.toFixed(2)}</span>
-                    </div>
-                  )}
-
-                  <div className="flex justify-between font-black text-base text-slate-850 pt-1">
-                    <span>GRAND TOTAL:</span>
-                    <span className="font-mono text-blue-600 text-lg">₹{total.toFixed(2)}</span>
-                  </div>
-
-                  {amountReceived !== undefined && amountReceived > 0 && (
-                    <div className="space-y-1 pt-1.5 mt-1.5 border-t border-gray-200/60 font-mono">
-                      <div className="flex justify-between text-[11px] text-gray-500">
-                        <span>Cash Received:</span>
-                        <span>₹{amountReceived.toFixed(2)}</span>
-                      </div>
-                      {changeAmount !== undefined && changeAmount > 0 && (
-                        <div className="flex justify-between font-bold text-emerald-600">
-                          <span>Change Return:</span>
-                          <span>₹{changeAmount.toFixed(2)}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* QR Code */}
-                {showQrCode && qrDataUrl && (
-                  <div className="text-center py-2 flex flex-col items-center justify-center">
-                    <img src={qrDataUrl} alt="Bill QR Code" className="border rounded-lg p-1 bg-white shadow-sm" width="95" height="95" />
-                    <p className="text-[8px] text-gray-400 font-mono mt-1.5">Scan to verify purchase details</p>
-                  </div>
-                )}
-
-                {/* Footer Notes & E2EE Verified Seal */}
-                <div className="text-center space-y-3 pt-3 border-t border-dashed border-gray-300">
-                  <p className="text-[10px] font-bold text-slate-800 italic">"{customFooter}"</p>
-                  
-                  {showVerificationStamp && (
-                    <div className="border border-emerald-500 border-dashed rounded-lg p-1.5 bg-emerald-500/[0.01] text-emerald-600 inline-block mx-auto text-center">
-                      <div className="flex items-center justify-center gap-1 font-bold text-[7px] uppercase">
-                        <ShieldCheck size={9} />
-                        <span>Cryptosignature verified</span>
-                      </div>
-                    </div>
-                  )}
-                  
-                  <div className="text-[8px] text-gray-400 font-mono leading-relaxed pt-2">
-                    <p>SYSTEM DATE: {currentDate}</p>
-                    <p className="font-black text-slate-600 uppercase mt-0.5">THANK YOU FOR YOUR PATRONAGE</p>
-                  </div>
-                </div>
-
               </div>
-            )}
+            </div>
           </div>
-
-          {/* Bottom Actions Panel */}
-          <div className={`flex gap-3 p-4 border-t print:hidden sticky bottom-0 z-10 transition-colors ${
-            darkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200'
-          }`}>
-            <button
-              type="button"
-              onClick={() => handlePrint(selectedTemplate)}
-              className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold py-3.5 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer text-xs uppercase tracking-wider shadow-lg shadow-emerald-500/10"
-            >
-              <Download size={16} />
-              Print / Save PDF
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-extrabold py-3.5 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer text-xs uppercase tracking-wider shadow-lg shadow-blue-500/10"
-            >
-              New Bill (ESC)
-            </button>
-          </div>
-        </div>
-
+        )}
       </div>
     </div>
   );

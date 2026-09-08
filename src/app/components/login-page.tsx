@@ -1,45 +1,34 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/auth-context';
-import { useTheme } from '../contexts/theme-context';
 import { useNavigate } from 'react-router';
-import { Store, Lock, User, AlertCircle, Eye, EyeOff, Coffee, Info } from 'lucide-react';
-import { InteractiveMeshBackground } from './ui/interactive-mesh-background';
-
+import { useTheme } from '../contexts/theme-context';
+import { useShopDetails } from '../lib/shop-details';
+import { isMobileDevice } from '../lib/device';
+import {
+  MONO,
+  NUM,
+  EYEBROW,
+  PANEL,
+  PANEL_HEAD,
+  FIELD,
+  KBD,
+  KBD_ON_FILL,
+} from '../lib/design-system';
 
 export function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [rememberDevice, setRememberDevice] = useState(false);
-  const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [hasActiveBreak, setHasActiveBreak] = useState(false);
-  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
-  const [mounted, setMounted] = useState(false);
 
+  const passwordRef = useRef<HTMLInputElement>(null);
   const { login, isAuthenticated } = useAuth();
-  const { darkMode } = useTheme();
   const navigate = useNavigate();
+  const { theme, setTheme } = useTheme();
+  const shopDetails = useShopDetails();
 
-  // Track mouse coordinates for interactive parallax animations
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      const x = (e.clientX / window.innerWidth) - 0.5;
-      const y = (e.clientY / window.innerHeight) - 0.5;
-      setMousePosition({ x, y });
-    };
-    window.addEventListener('mousemove', handleMouseMove);
-    return () => window.removeEventListener('mousemove', handleMouseMove);
-  }, []);
-
-  // Check for active breaks on mount
-  useEffect(() => {
-    const breaks = JSON.parse(localStorage.getItem('breakRecords') || '[]');
-    const activeBreak = breaks.find((b: any) => !b.endTime);
-    setHasActiveBreak(!!activeBreak);
-    setMounted(true);
-  }, []);
-
+  // Redirect if already authenticated
   useEffect(() => {
     if (isAuthenticated) {
       navigate('/');
@@ -49,27 +38,37 @@ export function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    setIsLoading(true);
 
-    if (!username || !password) {
-      setError('Please enter both username and password');
-      setIsLoading(false);
+    if (!username.trim()) {
+      setError('Enter a username to continue.');
+      return;
+    }
+    if (password.length < 4) {
+      setError('Password must be at least 4 characters.');
+      passwordRef.current?.focus();
       return;
     }
 
-    const result = await login(username, password, rememberDevice);
+    setIsLoading(true);
+    const result = await login(username, password, true);
 
     if (result.success) {
-      // Synchronously request fullscreen mode for all cashiers (except developer)
-      if (username !== 'developer') {
+      // Fullscreen kiosk request strictly for desktop cashier terminals (never on mobile devices)
+      if (!isMobileDevice() && username !== 'developer') {
         try {
           const el = document.documentElement;
-          if (el.requestFullscreen) {
-            await el.requestFullscreen();
-          } else if ((el as any).webkitRequestFullscreen) {
-            await (el as any).webkitRequestFullscreen();
-          } else if ((el as any).msRequestFullscreen) {
-            await (el as any).msRequestFullscreen();
+          const req =
+            el.requestFullscreen ||
+            (el as any).webkitRequestFullscreen ||
+            (el as any).mozRequestFullScreen ||
+            (el as any).msRequestFullscreen;
+          if (typeof req === 'function') {
+            const p = req.call(el);
+            if (p && typeof p.catch === 'function') {
+              p.catch((fsErr: any) => {
+                console.warn('[Kiosk Immersive Fullscreen Request Failed]', fsErr);
+              });
+            }
           }
         } catch (fsErr) {
           console.warn('[Kiosk Immersive Fullscreen Request Failed]', fsErr);
@@ -79,182 +78,168 @@ export function LoginPage() {
     } else {
       setError(result.error ?? 'Invalid username or password');
       setPassword('');
+      passwordRef.current?.focus();
+      setIsLoading(false);
     }
-
-    setIsLoading(false);
   };
 
   return (
-    <div className={`relative min-h-screen flex items-center justify-center ${darkMode ? 'bg-gray-955 text-white' : 'bg-gray-55 text-gray-900'} px-4 overflow-hidden`}>
-      {/* 🔮 Interactive High-Performance Mesh Background Constellation & Parallax Blobs */}
-      <InteractiveMeshBackground />
-
-
-      {/* 💳 Floating glassmorphic card container */}
-      <div 
-        className={`relative w-full max-w-md ${
-          darkMode 
-            ? 'bg-gray-900/75 border-gray-800/80 text-white shadow-indigo-950/20' 
-            : 'bg-white/75 border-white/60 text-gray-850 shadow-gray-200/50'
-        } border backdrop-blur-xl rounded-2xl shadow-2xl p-8 z-10 transition-all duration-[1000ms] cubic-bezier(0.16, 1, 0.3, 1) ${
-          mounted ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 translate-y-12'
-        }`}
-        style={{
-          transform: `perspective(1000px) rotateY(${mousePosition.x * 6}deg) rotateX(${mousePosition.y * -6}deg)`
-        }}
-      >
-        {/* Logo/Header */}
-        <div className={`text-center mb-8 transition-all duration-700 delay-100 transform ${
-          mounted ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'
-        }`}>
-          <div className={`inline-flex items-center justify-center w-16 h-16 ${darkMode ? 'bg-blue-900/30' : 'bg-blue-100'} rounded-full mb-4 hover:rotate-12 transition-transform duration-300`}>
-            <Store size={32} className="text-blue-500 animate-pulse" />
-          </div>
-          <h1 className={`text-3xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'} mb-2`}>
-            NexusFlow
-          </h1>
-          <p className={`${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-            Sign in to your account
-          </p>
+    <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)] flex flex-col justify-between font-sans">
+      {/* Top Header Bar */}
+      <header className="flex items-center justify-between px-6 h-[58px] border-b border-[var(--border)] bg-[var(--panel)] shrink-0">
+        <div className="flex items-center gap-3">
+          <span className="text-[16px] font-extrabold tracking-[-0.02em] text-[var(--ink)]">
+            {shopDetails.name}
+          </span>
+          <span style={EYEBROW}>Terminal sign-in</span>
         </div>
 
-        {/* Break Info Message */}
-        {hasActiveBreak && (
-          <div className={`mb-6 p-4 ${darkMode ? 'bg-orange-900/20 border-orange-800' : 'bg-orange-50 border-orange-200'} border rounded-lg flex items-start gap-3 transition-all duration-500 transform ${
-            mounted ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
-          }`}>
-            <Coffee className="text-orange-500 flex-shrink-0 mt-0.5" size={20} />
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <div className="w-2 h-2 rounded-full bg-[var(--ok)]" />
+            <span style={{ fontFamily: MONO, fontSize: 11, color: 'var(--ink3)' }}>Online</span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+            className="h-[30px] px-2.5 rounded-[7px] font-mono text-[11px] font-bold tracking-[0.06em] uppercase cursor-pointer transition-colors"
+            style={{ ...FIELD, color: 'var(--ink2)' }}
+          >
+            {theme === 'light' ? 'Dark' : 'Light'}
+          </button>
+        </div>
+      </header>
+
+      {/* Centered Single Login Box */}
+      <main className="flex-1 flex items-center justify-center p-4 sm:p-6">
+        <div
+          className="w-full max-w-[420px]"
+          style={{
+            ...PANEL,
+            borderRadius: 12,
+            padding: '32px 28px',
+            boxShadow: '0 8px 30px rgba(0, 0, 0, 0.08)',
+          }}
+        >
+          <div className="mb-6">
+            <div style={EYEBROW}>Counter Terminal</div>
+            <h1 className="text-[24px] font-extrabold tracking-[-0.03em] mt-1.5 mb-1 text-[var(--ink)]">
+              Sign in to register
+            </h1>
+            <p className="text-[13px] leading-relaxed text-[var(--ink2)]">
+              Enter your cashier credentials to open your shift.
+            </p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            {/* Username Input */}
             <div>
-              <p className={`text-sm font-medium ${darkMode ? 'text-orange-400' : 'text-orange-700'} mb-1`}>
-                Returning from Break
-              </p>
-              <p className={`text-xs ${darkMode ? 'text-orange-400/80' : 'text-orange-600'}`}>
-                Log in to resume work and end your break.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* Error Message */}
-        {error && (
-          <div className={`mb-6 p-4 ${darkMode ? 'bg-red-900/20 border-red-800' : 'bg-red-50 border-red-200'} border rounded-lg flex items-center gap-3 transition-all duration-500 transform ${
-            mounted ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
-          }`}>
-            <AlertCircle className="text-red-500 flex-shrink-0" size={20} />
-            <p className={`text-sm ${darkMode ? 'text-red-400' : 'text-red-700'}`}>{error}</p>
-          </div>
-        )}
-
-        {/* Login Form */}
-        <form onSubmit={handleSubmit} className="space-y-5">
-          {/* Username Field */}
-          <div className={`transition-all duration-700 delay-200 transform ${
-            mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
-          }`}>
-            <label className={`block text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'} mb-2`}>
-              Username or Email
-            </label>
-            <div className="relative group">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <User size={20} className={`${darkMode ? 'text-gray-500' : 'text-gray-400'} group-focus-within:text-blue-500 transition-colors`} />
-              </div>
-              <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                className={`w-full pl-10 pr-4 py-3 border ${
-                  darkMode
-                    ? 'bg-gray-800/80 border-gray-700 text-white placeholder-gray-400 focus:bg-gray-800 focus:border-blue-500'
-                    : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500 focus:bg-white focus:border-blue-500'
-                } rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all duration-300`}
-                placeholder="Enter your username"
-                autoComplete="username"
-                disabled={isLoading}
-              />
-            </div>
-          </div>
-
-          {/* Password Field */}
-          <div className={`transition-all duration-700 delay-300 transform ${
-            mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
-          }`}>
-            <label className={`block text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'} mb-2`}>
-              Password
-            </label>
-            <div className="relative group">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Lock size={20} className={`${darkMode ? 'text-gray-500' : 'text-gray-400'} group-focus-within:text-blue-500 transition-colors`} />
-              </div>
-              <input
-                type={showPassword ? 'text' : 'password'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className={`w-full pl-10 pr-12 py-3 border ${
-                  darkMode
-                    ? 'bg-gray-800/80 border-gray-700 text-white placeholder-gray-400 focus:bg-gray-800 focus:border-blue-500'
-                    : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500 focus:bg-white focus:border-blue-500'
-                } rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all duration-300`}
-                placeholder="Enter your password"
-                autoComplete="current-password"
-                disabled={isLoading}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute inset-y-0 right-0 pr-3 flex items-center hover:scale-105 active:scale-95 transition-transform"
-                disabled={isLoading}
+              <label
+                htmlFor="username"
+                className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5"
               >
-                {showPassword ? (
-                  <EyeOff size={20} className={darkMode ? 'text-gray-500' : 'text-gray-400'} />
-                ) : (
-                  <Eye size={20} className={darkMode ? 'text-gray-500' : 'text-gray-400'} />
-                )}
-              </button>
+                Username
+              </label>
+              <input
+                id="username"
+                type="text"
+                autoComplete="username"
+                value={username}
+                onChange={(e) => {
+                  setUsername(e.target.value);
+                  setError('');
+                }}
+                placeholder="Cashier username"
+                autoFocus
+                className="w-full text-[15px] px-3.5"
+                style={{ ...FIELD, height: 46 }}
+              />
             </div>
-          </div>
 
-          {/* Remember Device */}
-          <div className={`flex items-center transition-all duration-700 delay-[350ms] transform ${
-            mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
-          }`}>
-            <input
-              type="checkbox"
-              id="remember"
-              checked={rememberDevice}
-              onChange={(e) => setRememberDevice(e.target.checked)}
-              className="w-4 h-4 text-blue-500 border-gray-300 rounded focus:ring-blue-500/30 transition-shadow"
-              disabled={isLoading}
-            />
-            <label htmlFor="remember" className={`ml-2 text-sm ${darkMode ? 'text-gray-300' : 'text-gray-700'} hover:cursor-pointer select-none`}>
-              Remember this device
-            </label>
-          </div>
+            {/* Password Input */}
+            <div>
+              <label
+                htmlFor="password"
+                className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5"
+              >
+                Password
+              </label>
+              <div className="relative">
+                <input
+                  ref={passwordRef}
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setError('');
+                  }}
+                  placeholder="••••••••"
+                  className="w-full text-[15px] pl-3.5 pr-16"
+                  style={{ ...FIELD, ...NUM, height: 46 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-1.5 top-1.5 h-[34px] px-2.5 rounded-[5px] text-[11px] font-semibold cursor-pointer transition-colors"
+                  style={{ ...FIELD, color: 'var(--ink2)' }}
+                >
+                  {showPassword ? 'Hide' : 'Show'}
+                </button>
+              </div>
+            </div>
 
-          {/* Login Button */}
-          <div className={`transition-all duration-700 delay-400 transform ${
-            mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
-          }`}>
+            {/* Error Banner */}
+            {error && (
+              <div
+                className="p-3 rounded-[8px] text-[12px] font-semibold animate-fadeIn"
+                style={{
+                  background: 'var(--danger-soft)',
+                  border: '1px solid var(--danger-line)',
+                  color: 'var(--danger)',
+                }}
+              >
+                {error}
+              </div>
+            )}
+
+            {/* Primary Sign In Button */}
             <button
               type="submit"
               disabled={isLoading}
-              className={`w-full py-3 px-4 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-semibold rounded-lg shadow-lg shadow-blue-500/10 hover:shadow-blue-500/20 hover:scale-[1.01] active:scale-[0.98] transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                darkMode ? 'focus:ring-offset-gray-900' : 'focus:ring-offset-white'
-              } ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+              className="w-full mt-2 h-[48px] rounded-[8px] text-[14px] font-bold cursor-pointer flex items-center justify-center gap-2 transition-all hover:opacity-90 active:scale-[0.99] disabled:opacity-50 border-0"
+              style={{
+                background: 'var(--ink)',
+                color: 'var(--panel)',
+              }}
             >
-              {isLoading ? 'Signing in...' : 'Sign In'}
+              <span>{isLoading ? 'Opening shift…' : 'Start shift'}</span>
+              <span style={KBD_ON_FILL}>Enter</span>
             </button>
-          </div>
-        </form>
+          </form>
 
-        {/* Footer */}
-        <div className={`mt-8 text-center transition-all duration-700 delay-500 transform ${
-          mounted ? 'opacity-100' : 'opacity-0'
-        }`}>
-          <p className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
-            © 2026 NexusFlow System. All rights reserved.
-          </p>
+          {/* Footer inside card */}
+          <div
+            className="flex items-center justify-between text-[11px] mt-6 pt-4 border-t"
+            style={{ borderColor: 'var(--rule)', color: 'var(--ink3)' }}
+          >
+            <span>Need password help? Contact store owner.</span>
+            <span style={{ fontFamily: MONO }}>Till 01</span>
+          </div>
         </div>
-      </div>
+      </main>
+
+      {/* Tiny subtle nexusflow label at the bottom of the screen */}
+      <footer className="py-2.5 text-center shrink-0">
+        <span
+          className="font-mono text-[10px] tracking-wider select-none pointer-events-none"
+          style={{ color: 'var(--ink4)', opacity: 0.35 }}
+        >
+          nexusflow
+        </span>
+      </footer>
     </div>
   );
 }

@@ -7,6 +7,17 @@
 
 const BASE = '/api';
 
+/**
+ * Identifies this browser tab for the lifetime of the page.
+ *
+ * Sent on every request as `X-Client-Id`; the server stamps it onto any
+ * WebSocket broadcast the request causes, so this tab can ignore the echo of
+ * its own writes instead of re-fetching everything it already has.
+ */
+export const CLIENT_ID: string =
+  (globalThis.crypto?.randomUUID?.() ??
+    `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`);
+
 function getToken(): string | null {
   return localStorage.getItem('authToken');
 }
@@ -27,6 +38,7 @@ async function request<T>(
   const token = getToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    'X-Client-Id': CLIENT_ID,
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
@@ -65,9 +77,22 @@ async function request<T>(
 }
 
 export const api = {
-  get:    <T>(path: string)                    => request<T>('GET',    path),
-  post:   <T>(path: string, body: unknown)     => request<T>('POST',   path, body),
-  put:    <T>(path: string, body: unknown)     => request<T>('PUT',    path, body),
-  patch:  <T>(path: string, body: unknown)     => request<T>('PATCH',  path, body),
-  delete: <T>(path: string)                    => request<T>('DELETE', path),
+  get:     <T>(path: string)                    => request<T>('GET',    path),
+  post:    <T>(path: string, body: unknown)     => request<T>('POST',   path, body),
+  put:     <T>(path: string, body: unknown)     => request<T>('PUT',    path, body),
+  patch:   <T>(path: string, body: unknown)     => request<T>('PATCH',  path, body),
+  delete:  <T>(path: string)                    => request<T>('DELETE', path),
+  getBlob: async (path: string): Promise<Blob> => {
+    const token = getToken();
+    const headers: Record<string, string> = {
+      'X-Client-Id': CLIENT_ID,
+    };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(`${BASE}${path}`, { method: 'GET', headers });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    return res.blob();
+  },
 };

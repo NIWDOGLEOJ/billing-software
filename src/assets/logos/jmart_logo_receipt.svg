@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 80" width="100%" height="100%">
+  <!-- Monochrome Logo For Thermal Receipts -->
+  <g transform="translate(10, 5)">
+    <!-- Cart & J in pure black -->
+    <path d="M 16 52 L 58 52 L 51 26 L 23 26 Z" fill="none" stroke="#000000" stroke-width="4.5" stroke-linejoin="round" stroke-linecap="round"/>
+    <path d="M 44 10 L 44 48 C 44 58 34 61 24 56" fill="none" stroke="#000000" stroke-width="6" stroke-linecap="round"/>
+    <path d="M 21 15 Q 28 8 35 15 Q 42 8 49 15" fill="none" stroke="#000000" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="26" cy="64" r="5" fill="#000000"/>
+    <circle cx="50" cy="64" r="5" fill="#000000"/>
+  </g>
+  <g transform="translate(85, 48)">
+    <text font-family="monospace, 'Courier New', sans-serif" font-weight="900" font-size="34" fill="#000000" letter-spacing="2">
+      J MART
+    </text>
+    <text x="2" y="18" font-family="monospace, 'Courier New', sans-serif" font-weight="700" font-size="10" fill="#000000" letter-spacing="3">
+      SUPERMARKET
+    </text>
+  </g>
+</svg>
