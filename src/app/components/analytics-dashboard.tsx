@@ -607,7 +607,7 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
         gst_rate: newProduct.gst,
         stock: newProduct.stock,
         low_stock_threshold: newProduct.reorder,
-        hsn_code: newProduct.hsn,
+        hsn_code: newProduct.hsn === '—' ? '' : newProduct.hsn,
         brand: form.brand,
         uom: newProduct.uom,
         batch_number: form.batchNumber,

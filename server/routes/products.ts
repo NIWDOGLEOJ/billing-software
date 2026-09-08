@@ -53,15 +53,39 @@ router.post('/', authenticateToken, requirePermission('access_inventory'), async
     image_url
   } = req.body;
 
-  if (!id || !sku || !name || price === undefined || gst_rate === undefined || !uom) {
+  const finalId = (id && String(id).trim()) || `prod_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  const finalSku = (sku !== undefined && sku !== null) ? String(sku).trim() : '';
+  const finalName = (name !== undefined && name !== null) ? String(name).trim() : '';
+
+  if (
+    !finalSku ||
+    !finalName ||
+    price === undefined ||
+    price === null ||
+    price === '' ||
+    isNaN(Number(price)) ||
+    Number(price) < 0 ||
+    gst_rate === undefined ||
+    gst_rate === null ||
+    gst_rate === '' ||
+    isNaN(Number(gst_rate)) ||
+    Number(gst_rate) < 0
+  ) {
     return res.status(400).json({ error: 'Missing required Indian GST billing fields (id, sku, name, price, gst_rate, uom)' });
   }
 
+  const finalUom = (uom && String(uom).trim()) ? String(uom).trim().toUpperCase() : 'PCS';
+
   try {
     // Check if sku is already taken
-    const existing = db.prepare('SELECT * FROM products WHERE sku = ?').get(sku);
+    const existing = db.prepare('SELECT id FROM products WHERE sku = ?').get(finalSku);
     if (existing) {
-      return res.status(400).json({ error: `Product with SKU "${sku}" already exists` });
+      return res.status(400).json({ error: `Product with SKU "${finalSku}" already exists` });
+    }
+
+    const existingId = db.prepare('SELECT id FROM products WHERE id = ?').get(finalId);
+    if (existingId) {
+      return res.status(400).json({ error: `Product with ID "${finalId}" already exists` });
     }
 
     let finalImageUrl = image_url || '';
@@ -72,7 +96,7 @@ router.post('/', authenticateToken, requirePermission('access_inventory'), async
       } else {
         try {
           finalImageUrl = await processProductImageAsync({
-            productId: id,
+            productId: finalId,
             imageData: trimmed,
             broadcast: req.app.get('broadcast')
           });
@@ -82,6 +106,19 @@ router.post('/', authenticateToken, requirePermission('access_inventory'), async
       }
     }
 
+    const numericPrice = Number(price);
+    const numericGstRate = Number(gst_rate || 0);
+    const numericStock = Number(stock || 0);
+    const numericLowStock = Number(low_stock_threshold !== undefined && low_stock_threshold !== null && low_stock_threshold !== '' ? low_stock_threshold : 10);
+    const numericPurchasePrice = Number(purchase_price || 0);
+    const numericWholesalePrice = Number(wholesale_price || 0);
+    const parsedMrp = Number(mrp !== undefined && mrp !== null && mrp !== '' ? mrp : 0);
+    const numericMrp = parsedMrp > 0 ? parsedMrp : (numericPrice > 0 ? numericPrice : 0);
+    const numericDiscount = Number(discount_percent || 0);
+    const numericMoq = Number(moq || 1);
+    const numericDistributorPrice = Number(distributor_price || 0);
+    const cleanHsn = (hsn_code && String(hsn_code).trim() !== '—') ? String(hsn_code).trim() : '';
+
     db.prepare(`
       INSERT INTO products (
         id, sku, name, price, category, gst_rate, stock, low_stock_threshold, hsn_code,
@@ -90,31 +127,31 @@ router.post('/', authenticateToken, requirePermission('access_inventory'), async
       )
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      id,
-      sku,
-      name,
-      Number(price),
-      category || 'General',
-      Number(gst_rate || 0),
-      Number(stock || 0),
-      Number(low_stock_threshold || 10),
-      hsn_code || '',
-      brand || '',
-      uom || 'PCS',
-      Number(purchase_price || 0),
-      Number(wholesale_price || 0),
-      Number(mrp !== undefined && mrp !== null && mrp !== '' ? mrp : (price || 0)),
-      Number(discount_percent || 0),
-      batch_number || '',
-      expiry_date || '',
-      status || 'Active',
-      barcode_type || 'EAN-13',
-      Number(moq || 1),
-      Number(distributor_price || 0),
+      finalId,
+      finalSku,
+      finalName,
+      numericPrice,
+      (category && String(category).trim()) || 'General',
+      numericGstRate,
+      numericStock,
+      numericLowStock,
+      cleanHsn,
+      (brand && String(brand).trim()) || '',
+      finalUom,
+      numericPurchasePrice,
+      numericWholesalePrice,
+      numericMrp,
+      numericDiscount,
+      (batch_number && String(batch_number).trim()) || '',
+      (expiry_date && String(expiry_date).trim()) || '',
+      (status && String(status).trim()) || 'Active',
+      (barcode_type && String(barcode_type).trim()) || 'EAN-13',
+      numericMoq,
+      numericDistributorPrice,
       finalImageUrl
     );
 
-    const product = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
+    const product = db.prepare('SELECT * FROM products WHERE id = ?').get(finalId);
 
     // Broadcast WS update for stock
     const broadcast = req.app.get('broadcast');
@@ -158,7 +195,12 @@ router.post('/bulk', authenticateToken, requirePermission('access_inventory'), (
         wholesale_price = excluded.wholesale_price,
         mrp = excluded.mrp,
         discount_percent = excluded.discount_percent,
+        batch_number = excluded.batch_number,
+        expiry_date = excluded.expiry_date,
         status = excluded.status,
+        barcode_type = excluded.barcode_type,
+        moq = excluded.moq,
+        distributor_price = excluded.distributor_price,
         image_url = CASE WHEN excluded.image_url != '' THEN excluded.image_url ELSE products.image_url END
     `);
 
@@ -170,13 +212,14 @@ router.post('/bulk', authenticateToken, requirePermission('access_inventory'), (
         if (!sku || !name) continue;
 
         const id = p.id || `prod_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-        const mrp = Number(p.mrp || p.price || 0);
-        const price = Number(p.price !== undefined ? p.price : mrp);
+        const price = Number(p.price !== undefined && p.price !== null && p.price !== '' ? p.price : (p.mrp || 0));
+        const rawMrp = Number(p.mrp !== undefined && p.mrp !== null && p.mrp !== '' ? p.mrp : 0);
+        const mrp = rawMrp > 0 ? rawMrp : (price > 0 ? price : 0);
         const category = p.category || p.cat || 'General';
         const gst_rate = Number(p.gst_rate ?? p.gst ?? 0);
         const stock = Number(p.stock || 0);
         const low_stock = Number(p.low_stock_threshold ?? p.reorder ?? 10);
-        const hsn = p.hsn_code || p.hsn || '';
+        const hsn = (p.hsn_code || p.hsn || '').replace(/^—$/, '').trim();
         const brand = p.brand || '';
         const uom = (p.uom || 'PCS').toUpperCase();
         const purchase_price = Number(p.purchase_price || (price * 0.7));
@@ -243,7 +286,20 @@ router.put('/:id', authenticateToken, requirePermission('access_inventory'), asy
     image_url
   } = req.body;
 
-  if (!name || price === undefined || gst_rate === undefined || !uom) {
+  const trimmedName = (name !== undefined && name !== null) ? String(name).trim() : '';
+  if (
+    !trimmedName ||
+    price === undefined ||
+    price === null ||
+    price === '' ||
+    isNaN(Number(price)) ||
+    Number(price) < 0 ||
+    gst_rate === undefined ||
+    gst_rate === null ||
+    gst_rate === '' ||
+    isNaN(Number(gst_rate)) ||
+    Number(gst_rate) < 0
+  ) {
     return res.status(400).json({ error: 'Missing required Indian GST billing fields (name, price, gst_rate, uom)' });
   }
 
@@ -253,11 +309,12 @@ router.put('/:id', authenticateToken, requirePermission('access_inventory'), asy
       return res.status(404).json({ error: 'Product not found' });
     }
 
+    const trimmedSku = (sku !== undefined && sku !== null) ? String(sku).trim() : '';
     // Check if sku is being updated to a duplicate
-    if (sku && sku !== (product as any).sku) {
-      const existing = db.prepare('SELECT * FROM products WHERE sku = ?').get(sku);
+    if (trimmedSku && trimmedSku !== (product as any).sku) {
+      const existing = db.prepare('SELECT id FROM products WHERE sku = ?').get(trimmedSku);
       if (existing) {
-        return res.status(400).json({ error: `SKU "${sku}" is already in use by another product` });
+        return res.status(400).json({ error: `SKU "${trimmedSku}" is already in use by another product` });
       }
     }
 
@@ -279,6 +336,12 @@ router.put('/:id', authenticateToken, requirePermission('access_inventory'), asy
       }
     }
 
+    const effectivePrice = Number(price);
+    const parsedMrp = Number(mrp !== undefined && mrp !== null && mrp !== '' ? mrp : 0);
+    const effectiveMrp = parsedMrp > 0 ? parsedMrp : (effectivePrice > 0 ? effectivePrice : ((product as any).mrp || 0));
+    const finalUom = (uom !== undefined && String(uom).trim()) ? String(uom).trim().toUpperCase() : ((product as any).uom || 'PCS');
+    const cleanHsn = hsn_code !== undefined ? String(hsn_code).replace(/^—$/, '').trim() : (product as any).hsn_code;
+
     db.prepare(`
       UPDATE products
       SET sku = ?, name = ?, price = ?, category = ?, gst_rate = ?, stock = ?, low_stock_threshold = ?, hsn_code = ?,
@@ -286,25 +349,25 @@ router.put('/:id', authenticateToken, requirePermission('access_inventory'), asy
           batch_number = ?, expiry_date = ?, status = ?, barcode_type = ?, moq = ?, distributor_price = ?, image_url = ?
       WHERE id = ?
     `).run(
-      sku || (product as any).sku,
-      name,
-      Number(price),
-      category || 'General',
+      trimmedSku || (product as any).sku,
+      trimmedName,
+      effectivePrice,
+      category !== undefined ? (String(category).trim() || 'General') : (product as any).category,
       Number(gst_rate || 0),
-      Number(stock || 0),
-      Number(low_stock_threshold || 10),
-      hsn_code || '',
-      brand !== undefined ? brand : ((product as any).brand || ''),
-      uom !== undefined ? uom : ((product as any).uom || 'PCS'),
+      stock !== undefined ? Number(stock || 0) : (product as any).stock,
+      low_stock_threshold !== undefined ? Number(low_stock_threshold || 10) : (product as any).low_stock_threshold,
+      cleanHsn || '',
+      brand !== undefined ? String(brand).trim() : ((product as any).brand || ''),
+      finalUom,
       purchase_price !== undefined ? Number(purchase_price) : ((product as any).purchase_price || 0),
       wholesale_price !== undefined ? Number(wholesale_price) : ((product as any).wholesale_price || 0),
-      mrp !== undefined ? Number(mrp) : ((product as any).mrp || 0),
+      effectiveMrp,
       discount_percent !== undefined ? Number(discount_percent) : ((product as any).discount_percent || 0),
-      batch_number !== undefined ? batch_number : ((product as any).batch_number || ''),
-      expiry_date !== undefined ? expiry_date : ((product as any).expiry_date || ''),
-      status !== undefined ? status : ((product as any).status || 'Active'),
-      barcode_type !== undefined ? barcode_type : ((product as any).barcode_type || 'EAN-13'),
-      moq !== undefined ? Number(moq) : ((product as any).moq || 1),
+      batch_number !== undefined ? String(batch_number).trim() : ((product as any).batch_number || ''),
+      expiry_date !== undefined ? String(expiry_date).trim() : ((product as any).expiry_date || ''),
+      status !== undefined ? String(status).trim() : ((product as any).status || 'Active'),
+      barcode_type !== undefined ? String(barcode_type).trim() : ((product as any).barcode_type || 'EAN-13'),
+      moq !== undefined ? Number(moq || 1) : ((product as any).moq || 1),
       distributor_price !== undefined ? Number(distributor_price) : ((product as any).distributor_price || 0),
       finalImageUrl,
       id

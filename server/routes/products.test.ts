@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import http from 'http';
 import { db, initDb } from '../db';
 import productRoutes from './products';
+import billsRoutes from './bills';
 import { JWT_SECRET } from '../middleware/auth';
 
 describe('Product Insertion & Route Column Matching', () => {
@@ -39,6 +40,7 @@ describe('Product Insertion & Route Column Matching', () => {
     app = express();
     app.use(express.json());
     app.use('/api/products', productRoutes);
+    app.use('/api/bills', billsRoutes);
 
     await new Promise<void>((resolve) => {
       server = app.listen(0, () => {
@@ -224,6 +226,233 @@ describe('Product Insertion & Route Column Matching', () => {
     db.prepare('DELETE FROM products WHERE sku IN (?, ?)').run(sku1, sku2);
   });
 
+  it('auto-generates product id and defaults UOM to PCS when omitted', async () => {
+    const testSku = `NO_ID_${Date.now()}`;
+    const payload = {
+      sku: testSku,
+      name: 'Item Without ID or UOM',
+      price: 88,
+      gst_rate: 5,
+    };
+
+    const res = await fetch(`${baseUrl}/api/products`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${ownerToken}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const body = await res.json();
+    expect(res.status).toBe(201);
+    expect(body.id).toBeDefined();
+    expect(body.id).toMatch(/^prod_/);
+    expect(body.uom).toBe('PCS');
+    expect(body.mrp).toBe(88); // defaults to price
+
+    // Clean up
+    db.prepare('DELETE FROM products WHERE id = ?').run(body.id);
+  });
+
+  it('defaults MRP to price when mrp is passed as 0 or empty string', async () => {
+    const testSku = `ZERO_MRP_${Date.now()}`;
+    const payload = {
+      sku: testSku,
+      name: 'Zero MRP Product',
+      price: 199,
+      mrp: 0,
+      gst_rate: 12,
+    };
+
+    const res = await fetch(`${baseUrl}/api/products`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${ownerToken}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const body = await res.json();
+    expect(res.status).toBe(201);
+    expect(body.mrp).toBe(199);
+
+    // Clean up
+    db.prepare('DELETE FROM products WHERE id = ?').run(body.id);
+  });
+
+  it('updates all columns on conflict during bulk upsert including batch, expiry, barcode_type, moq, distributor_price', async () => {
+    const testSku = `CONFLICT_TEST_${Date.now()}`;
+    const initialId = `prod_init_${Date.now()}`;
+
+    // 1. Initial insert
+    db.prepare(`
+      INSERT INTO products (
+        id, sku, name, price, category, gst_rate, stock, low_stock_threshold, hsn_code,
+        brand, uom, purchase_price, wholesale_price, mrp, discount_percent,
+        batch_number, expiry_date, status, barcode_type, moq, distributor_price, image_url
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      initialId, testSku, 'Initial Name', 100, 'General', 18, 10, 5, '1111',
+      'OldBrand', 'PCS', 70, 90, 110, 0,
+      'BATCH_OLD', '2025-01-01', 'Active', 'EAN-13', 1, 85, ''
+    );
+
+    // 2. Bulk update with new batch, expiry, barcode_type, moq, distributor_price
+    const bulkPayload = {
+      products: [
+        {
+          sku: testSku,
+          name: 'Updated Name',
+          price: 120,
+          mrp: 130,
+          purchase_price: 80,
+          wholesale_price: 105,
+          distributor_price: 95,
+          category: 'Grocery',
+          gst_rate: 5,
+          stock: 50,
+          low_stock_threshold: 15,
+          hsn_code: '2222',
+          brand: 'NewBrand',
+          uom: 'KG',
+          batch_number: 'BATCH_NEW',
+          expiry_date: '2027-12-31',
+          status: 'Active',
+          barcode_type: 'CODE-128',
+          moq: 10,
+        },
+      ],
+    };
+
+    const res = await fetch(`${baseUrl}/api/products/bulk`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${ownerToken}`,
+      },
+      body: JSON.stringify(bulkPayload),
+    });
+
+    expect(res.status).toBe(200);
+
+    const updated = db.prepare('SELECT * FROM products WHERE sku = ?').get(testSku) as any;
+    expect(updated).toBeDefined();
+    expect(updated.name).toBe('Updated Name');
+    expect(updated.price).toBe(120);
+    expect(updated.mrp).toBe(130);
+    expect(updated.batch_number).toBe('BATCH_NEW');
+    expect(updated.expiry_date).toBe('2027-12-31');
+    expect(updated.barcode_type).toBe('CODE-128');
+    expect(updated.moq).toBe(10);
+    expect(updated.distributor_price).toBe(95);
+    expect(updated.hsn_code).toBe('2222');
+
+    // Clean up
+    db.prepare('DELETE FROM products WHERE sku = ?').run(testSku);
+  });
+
+  it('updates product via PUT /api/products/:id correctly across all 22 columns', async () => {
+    const testSku = `PUT_TEST_${Date.now()}`;
+    const testId = `prod_put_${Date.now()}`;
+
+    // 1. Create product
+    db.prepare(`
+      INSERT INTO products (
+        id, sku, name, price, category, gst_rate, stock, low_stock_threshold, hsn_code,
+        brand, uom, purchase_price, wholesale_price, mrp, discount_percent,
+        batch_number, expiry_date, status, barcode_type, moq, distributor_price, image_url
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      testId, testSku, 'Pre-Edit Item', 50, 'General', 5, 20, 5, '3333',
+      'OldBrand', 'PCS', 35, 45, 55, 0,
+      'B01', '2026-01-01', 'Active', 'EAN-13', 1, 40, ''
+    );
+
+    // 2. PUT update
+    const updatePayload = {
+      name: 'Post-Edit Item',
+      price: 60,
+      mrp: 65,
+      gst_rate: 12,
+      uom: 'BOX',
+      brand: 'EditedBrand',
+      batch_number: 'B02',
+      distributor_price: 48,
+    };
+
+    const res = await fetch(`${baseUrl}/api/products/${testId}`, {
+      method: 'PUT',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${ownerToken}`,
+      },
+      body: JSON.stringify(updatePayload),
+    });
+
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.name).toBe('Post-Edit Item');
+    expect(body.price).toBe(60);
+    expect(body.mrp).toBe(65);
+    expect(body.gst_rate).toBe(12);
+    expect(body.uom).toBe('BOX');
+    expect(body.brand).toBe('EditedBrand');
+    expect(body.batch_number).toBe('B02');
+    expect(body.distributor_price).toBe(48);
+
+    // Clean up
+    db.prepare('DELETE FROM products WHERE id = ?').run(testId);
+  });
+
+  it('rejects duplicate SKU creation with 400', async () => {
+    const testSku = `DUP_${Date.now()}`;
+    const id1 = `prod_dup_1_${Date.now()}`;
+    const id2 = `prod_dup_2_${Date.now()}`;
+
+    // First insert succeeds
+    const res1 = await fetch(`${baseUrl}/api/products`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${ownerToken}`,
+      },
+      body: JSON.stringify({
+        id: id1,
+        sku: testSku,
+        name: 'Original',
+        price: 10,
+        gst_rate: 5,
+      }),
+    });
+    expect(res1.status).toBe(201);
+
+    // Duplicate insert fails with 400
+    const res2 = await fetch(`${baseUrl}/api/products`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${ownerToken}`,
+      },
+      body: JSON.stringify({
+        id: id2,
+        sku: testSku,
+        name: 'Duplicate',
+        price: 20,
+        gst_rate: 5,
+      }),
+    });
+    const body2 = await res2.json();
+    expect(res2.status).toBe(400);
+    expect(body2.error).toContain('already exists');
+
+    // Clean up
+    db.prepare('DELETE FROM products WHERE sku = ?').run(testSku);
+  });
+
   it('rejects product creation when required fields are missing', async () => {
     const res = await fetch(`${baseUrl}/api/products`, {
       method: 'POST',
@@ -237,5 +466,92 @@ describe('Product Insertion & Route Column Matching', () => {
     const body = await res.json();
     expect(res.status).toBe(400);
     expect(body.error).toContain('Missing required Indian GST billing fields');
+  });
+
+  it('rejects product creation when price is negative or non-numeric', async () => {
+    const res = await fetch(`${baseUrl}/api/products`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${ownerToken}`,
+      },
+      body: JSON.stringify({
+        sku: `BAD_PRICE_${Date.now()}`,
+        name: 'Negative Price Item',
+        price: -10,
+        gst_rate: 5,
+      }),
+    });
+
+    const body = await res.json();
+    expect(res.status).toBe(400);
+    expect(body.error).toContain('Missing required Indian GST billing fields');
+  });
+
+  it('deducts stock accurately when a bill is finalized for a mobile quick-added product', async () => {
+    const testSku = `MOBILE_STOCK_${Date.now()}`;
+    const testId = `prod_mob_${Date.now()}`;
+
+    // 1. Create product via mobile Quick Add payload
+    const createRes = await fetch(`${baseUrl}/api/products`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${ownerToken}`,
+      },
+      body: JSON.stringify({
+        id: testId,
+        sku: testSku,
+        name: 'Mobile Quick Add Stock Test',
+        price: 50,
+        gst_rate: 18,
+        stock: 25,
+        uom: 'PCS',
+      }),
+    });
+    expect(createRes.status).toBe(201);
+
+    const billId = `BILL_TEST_${Date.now()}`;
+    // 2. Finalize a bill selling 3 units where item uses code / sku as id
+    const billRes = await fetch(`${baseUrl}/api/bills`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${ownerToken}`,
+      },
+      body: JSON.stringify({
+        id: billId,
+        bill_number: billId,
+        date: new Date().toISOString(),
+        subtotal: 150,
+        gst_amount: 27,
+        cgst: 13.5,
+        sgst: 13.5,
+        total: 177,
+        payment_mode: 'cash',
+        items: [
+          {
+            id: testId,
+            sku: testSku,
+            name: 'Mobile Quick Add Stock Test',
+            price: 50,
+            quantity: 3,
+            gstRate: 18,
+            uom: 'PCS',
+          },
+        ],
+      }),
+    });
+
+    expect(billRes.status).toBe(201);
+
+    // 3. Verify stock in SQLite database is reduced from 25 to 22
+    const updated = db.prepare('SELECT stock FROM products WHERE id = ?').get(testId) as any;
+    expect(updated).toBeDefined();
+    expect(updated.stock).toBe(22);
+
+    // Clean up
+    db.prepare('DELETE FROM bills WHERE id = ?').run(billId);
+    db.prepare('DELETE FROM products WHERE id = ?').run(testId);
   });
 });

@@ -87,6 +87,7 @@ export function createConfiguredZxingReader(): BrowserMultiFormatReader {
 }
 
 interface Product {
+  id?: string;
   code: string;
   name: string;
   price: number;
@@ -103,6 +104,7 @@ interface Product {
 }
 
 interface BillItem {
+  id?: string;
   code: string;
   name: string;
   price: number;
@@ -821,6 +823,7 @@ export function CashierBillingAdvanced() {
       ]);
 
       setProducts(prods.map(p => ({
+        id: p.id,
         code: p.sku || p.id,
         name: p.name,
         price: p.price,
@@ -830,7 +833,8 @@ export function CashierBillingAdvanced() {
         lowStockThreshold: p.low_stock_threshold,
         hsnCode: p.hsn_code || '',
         uom: p.uom || 'PCS',
-        discountPercent: p.discount_percent || 0
+        discountPercent: p.discount_percent || 0,
+        moq: p.moq || 1
       })));
 
       applySettings(settings);
@@ -1782,7 +1786,7 @@ export function CashierBillingAdvanced() {
       : 0;
     
     const mappedItems = billItems.map(item => ({
-      id: item.code,
+      id: item.id || item.code,
       sku: item.code,
       name: item.name,
       price: item.price,
@@ -1970,6 +1974,7 @@ export function CashierBillingAdvanced() {
       if (res && res.id) {
         // Successfully created product!
         const newProduct: Product = {
+          id: res.id,
           code: res.sku, // standard maps SKU as code in search/lookup
           name: res.name,
           price: res.price,
@@ -1979,7 +1984,8 @@ export function CashierBillingAdvanced() {
           lowStockThreshold: res.low_stock_threshold,
           hsnCode: res.hsn_code,
           uom: res.uom,
-          discountPercent: res.discount_percent || 0
+          discountPercent: res.discount_percent || 0,
+          moq: res.moq || 1
         };
 
         // 1. Update product catalog state locally

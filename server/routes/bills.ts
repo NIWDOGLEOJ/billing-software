@@ -147,31 +147,35 @@ router.post('/', authenticateToken, (req: AuthRequest, res: Response) => {
 
     // 2. Deduct product stock & update inventory ledgers / batches
     for (const item of items) {
-      const reservedQty = (item.id && reservedItemMap[item.id]) || (item.sku && reservedItemMap[item.sku]) || 0;
+      const prod = (
+        (item.id ? db.prepare('SELECT id, stock FROM products WHERE id = ?').get(item.id) : null) ||
+        (item.sku ? db.prepare('SELECT id, stock FROM products WHERE sku = ?').get(item.sku) : null) ||
+        (item.id ? db.prepare('SELECT id, stock FROM products WHERE sku = ?').get(item.id) : null)
+      ) as any;
+      const targetProductId = prod ? prod.id : item.id;
+
+      const reservedQty = (item.id && reservedItemMap[item.id]) || (item.sku && reservedItemMap[item.sku]) || (prod && reservedItemMap[prod.id]) || 0;
       const qtyToDeduct = Math.max(0, item.quantity - reservedQty);
 
-      if (qtyToDeduct > 0) {
-        const prod = db.prepare('SELECT stock FROM products WHERE id = ?').get(item.id) as any;
-        if (prod) {
-          const newStock = Math.max(0, prod.stock - qtyToDeduct);
-          db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(newStock, item.id);
-        }
+      if (qtyToDeduct > 0 && prod) {
+        const newStock = Math.max(0, prod.stock - qtyToDeduct);
+        db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(newStock, prod.id);
       }
 
       // Deduct from pharmacy batch if applicable
       if (item.selectedBatch) {
         db.prepare('UPDATE medicine_batches SET stock_quantity = MAX(0, stock_quantity - ?) WHERE product_id = ? AND batch_number = ?')
-          .run(item.quantity, item.id, item.selectedBatch);
+          .run(item.quantity, targetProductId, item.selectedBatch);
       }
 
       // Record transaction movement in inventory ledger
-      const ledgerId = `log_${Date.now()}_${item.id}_${Math.random().toString(36).substring(2, 6)}`;
+      const ledgerId = `log_${Date.now()}_${targetProductId}_${Math.random().toString(36).substring(2, 6)}`;
       db.prepare(`
         INSERT INTO inventory_ledger (id, product_id, warehouse_id, change_qty, type, reference_id, notes, timestamp)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         ledgerId,
-        item.id,
+        targetProductId,
         'wh_main',
         -item.quantity,
         'sale',
