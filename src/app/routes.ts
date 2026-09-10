@@ -20,6 +20,14 @@ export const router = createBrowserRouter([
     },
   },
   {
+    path: "/invite",
+    ErrorBoundary: RouteErrorBoundary,
+    lazy: async () => {
+      const { InvitePage } = await import("./components/invite-page");
+      return { Component: InvitePage };
+    },
+  },
+  {
     path: "/",
     Component: Layout,
     // Catches a crash in the shell itself. Each child below declares its own

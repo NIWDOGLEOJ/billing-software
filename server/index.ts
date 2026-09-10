@@ -23,6 +23,7 @@ import inventoryRoutes from './routes/inventory';
 import batchRoutes from './routes/batches';
 import reservationRoutes from './routes/reservations';
 import couponRoutes from './routes/coupons';
+import inviteRoutes from './routes/invites';
 import fs from 'fs';
 import BonjourService from 'bonjour-service';
 const { Bonjour } = BonjourService;
@@ -127,6 +128,7 @@ app.use('/api/inventory', inventoryRoutes);
 app.use('/api/batches', batchRoutes);
 app.use('/api/reservations', reservationRoutes);
 app.use('/api/coupons', couponRoutes);
+app.use('/api/invites', inviteRoutes);
 
 // Serves uploaded product images with CORS for customer website
 const uploadsDir = path.join(__dirname, '..', 'uploads');

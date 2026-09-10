@@ -5,6 +5,20 @@ import { useTheme } from '../contexts/theme-context';
 import { api } from '../utils/api';
 import { toast } from 'sonner';
 import { saveStoredShopDetails } from '../lib/shop-details';
+import {
+  Lock,
+  Copy,
+  Check,
+  UserPlus,
+  Mail,
+  Link as LinkIcon,
+  Trash2,
+  X,
+  RefreshCw,
+  AlertCircle,
+  Shield,
+  Clock
+} from 'lucide-react';
 
 const MONO = "'IBM Plex Mono', ui-monospace, monospace";
 
@@ -202,7 +216,7 @@ function SettingsModalWrapper({ children, onClose }: { children: React.ReactNode
 
 export function POSSettings({ onClose, isModal = false, defaultPanel = 'shop' }: POSSettingsProps) {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, isPrimaryOwner } = useAuth();
   const { theme, setTheme, accentColor, setAccentColor } = useTheme();
 
   const [panel, setPanel] = useState<SettingsPanelKey>(defaultPanel);
@@ -240,11 +254,35 @@ export function POSSettings({ onClose, isModal = false, defaultPanel = 'shop' }:
 
   // Shop Details
   const [shopName, setShopName] = useState('J MART');
+  const [ownerName, setOwnerName] = useState('Store Owner');
   const [gstin, setGstin] = useState('33AAAAA0000A1Z5');
   const [shopPhone, setShopPhone] = useState('+91 77088 00220');
   const [shopState, setShopState] = useState('Tamil Nadu');
   const [shopAddr, setShopAddr] = useState('Rayala Nagar Extension, near Koilpillai School\nRamapuram, Chennai 600089');
   const [footer, setFooter] = useState('Thank you. Goods once sold are not returnable.');
+
+  // Co-Owners & Invites State
+  const [ownersList, setOwnersList] = useState<any[]>([]);
+  const [invitesList, setInvitesList] = useState<any[]>([]);
+  const [isOwnersLoading, setIsOwnersLoading] = useState(false);
+
+  // Invite Modal State
+  const [inviteModalOpen, setInviteModalOpen] = useState(false);
+  const [inviteName, setInviteName] = useState('');
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [invitePhone, setInvitePhone] = useState('');
+  const [inviteDays, setInviteDays] = useState(7);
+  const [generatedInvite, setGeneratedInvite] = useState<{ token: string; url: string; expires_at: string } | null>(null);
+  const [copiedToken, setCopiedToken] = useState(false);
+  const [copiedUrl, setCopiedUrl] = useState(false);
+
+  // Direct Add Co-Owner Modal State
+  const [directAddOpen, setDirectAddOpen] = useState(false);
+  const [directName, setDirectName] = useState('');
+  const [directUsername, setDirectUsername] = useState('');
+  const [directPassword, setDirectPassword] = useState('');
+  const [directPhone, setDirectPhone] = useState('');
+  const [directEmail, setDirectEmail] = useState('');
 
   // Workspace Profile
   const [activeSector, setActiveSector] = useState('retail');
@@ -308,6 +346,11 @@ export function POSSettings({ onClose, isModal = false, defaultPanel = 'shop' }:
         if (settingsRes.status === 'fulfilled' && settingsRes.value) {
           const s = settingsRes.value;
           if (s.shop_name) setShopName(s.shop_name);
+          if (s.owner_name) {
+            setOwnerName(s.owner_name);
+          } else if (user?.role === 'owner' && user.name) {
+            setOwnerName(user.name);
+          }
           if (s.gst_number) setGstin(s.gst_number);
           if (s.counter_phone) setShopPhone(s.counter_phone);
           if (s.shop_address) setShopAddr(s.shop_address);
@@ -328,23 +371,138 @@ export function POSSettings({ onClose, isModal = false, defaultPanel = 'shop' }:
     };
 
     fetchSettings();
-  }, []);
+  }, [user]);
 
   const toggleFlag = (key: keyof typeof flags) => {
     setFlags(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
+  // Co-Owners & Invites fetcher
+  const loadCoOwnersAndInvites = useCallback(async () => {
+    setIsOwnersLoading(true);
+    try {
+      const [usersRes, invitesRes] = await Promise.allSettled([
+        api.get<any[]>('/users'),
+        isPrimaryOwner() ? api.get<any[]>('/invites') : Promise.resolve([])
+      ]);
+
+      if (usersRes.status === 'fulfilled' && Array.isArray(usersRes.value)) {
+        const filtered = usersRes.value.filter(u => u.role === 'owner' || u.role === 'co-owner');
+        setOwnersList(filtered);
+        const ownerUser = usersRes.value.find(u => u.role === 'owner');
+        if (ownerUser && ownerUser.name) {
+          setOwnerName(ownerUser.name);
+        }
+      }
+      if (invitesRes.status === 'fulfilled' && Array.isArray(invitesRes.value)) {
+        setInvitesList(invitesRes.value);
+      }
+    } catch (err: any) {
+      console.error('Failed to load co-owners or invites:', err);
+    } finally {
+      setIsOwnersLoading(false);
+    }
+  }, [isPrimaryOwner]);
+
+  useEffect(() => {
+    if (panel === 'owners') {
+      loadCoOwnersAndInvites();
+    }
+  }, [panel, loadCoOwnersAndInvites]);
+
+  const handleCreateInvite = async () => {
+    try {
+      const res = await api.post<any>('/invites', {
+        name: inviteName.trim(),
+        email: inviteEmail.trim(),
+        phone: invitePhone.trim(),
+        expiresInDays: Number(inviteDays) || 7
+      });
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      const fullUrl = `${origin}/invite?token=${res.token}`;
+      setGeneratedInvite({
+        token: res.token,
+        url: fullUrl,
+        expires_at: res.expires_at
+      });
+      flash('Co-owner invite created');
+      loadCoOwnersAndInvites();
+    } catch (err: any) {
+      flash(err?.message || 'Failed to create invite');
+    }
+  };
+
+  const handleRevokeInvite = async (id: string) => {
+    try {
+      await api.delete(`/invites/${id}`);
+      flash('Invite revoked');
+      loadCoOwnersAndInvites();
+    } catch (err: any) {
+      flash(err?.message || 'Failed to revoke invite');
+    }
+  };
+
+  const handleDirectAddCoOwner = async () => {
+    if (!directName.trim() || !directUsername.trim() || !directPassword.trim()) {
+      flash('Name, username, and password are required');
+      return;
+    }
+    if (directPassword.length < 8) {
+      flash('Password must be at least 8 characters long');
+      return;
+    }
+    try {
+      await api.post('/users', {
+        id: `usr_${Date.now()}`,
+        username: directUsername.trim().toLowerCase(),
+        name: directName.trim(),
+        password: directPassword.trim(),
+        phone: directPhone.trim() || null,
+        email: directEmail.trim() || null,
+        role: 'co-owner'
+      });
+      flash(`Co-owner account created for ${directName}`);
+      setDirectAddOpen(false);
+      setDirectName('');
+      setDirectUsername('');
+      setDirectPassword('');
+      setDirectPhone('');
+      setDirectEmail('');
+      loadCoOwnersAndInvites();
+    } catch (err: any) {
+      flash(err?.message || 'Failed to create co-owner');
+    }
+  };
+
+  const handleRevokeCoOwner = async (id: string, name: string) => {
+    if (!isPrimaryOwner()) {
+      flash('Only the primary store owner can revoke co-owners');
+      return;
+    }
+    try {
+      await api.delete(`/users/${id}`);
+      flash(`Revoked access for ${name}`);
+      loadCoOwnersAndInvites();
+    } catch (err: any) {
+      flash(err?.message || 'Failed to remove co-owner');
+    }
+  };
+
   // Save shop details to server
   const handleSaveShop = async () => {
     try {
-      await api.put('/settings', {
+      const payload: any = {
         shop_name: shopName,
         gst_number: gstin,
         counter_phone: shopPhone,
         shop_state: shopState,
         shop_address: shopAddr,
         receipt_footer: footer
-      });
+      };
+      if (isPrimaryOwner()) {
+        payload.owner_name = ownerName.trim();
+      }
+      await api.put('/settings', payload);
       saveStoredShopDetails({
         name: shopName,
         gstin,
@@ -716,6 +874,32 @@ export function POSSettings({ onClose, isModal = false, defaultPanel = 'shop' }:
                     onChange={e => setShopName(e.target.value)}
                     className="w-full h-[44px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
                   />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-[12px] font-semibold text-[var(--ink2)]">Store owner name</label>
+                    {!isPrimaryOwner() && (
+                      <span className="flex items-center gap-1 text-[10px] font-bold text-[var(--ink3)] uppercase" style={{ fontFamily: MONO }}>
+                        <Lock className="w-3 h-3" /> Owner only
+                      </span>
+                    )}
+                  </div>
+                  <input
+                    value={ownerName}
+                    onChange={e => setOwnerName(e.target.value)}
+                    disabled={!isPrimaryOwner()}
+                    placeholder="Store Owner"
+                    className={`w-full h-[44px] px-3 text-[14px] border rounded-[7px] ${
+                      !isPrimaryOwner()
+                        ? 'bg-[var(--rule)] border-[var(--rule2)] text-[var(--ink3)] cursor-not-allowed opacity-80'
+                        : 'bg-[var(--sub)] border-[var(--border2)] text-[var(--ink)]'
+                    }`}
+                  />
+                  {!isPrimaryOwner() && (
+                    <span className="block text-[11px] text-[var(--ink3)] mt-1">
+                      Only the primary store owner can edit this name.
+                    </span>
+                  )}
                 </div>
                 <div>
                   <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">GSTIN</label>
@@ -1231,49 +1415,450 @@ export function POSSettings({ onClose, isModal = false, defaultPanel = 'shop' }:
 
           {/* TAB 10: CO-OWNER ACCOUNTS */}
           {panel === 'owners' && (
-            <div className="bg-[var(--panel)] border border-[var(--border)] rounded-[10px] overflow-hidden">
-              {[
-                { name: user?.name || 'S. Iyer', meta: `@${user?.username || 's.iyer'} · full control`, role: 'Owner', action: 'You' },
-                { name: 'P. Rao', meta: '@p.rao · added 08 Jan 2026', role: 'Co-owner', action: 'Revoke' },
-                { name: 'M. Fernandes', meta: '@m.fernandes · added 14 Jul 2026', role: 'Co-owner', action: 'Revoke' }
-              ].map(o => (
-                <div
-                  key={o.name}
-                  className="flex items-center gap-3.5 px-5 py-3.5 border-b border-[var(--rule)] last:border-b-0"
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[14px] font-semibold text-[var(--ink)]">{o.name}</div>
-                    <div className="text-[11px] text-[var(--ink3)] mt-0.5" style={{ fontFamily: MONO }}>
-                      {o.meta}
-                    </div>
+            <div className="flex flex-col gap-4">
+              {/* Header Action Card */}
+              <div className="bg-[var(--panel)] border border-[var(--border)] rounded-[10px] p-5 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-[15px] font-extrabold text-[var(--ink)]">Store Ownership & Access Control</div>
+                  <p className="text-[13px] text-[var(--ink2)] mt-0.5">
+                    Co-owners have full administrative back-office and register access. The primary owner role cannot be transferred or deleted.
+                  </p>
+                </div>
+                {isPrimaryOwner() && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setDirectAddOpen(true);
+                      }}
+                      className="h-[38px] px-3.5 rounded-[7px] border border-[var(--border2)] bg-[var(--sub)] hover:bg-[var(--surface-hover)] text-[var(--ink)] text-[12px] font-bold cursor-pointer transition-colors flex items-center gap-1.5"
+                    >
+                      <UserPlus className="w-3.5 h-3.5" />
+                      Add directly
+                    </button>
+                    <button
+                      onClick={() => {
+                        setGeneratedInvite(null);
+                        setInviteModalOpen(true);
+                      }}
+                      className="h-[38px] px-4 rounded-[7px] bg-[var(--ink)] hover:opacity-95 text-[var(--panel)] text-[12px] font-bold cursor-pointer transition-opacity border-0 flex items-center gap-1.5"
+                    >
+                      <Mail className="w-3.5 h-3.5" />
+                      Invite co-owner
+                    </button>
                   </div>
-                  <span
-                    className={`text-[10px] font-bold uppercase tracking-[0.06em] px-2 py-1 rounded-[5px] ${
-                      o.role === 'Owner'
-                        ? 'bg-[var(--accent-soft2)] text-[var(--accent-hi)]'
-                        : 'bg-[var(--rule)] text-[var(--ink2)]'
-                    }`}
-                    style={{ fontFamily: MONO }}
-                  >
-                    {o.role}
+                )}
+              </div>
+
+              {/* Accounts List */}
+              <div className="bg-[var(--panel)] border border-[var(--border)] rounded-[10px] overflow-hidden">
+                <div className="px-5 py-3 border-b border-[var(--rule2)] flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--ink3)]" style={{ fontFamily: MONO }}>
+                    Active Owners & Co-Owners
                   </span>
                   <button
-                    onClick={() => flash(o.action === 'You' ? 'Your primary credentials' : `Revoked access for ${o.name}`)}
-                    className="h-[34px] px-3 border border-[var(--border2)] bg-[var(--sub)] rounded-[7px] text-[12px] font-semibold text-[var(--ink)] cursor-pointer"
+                    onClick={() => loadCoOwnersAndInvites()}
+                    className="p-1 rounded text-[var(--ink3)] hover:text-[var(--ink)] hover:bg-[var(--sub)] border-0 cursor-pointer"
+                    title="Refresh"
                   >
-                    {o.action}
+                    <RefreshCw className={`w-3.5 h-3.5 ${isOwnersLoading ? 'animate-spin' : ''}`} />
                   </button>
                 </div>
-              ))}
 
-              <div className="p-4 border-t border-[var(--rule2)] bg-[var(--sub)]">
-                <button
-                  onClick={() => flash('Invite link generated')}
-                  className="h-[44px] px-4 rounded-[8px] bg-[var(--ink)] text-[var(--panel)] text-[13px] font-bold cursor-pointer hover:opacity-95 transition-opacity border-0"
-                >
-                  Invite co-owner
-                </button>
+                {isOwnersLoading && ownersList.length === 0 ? (
+                  <div className="p-8 text-center text-[13px] text-[var(--ink3)]">Loading accounts...</div>
+                ) : (
+                  <div>
+                    {/* Primary Owner Row */}
+                    {ownersList.filter(u => u.role === 'owner').map(o => (
+                      <div
+                        key={o.id}
+                        className="flex items-center gap-3.5 px-5 py-4 border-b border-[var(--rule)] bg-[var(--panel)]"
+                      >
+                        <div className="w-9 h-9 rounded-full bg-[var(--accent-soft2)] border border-[var(--accent-line)] flex items-center justify-center shrink-0">
+                          <Shield className="w-4 h-4 text-[var(--accent-hi)]" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[14px] font-bold text-[var(--ink)]">{o.name}</span>
+                            <span
+                              className="text-[9px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 rounded-[4px] bg-[var(--accent-soft2)] text-[var(--accent-hi)] border border-[var(--accent-line)]"
+                              style={{ fontFamily: MONO }}
+                            >
+                              Primary Owner
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-[var(--ink3)] mt-0.5" style={{ fontFamily: MONO }}>
+                            @{o.username} {o.phone ? `· ${o.phone}` : ''} {o.email ? `· ${o.email}` : ''}
+                          </div>
+                        </div>
+
+                        {user?.id === o.id ? (
+                          <span className="text-[11px] font-semibold text-[var(--ink3)] px-3 py-1 bg-[var(--sub)] rounded-[6px]" style={{ fontFamily: MONO }}>
+                            You
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-[var(--ink4)] flex items-center gap-1" style={{ fontFamily: MONO }}>
+                            <Lock className="w-3 h-3" /> Protected
+                          </span>
+                        )}
+                      </div>
+                    ))}
+
+                    {/* Co-Owners Rows */}
+                    {ownersList.filter(u => u.role === 'co-owner').map(co => (
+                      <div
+                        key={co.id}
+                        className="flex items-center gap-3.5 px-5 py-3.5 border-b border-[var(--rule)] last:border-b-0 hover:bg-[var(--sub)] transition-colors"
+                      >
+                        <div className="w-9 h-9 rounded-full bg-[var(--rule)] flex items-center justify-center shrink-0">
+                          <UserCheck className="w-4 h-4 text-[var(--ink2)]" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[14px] font-semibold text-[var(--ink)]">{co.name}</span>
+                            <span
+                              className="text-[9px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 rounded-[4px] bg-[var(--rule)] text-[var(--ink2)]"
+                              style={{ fontFamily: MONO }}
+                            >
+                              Co-Owner
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-[var(--ink3)] mt-0.5" style={{ fontFamily: MONO }}>
+                            @{co.username} {co.phone ? `· ${co.phone}` : ''} {co.email ? `· ${co.email}` : ''}
+                          </div>
+                        </div>
+
+                        {user?.id === co.id ? (
+                          <span className="text-[11px] font-semibold text-[var(--ink3)] px-3 py-1 bg-[var(--sub)] rounded-[6px]" style={{ fontFamily: MONO }}>
+                            You
+                          </span>
+                        ) : isPrimaryOwner() ? (
+                          <button
+                            onClick={() => handleRevokeCoOwner(co.id, co.name)}
+                            className="h-[32px] px-2.5 border border-[var(--danger-line)] bg-[var(--danger-soft)] hover:bg-[var(--danger-soft2)] text-[var(--danger)] rounded-[6px] text-[11px] font-bold cursor-pointer transition-colors"
+                          >
+                            Revoke access
+                          </button>
+                        ) : (
+                          <span className="text-[11px] text-[var(--ink3)]" style={{ fontFamily: MONO }}>
+                            Co-Owner
+                          </span>
+                        )}
+                      </div>
+                    ))}
+
+                    {ownersList.filter(u => u.role === 'co-owner').length === 0 && (
+                      <div className="px-5 py-6 text-center text-[13px] text-[var(--ink3)]">
+                        No co-owners assigned. You can invite a partner or add one directly above.
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
+
+              {/* Pending Invites Section (visible to Primary Owner) */}
+              {isPrimaryOwner() && (
+                <div className="bg-[var(--panel)] border border-[var(--border)] rounded-[10px] overflow-hidden">
+                  <div className="px-5 py-3 border-b border-[var(--rule2)] flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--ink3)]" style={{ fontFamily: MONO }}>
+                        Pending Invitations
+                      </span>
+                      <span className="text-[11px] px-1.5 py-0.2 rounded bg-[var(--sub)] font-mono text-[var(--ink2)]">
+                        {invitesList.filter(i => i.status === 'pending').length}
+                      </span>
+                    </div>
+                  </div>
+
+                  {invitesList.filter(i => i.status === 'pending').length === 0 ? (
+                    <div className="p-5 text-center text-[12px] text-[var(--ink3)]">
+                      No active pending invitations. Generate an invite link to invite a partner.
+                    </div>
+                  ) : (
+                    <div>
+                      {invitesList.filter(i => i.status === 'pending').map(inv => {
+                        const origin = typeof window !== 'undefined' ? window.location.origin : '';
+                        const fullLink = `${origin}/invite?token=${inv.token}`;
+                        return (
+                          <div
+                            key={inv.id}
+                            className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b border-[var(--rule)] last:border-b-0"
+                          >
+                            <div className="flex-1 min-w-[200px]">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[13px] font-bold text-[var(--ink)]">
+                                  {inv.name || inv.email || 'Co-Owner Invite'}
+                                </span>
+                                <span className="font-mono text-[11px] px-2 py-0.5 bg-[var(--sub)] border border-[var(--border2)] rounded font-semibold text-[var(--ink)]">
+                                  {inv.token}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 text-[11px] text-[var(--ink3)] mt-1" style={{ fontFamily: MONO }}>
+                                <Clock className="w-3 h-3" />
+                                <span>Expires {new Date(inv.expires_at).toLocaleDateString()}</span>
+                                {inv.email && <span>· Sent to {inv.email}</span>}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => {
+                                  navigator.clipboard.writeText(fullLink);
+                                  flash('Invite link copied to clipboard');
+                                }}
+                                className="h-[32px] px-3 border border-[var(--border2)] bg-[var(--sub)] hover:bg-[var(--surface-hover)] rounded-[6px] text-[11px] font-bold text-[var(--ink)] cursor-pointer flex items-center gap-1.5 transition-colors"
+                              >
+                                <Copy className="w-3 h-3" />
+                                Copy Link
+                              </button>
+                              <button
+                                onClick={() => handleRevokeInvite(inv.id)}
+                                className="h-[32px] px-2.5 border border-[var(--rule2)] bg-transparent hover:bg-[var(--danger-soft)] text-[var(--danger)] rounded-[6px] text-[11px] font-semibold cursor-pointer transition-colors"
+                                title="Revoke invite"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* MODAL: INVITE CO-OWNER */}
+              {inviteModalOpen && (
+                <div
+                  className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[rgba(0,0,0,0.55)] backdrop-blur-sm"
+                  onClick={() => setInviteModalOpen(false)}
+                >
+                  <div
+                    className="w-full max-w-[480px] bg-[var(--panel)] border border-[var(--border)] rounded-[12px] shadow-2xl overflow-hidden"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--rule2)] bg-[var(--sub)]">
+                      <div className="flex items-center gap-2">
+                        <Mail className="w-4 h-4 text-[var(--ink)]" />
+                        <h2 className="text-[15px] font-black text-[var(--ink)]">Invite Co-Owner</h2>
+                      </div>
+                      <button
+                        onClick={() => setInviteModalOpen(false)}
+                        className="p-1 rounded text-[var(--ink3)] hover:text-[var(--ink)] hover:bg-[var(--rule)] cursor-pointer border-0"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="p-6 flex flex-col gap-4">
+                      {!generatedInvite ? (
+                        <>
+                          <p className="text-[13px] leading-relaxed text-[var(--ink2)]">
+                            Generate a secure invitation code and link. Your co-owner can use it to register their account with administrative back-office privileges.
+                          </p>
+
+                          <div>
+                            <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Invitee Name (Optional)</label>
+                            <input
+                              value={inviteName}
+                              onChange={e => setInviteName(e.target.value)}
+                              placeholder="e.g. Priya Sharma"
+                              className="w-full h-[42px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Email (Optional)</label>
+                              <input
+                                type="email"
+                                value={inviteEmail}
+                                onChange={e => setInviteEmail(e.target.value)}
+                                placeholder="priya@store.com"
+                                className="w-full h-[42px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Expires in</label>
+                              <select
+                                value={inviteDays}
+                                onChange={e => setInviteDays(Number(e.target.value))}
+                                className="w-full h-[42px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)] cursor-pointer"
+                              >
+                                <option value={3}>3 Days</option>
+                                <option value={7}>7 Days</option>
+                                <option value={14}>14 Days</option>
+                                <option value={30}>30 Days</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="pt-2">
+                            <button
+                              onClick={handleCreateInvite}
+                              className="w-full h-[44px] rounded-[8px] bg-[var(--ink)] text-[var(--panel)] text-[13px] font-bold cursor-pointer hover:opacity-95 transition-opacity border-0"
+                            >
+                              Generate Invite Link & Code
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex flex-col gap-4">
+                          <div className="p-4 bg-[var(--ok-soft2)] border border-[var(--ok-line)] rounded-[8px] text-center">
+                            <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--ok)]" style={{ fontFamily: MONO }}>
+                              Invite Ready
+                            </div>
+                            <div className="text-[26px] font-black tracking-widest text-[var(--ink)] my-2" style={{ fontFamily: MONO }}>
+                              {generatedInvite.token}
+                            </div>
+                            <div className="text-[12px] text-[var(--ink2)]">
+                              Give this code or the full registration link to your co-owner.
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Direct Registration Link</label>
+                            <div className="flex gap-2">
+                              <input
+                                readOnly
+                                value={generatedInvite.url}
+                                className="flex-1 h-[42px] px-3 text-[13px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)] select-all"
+                                style={{ fontFamily: MONO }}
+                              />
+                              <button
+                                onClick={() => {
+                                  navigator.clipboard.writeText(generatedInvite.url);
+                                  setCopiedUrl(true);
+                                  setTimeout(() => setCopiedUrl(false), 2000);
+                                  flash('Invite link copied');
+                                }}
+                                className="h-[42px] px-4 rounded-[7px] bg-[var(--ink)] text-[var(--panel)] text-[12px] font-bold cursor-pointer flex items-center gap-1.5 border-0"
+                              >
+                                {copiedUrl ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                                {copiedUrl ? 'Copied' : 'Copy'}
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="flex justify-end pt-2">
+                            <button
+                              onClick={() => {
+                                setInviteModalOpen(false);
+                                setGeneratedInvite(null);
+                                setInviteName('');
+                                setInviteEmail('');
+                              }}
+                              className="h-[40px] px-5 rounded-[8px] bg-[var(--sub)] border border-[var(--border2)] text-[var(--ink)] text-[13px] font-bold cursor-pointer"
+                            >
+                              Done
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* MODAL: DIRECT ADD CO-OWNER */}
+              {directAddOpen && (
+                <div
+                  className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[rgba(0,0,0,0.55)] backdrop-blur-sm"
+                  onClick={() => setDirectAddOpen(false)}
+                >
+                  <div
+                    className="w-full max-w-[480px] bg-[var(--panel)] border border-[var(--border)] rounded-[12px] shadow-2xl overflow-hidden"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--rule2)] bg-[var(--sub)]">
+                      <div className="flex items-center gap-2">
+                        <UserPlus className="w-4 h-4 text-[var(--ink)]" />
+                        <h2 className="text-[15px] font-black text-[var(--ink)]">Add Co-Owner Directly</h2>
+                      </div>
+                      <button
+                        onClick={() => setDirectAddOpen(false)}
+                        className="p-1 rounded text-[var(--ink3)] hover:text-[var(--ink)] hover:bg-[var(--rule)] cursor-pointer border-0"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="p-6 flex flex-col gap-4">
+                      <div>
+                        <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Full Name</label>
+                        <input
+                          value={directName}
+                          onChange={e => setDirectName(e.target.value)}
+                          placeholder="e.g. Ramesh Patel"
+                          className="w-full h-[42px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Username</label>
+                          <input
+                            value={directUsername}
+                            onChange={e => setDirectUsername(e.target.value)}
+                            placeholder="ramesh"
+                            className="w-full h-[42px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
+                            style={{ fontFamily: MONO }}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Password</label>
+                          <input
+                            type="password"
+                            value={directPassword}
+                            onChange={e => setDirectPassword(e.target.value)}
+                            placeholder="Min. 8 characters"
+                            className="w-full h-[42px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
+                            style={{ fontFamily: MONO }}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Phone (Optional)</label>
+                          <input
+                            value={directPhone}
+                            onChange={e => setDirectPhone(e.target.value)}
+                            placeholder="+91 98450 12345"
+                            className="w-full h-[42px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
+                            style={{ fontFamily: MONO }}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Email (Optional)</label>
+                          <input
+                            type="email"
+                            value={directEmail}
+                            onChange={e => setDirectEmail(e.target.value)}
+                            placeholder="ramesh@store.com"
+                            className="w-full h-[42px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-3 pt-2">
+                        <button
+                          onClick={() => setDirectAddOpen(false)}
+                          className="h-[42px] px-4 rounded-[8px] border border-[var(--border2)] bg-[var(--panel)] text-[var(--ink)] text-[13px] font-semibold cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={handleDirectAddCoOwner}
+                          className="h-[42px] px-5 rounded-[8px] bg-[var(--ink)] text-[var(--panel)] text-[13px] font-bold cursor-pointer hover:opacity-95 transition-opacity border-0"
+                        >
+                          Create Co-Owner
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/auth-context';
-import { useNavigate } from 'react-router';
+import { useNavigate, Link } from 'react-router';
 import { useTheme } from '../contexts/theme-context';
 import { useShopDetails } from '../lib/shop-details';
 import { isMobileDevice } from '../lib/device';
@@ -240,6 +240,17 @@ export function LoginPage() {
               <span style={KBD_ON_FILL}>Enter</span>
             </button>
           </form>
+
+          {/* Co-owner invite link */}
+          <div className="mt-4 text-center">
+            <Link
+              to="/invite"
+              className="text-[12px] font-medium text-[var(--ink2)] hover:text-[var(--ink)] transition-colors inline-flex items-center gap-1.5"
+            >
+              <span>Received a co-owner invite?</span>
+              <span className="font-bold underline text-[var(--ink)]">Accept invite</span>
+            </Link>
+          </div>
 
           {/* Footer inside card */}
           <div

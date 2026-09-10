@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/Express-5-000000?logo=express" alt="Express 5"/>
   <img src="https://img.shields.io/badge/SQLite-WAL-003B57?logo=sqlite" alt="SQLite"/>
   <img src="https://img.shields.io/badge/Tailwind-4-06B6D4?logo=tailwindcss" alt="Tailwind CSS 4"/>
-  <img src="https://img.shields.io/badge/tests-243%20passed-brightgreen" alt="243 tests"/>
+  <img src="https://img.shields.io/badge/tests-259%20passed-brightgreen" alt="259 tests"/>
 </p>
 
 ---
@@ -166,6 +166,12 @@ The server binary handles:
 ### 7. End-to-End Encrypted Terminal Chat & OTP Pickup
 - **E2EE Communication**: AES-256-GCM encrypted messaging between cashier terminals where the server only acts as a blind relay.
 - **OTP Order Pickup**: Customer-facing pickup tokens for pre-packed orders, auto-claimed upon receipt.
+
+### 8. Store Owner Authority & Co-Owner Invitations
+- **Strict Owner-Only Editing**: Store owner name and master profile settings are strictly editable by the primary store owner only; co-owners receive `403 Forbidden` on backend and disabled lock state on UI.
+- **Co-Owner Invitation System**: Primary owner can generate cryptographically secure 16-hex alphanumeric invite codes and shareable onboarding links (`/invite?token=...`).
+- **Direct Provisioning**: Seamless co-owner registration page with auto-validation, custom username, password hashing, full administrative permission presets, and immediate session generation.
+- **Access Revocation & Protection**: Co-owners can never delete or demote the store owner, modify the owner's password, or revoke other co-owners.
 
 ---
 
@@ -510,6 +516,10 @@ NexusFlow maintains a persistent WebSocket connection between the server and all
 ---
 
 ## 🚀 Deployment Notes
+
+### 💻 24/7 Laptop Micro-Server Deployment (Garuda / Arch Linux)
+For full end-to-end instructions on running both the **POS Billing System** and the **Customer Website** 24/7 on an Intel i5 laptop with battery UPS backup and Cloudflare Tunnel, see:
+👉 **[Garuda Linux Laptop 24/7 Setup Guide](LAPTOP_SERVER_SETUP.md)**
 
 ### Dedicated LAN Counter Setup (Recommended)
 1. Designate one machine (PC, Mac, or Mini-PC) as the counter server.

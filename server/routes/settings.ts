@@ -29,10 +29,22 @@ router.put('/', authenticateToken, requireOwner, (req: AuthRequest, res: Respons
     return res.status(400).json({ error: 'Settings object is required' });
   }
 
+  // Security guard: Only the primary store owner can edit the owner name
+  if ('owner_name' in settingsObj) {
+    if (req.user?.role !== 'owner') {
+      return res.status(403).json({ error: 'Only the primary store owner can edit the owner name' });
+    }
+  }
+
   const transaction = db.transaction(() => {
     const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
     for (const [key, value] of Object.entries(settingsObj)) {
       upsert.run(key, String(value));
+    }
+
+    if (settingsObj.owner_name && req.user?.role === 'owner') {
+      // Sync owner user record with new owner name
+      db.prepare("UPDATE users SET name = ? WHERE role = 'owner'").run(String(settingsObj.owner_name).trim());
     }
   });
 

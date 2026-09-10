@@ -48,6 +48,15 @@ export function requireOwner(req: AuthRequest, res: Response, next: NextFunction
   next();
 }
 
+/** Allow strictly the primary owner role (blocks co-owners and employees). */
+export function requireStrictOwner(req: AuthRequest, res: Response, next: NextFunction) {
+  if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+  if (req.user.role !== 'owner') {
+    return res.status(403).json({ error: 'Primary owner access required' });
+  }
+  next();
+}
+
 /** Check a specific permission (owners bypass all checks). */
 export function requirePermission(permission: string) {
   return (req: AuthRequest, res: Response, next: NextFunction) => {

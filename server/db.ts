@@ -259,6 +259,19 @@ export function initDb(sector?: string) {
       redeemed_bill_id TEXT,
       created_at       TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS invites (
+      id          TEXT PRIMARY KEY,
+      token       TEXT UNIQUE NOT NULL,
+      role        TEXT NOT NULL DEFAULT 'co-owner',
+      name        TEXT,
+      email       TEXT,
+      phone       TEXT,
+      created_by  TEXT NOT NULL,
+      created_at  TEXT NOT NULL,
+      expires_at  TEXT NOT NULL,
+      status      TEXT DEFAULT 'pending'
+    );
   `);
 
   // Safe migrations for existing databases
@@ -559,6 +572,7 @@ export function initDb(sector?: string) {
     ['autoOpenDrawer',       'true'],
     ['chatEnabled',          'true'],
     ['active_sector',        'retail'],
+    ['owner_name',           'Store Owner'],
   ];
 
   for (const [k, v] of defaultSettings) insSettings.run(k, v);

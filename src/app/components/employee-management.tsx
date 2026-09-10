@@ -4,6 +4,7 @@ import { useTheme } from '../contexts/theme-context';
 import { useShopDetails } from '../lib/shop-details';
 import { api } from '../utils/api';
 import { toast } from 'sonner';
+import { Lock, Shield } from 'lucide-react';
 
 const MONO = "'IBM Plex Mono', ui-monospace, monospace";
 
@@ -38,7 +39,7 @@ interface ExtendedEmployee extends User {
 }
 
 export function EmployeeManagement() {
-  const { isOwner } = useAuth();
+  const { isOwner, isPrimaryOwner, user } = useAuth();
   const { theme, setTheme } = useTheme();
   const shopDetails = useShopDetails();
   const shopSlug = (shopDetails.name || 'store').toLowerCase().replace(/[^a-z0-9]+/g, '-');
@@ -656,44 +657,54 @@ export function EmployeeManagement() {
                     @{selectedEmployee.username} · {selectedEmployee.role} · {selectedEmployee.phone || 'No phone'} · joined {selectedEmployee.joinedFormatted}
                   </div>
                 </div>
-                <button
-                  onClick={() => {
-                    setFormData({
-                      id: selectedEmployee.id,
-                      name: selectedEmployee.name,
-                      username: selectedEmployee.username,
-                      email: selectedEmployee.email || '',
-                      phone: selectedEmployee.phone || '',
-                      password: '',
-                      role: selectedEmployee.role,
-                      permissions: selectedEmployee.permissions || []
-                    });
-                    setEditOpen(true);
-                  }}
-                  className="h-[34px] px-3 border border-[var(--border2)] bg-[var(--sub)] rounded-[7px] text-[12px] font-semibold text-[var(--ink)] hover:bg-[var(--rule)] cursor-pointer transition-colors"
-                >
-                  Edit
-                </button>
+                {selectedEmployee.role === 'owner' && !isPrimaryOwner() ? (
+                  <span className="h-[34px] px-2.5 flex items-center gap-1.5 border border-[var(--border2)] bg-[var(--sub)] rounded-[7px] text-[11px] font-semibold text-[var(--ink3)]" style={{ fontFamily: MONO }}>
+                    <Lock className="w-3 h-3" /> Protected
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setFormData({
+                        id: selectedEmployee.id,
+                        name: selectedEmployee.name,
+                        username: selectedEmployee.username,
+                        email: selectedEmployee.email || '',
+                        phone: selectedEmployee.phone || '',
+                        password: '',
+                        role: selectedEmployee.role,
+                        permissions: selectedEmployee.permissions || []
+                      });
+                      setEditOpen(true);
+                    }}
+                    className="h-[34px] px-3 border border-[var(--border2)] bg-[var(--sub)] rounded-[7px] text-[12px] font-semibold text-[var(--ink)] hover:bg-[var(--rule)] cursor-pointer transition-colors"
+                  >
+                    Edit
+                  </button>
+                )}
               </div>
 
               <div className="flex gap-2 mt-3.5 flex-wrap">
-                <button
-                  onClick={() => {
-                    setNewPassword('');
-                    setConfirmPassword('');
-                    setResetPwOpen(true);
-                  }}
-                  className="h-[36px] px-3 border border-[var(--border2)] bg-[var(--sub)] rounded-[7px] text-[12px] font-semibold text-[var(--ink)] hover:bg-[var(--rule)] cursor-pointer transition-colors"
-                >
-                  Reset password
-                </button>
+                {(selectedEmployee.role !== 'owner' || isPrimaryOwner() || user?.id === selectedEmployee.id) && (
+                  <button
+                    onClick={() => {
+                      setNewPassword('');
+                      setConfirmPassword('');
+                      setResetPwOpen(true);
+                    }}
+                    className="h-[36px] px-3 border border-[var(--border2)] bg-[var(--sub)] rounded-[7px] text-[12px] font-semibold text-[var(--ink)] hover:bg-[var(--rule)] cursor-pointer transition-colors"
+                  >
+                    Reset password
+                  </button>
+                )}
 
-                <button
-                  onClick={() => handleToggleActive(selectedEmployee)}
-                  className="h-[36px] px-3 border border-[var(--border2)] bg-[var(--sub)] rounded-[7px] text-[12px] font-semibold text-[var(--ink)] hover:bg-[var(--rule)] cursor-pointer transition-colors"
-                >
-                  {selectedEmployee.isActive ? 'Deactivate account' : 'Activate account'}
-                </button>
+                {selectedEmployee.role !== 'owner' && (
+                  <button
+                    onClick={() => handleToggleActive(selectedEmployee)}
+                    className="h-[36px] px-3 border border-[var(--border2)] bg-[var(--sub)] rounded-[7px] text-[12px] font-semibold text-[var(--ink)] hover:bg-[var(--rule)] cursor-pointer transition-colors"
+                  >
+                    {selectedEmployee.isActive ? 'Deactivate account' : 'Activate account'}
+                  </button>
+                )}
               </div>
             </div>
 
@@ -857,12 +868,23 @@ export function EmployeeManagement() {
                   <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Role</label>
                   <select
                     value={formData.role}
-                    onChange={e => setFormData({ ...formData, role: e.target.value })}
+                    onChange={e => {
+                      const r = e.target.value;
+                      if (r === 'co-owner' || r === 'owner') {
+                        setFormData({
+                          ...formData,
+                          role: r,
+                          permissions: ALL_PERMISSIONS.map(p => p.value)
+                        });
+                      } else {
+                        setFormData({ ...formData, role: r });
+                      }
+                    }}
                     className="w-full h-[44px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)] cursor-pointer"
                   >
                     <option value="employee">Employee</option>
                     <option value="co-owner">Co-owner</option>
-                    <option value="owner">Owner</option>
+                    {isPrimaryOwner() && <option value="owner">Owner</option>}
                   </select>
                 </div>
               </div>
@@ -969,12 +991,19 @@ export function EmployeeManagement() {
                 <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Role</label>
                 <select
                   value={formData.role}
+                  disabled={selectedEmployee?.role === 'owner'}
                   onChange={e => setFormData({ ...formData, role: e.target.value })}
-                  className="w-full h-[44px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)] cursor-pointer"
+                  className={`w-full h-[44px] px-3 text-[14px] border rounded-[7px] ${
+                    selectedEmployee?.role === 'owner'
+                      ? 'bg-[var(--rule)] border-[var(--rule2)] text-[var(--ink3)] cursor-not-allowed'
+                      : 'bg-[var(--sub)] border-[var(--border2)] text-[var(--ink)] cursor-pointer'
+                  }`}
                 >
                   <option value="employee">Employee</option>
                   <option value="co-owner">Co-owner</option>
-                  <option value="owner">Owner</option>
+                  {(isPrimaryOwner() || selectedEmployee?.role === 'owner') && (
+                    <option value="owner">Owner {selectedEmployee?.role === 'owner' ? '(Fixed)' : ''}</option>
+                  )}
                 </select>
               </div>
             </div>
