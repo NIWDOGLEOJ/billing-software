@@ -15,6 +15,7 @@ import { ShiftClosingModal } from './shift-closing-modal';
 import { ShiftStartModal } from './shift-start-modal';
 import { KeyboardShortcutsModal } from './keyboard-shortcuts-modal';
 import { useShopDetails } from '../lib/shop-details';
+import jmartLogo from '../../assets/logos/jmart_logo_transparent.png';
 
 /**
  * The top nav.
@@ -185,15 +186,16 @@ export function SectorNav({
           onClick={() => {
             if (location.pathname !== '/') navigate('/');
           }}
-          title="Retail & Wholesale unified terminal"
-          className="flex items-center gap-2.5 px-4 flex-shrink-0 text-left bg-[var(--sub)] border-r border-[var(--border)] hover:bg-[var(--surface-hover)] transition-colors cursor-pointer"
+          title="J MART Retail POS terminal"
+          className="flex items-center gap-2.5 px-3.5 flex-shrink-0 text-left bg-[var(--sub)] border-r border-[var(--border)] hover:bg-[var(--surface-hover)] transition-colors cursor-pointer"
         >
-          <span
-            className="w-2 h-2 rounded-full flex-shrink-0"
-            style={{ background: dot }}
+          <img
+            src={jmartLogo}
+            alt="J MART"
+            className="w-8 h-8 object-contain flex-shrink-0"
           />
           <span>
-            <span className="block text-sm font-bold leading-tight tracking-[-0.01em] text-[var(--text-primary)]">
+            <span className="block text-sm font-black leading-tight tracking-[-0.01em] text-[var(--text-primary)]">
               {shopDetails.name}
             </span>
             <span

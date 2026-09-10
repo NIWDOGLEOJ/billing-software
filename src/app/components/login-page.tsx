@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router';
 import { useTheme } from '../contexts/theme-context';
 import { useShopDetails } from '../lib/shop-details';
 import { isMobileDevice } from '../lib/device';
+import jmartLogo from '../../assets/logos/jmart_logo_transparent.png';
 import {
   MONO,
   NUM,
@@ -99,7 +100,8 @@ export function LoginPage() {
       {/* Top Header Bar */}
       <header className="flex items-center justify-between px-6 h-[58px] border-b border-[var(--border)] bg-[var(--panel)] shrink-0">
         <div className="flex items-center gap-3">
-          <span className="text-[16px] font-extrabold tracking-[-0.02em] text-[var(--ink)]">
+          <img src={jmartLogo} alt="J MART" className="w-8 h-8 object-contain" />
+          <span className="text-[16px] font-black tracking-[-0.02em] text-[var(--ink)]">
             {shopDetails.name}
           </span>
           <span style={EYEBROW}>Terminal sign-in</span>
@@ -134,8 +136,16 @@ export function LoginPage() {
           }}
         >
           <div className="mb-6">
-            <div style={EYEBROW}>Counter Terminal</div>
-            <h1 className="text-[24px] font-extrabold tracking-[-0.03em] mt-1.5 mb-1 text-[var(--ink)]">
+            <div className="flex items-center gap-3 mb-3">
+              <img src={jmartLogo} alt="J MART" className="w-12 h-12 object-contain" />
+              <div>
+                <div style={EYEBROW}>Counter Terminal</div>
+                <div className="text-[18px] font-black tracking-tight text-[var(--ink)]">
+                  {shopDetails.name}
+                </div>
+              </div>
+            </div>
+            <h1 className="text-[22px] font-extrabold tracking-[-0.03em] mb-1 text-[var(--ink)]">
               Sign in to register
             </h1>
             <p className="text-[13px] leading-relaxed text-[var(--ink2)]">
@@ -242,13 +252,13 @@ export function LoginPage() {
         </div>
       </main>
 
-      {/* Tiny subtle nexusflow label at the bottom of the screen */}
+      {/* Subtle brand label at the bottom of the screen */}
       <footer className="py-2.5 text-center shrink-0">
         <span
-          className="font-mono text-[10px] tracking-wider select-none pointer-events-none"
+          className="font-mono text-[10px] tracking-wider select-none pointer-events-none uppercase font-bold"
           style={{ color: 'var(--ink4)', opacity: 0.35 }}
         >
-          nexusflow
+          j mart pos
         </span>
       </footer>
     </div>

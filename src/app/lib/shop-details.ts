@@ -9,11 +9,11 @@ export interface ShopDetails {
 }
 
 export const DEFAULT_SHOP_DETAILS: ShopDetails = {
-  name: 'Sunrise Provisions',
-  address: '14 Market Street, Fort, Mumbai 400 001',
-  phone: '+91 22 2266 1890',
-  email: 'accounts@sunriseprovisions.in',
-  gstin: '27AABCU9603R1ZM',
+  name: 'J MART',
+  address: 'Rayala Nagar Extension, near Koilpillai School, Ramapuram, Chennai 600089',
+  phone: '+91 77088 00220',
+  email: 'contact@jmart.store',
+  gstin: '33AAAAA0000A1Z5',
 };
 
 export function getStoredShopDetails(): ShopDetails {

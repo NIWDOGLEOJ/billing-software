@@ -230,10 +230,10 @@ export function Layout() {
         />
       )}
 
-      {/* Subtle tiny nexusflow label at the bottom */}
+      {/* Subtle brand label at the bottom */}
       <footer className="h-4 px-3 flex items-center justify-end shrink-0 pointer-events-none select-none">
-        <span className="font-mono text-[9px] tracking-wider" style={{ color: 'var(--ink4)', opacity: 0.3 }}>
-          nexusflow
+        <span className="font-mono text-[9px] tracking-wider uppercase font-bold" style={{ color: 'var(--ink4)', opacity: 0.3 }}>
+          j mart pos
         </span>
       </footer>
     </div>

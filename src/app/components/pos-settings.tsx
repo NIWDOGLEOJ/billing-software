@@ -239,11 +239,11 @@ export function POSSettings({ onClose, isModal = false, defaultPanel = 'shop' }:
   });
 
   // Shop Details
-  const [shopName, setShopName] = useState('Sunrise Provisions');
-  const [gstin, setGstin] = useState('29ABCDE1234F1Z5');
-  const [shopPhone, setShopPhone] = useState('080 4123 7788');
-  const [shopState, setShopState] = useState('Karnataka');
-  const [shopAddr, setShopAddr] = useState('14, 3rd Cross, Malleswaram\nBengaluru 560003');
+  const [shopName, setShopName] = useState('J MART');
+  const [gstin, setGstin] = useState('33AAAAA0000A1Z5');
+  const [shopPhone, setShopPhone] = useState('+91 77088 00220');
+  const [shopState, setShopState] = useState('Tamil Nadu');
+  const [shopAddr, setShopAddr] = useState('Rayala Nagar Extension, near Koilpillai School\nRamapuram, Chennai 600089');
   const [footer, setFooter] = useState('Thank you. Goods once sold are not returnable.');
 
   // Workspace Profile

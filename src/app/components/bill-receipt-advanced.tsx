@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { toast } from 'sonner';
 import { useTheme } from '../contexts/theme-context';
+import jmartLogo from '../../assets/logos/jmart_logo.png';
 
 export interface BillItem {
   code: string;
@@ -379,7 +380,7 @@ export function BillReceipt({
       {/* Top Header Bar per Receipt.dc.html */}
       <div className="no-print flex flex-wrap items-center gap-2 sm:gap-5 px-5 min-h-[58px] bg-[var(--panel)] border-b border-[var(--border)] shrink-0 z-20">
         <div className="flex items-baseline gap-2.5">
-          <span className="text-[16px] font-extrabold tracking-[-0.02em]">{shopDetails.name || 'Sunrise Provisions'}</span>
+          <span className="text-[16px] font-extrabold tracking-[-0.02em]">{shopDetails.name || 'J MART'}</span>
           <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ink3)]">
             Bill output
           </span>
@@ -490,16 +491,19 @@ export function BillReceipt({
               >
                 {/* Store Masthead */}
                 <div className="text-center pb-3">
+                  <div className="flex justify-center mb-1.5">
+                    <img src={jmartLogo} alt="J MART" className="w-10 h-10 object-contain" />
+                  </div>
                   <div className="text-[17px] font-extrabold tracking-[0.04em]">
-                    {(shopDetails.name || 'SUNRISE PROVISIONS').toUpperCase()}
+                    {(shopDetails.name || 'J MART').toUpperCase()}
                   </div>
                   <div className="text-[10.5px] leading-relaxed text-[#55524a] pt-1">
-                    {shopDetails.address || '123 Main Street, City, State 12345'}
+                    {shopDetails.address || 'Rayala Nagar Extension, Ramapuram, Chennai 600089'}
                     <br />
-                    Tel {shopDetails.phone || '(555) 123-4567'}
+                    Tel {shopDetails.phone || '+91 77088 00220'}
                   </div>
                   <div className="font-mono text-[10px] font-semibold text-[#16150f] pt-1">
-                    GSTIN {shopDetails.gstin || '29ABCDE1234F1Z5'}
+                    GSTIN {shopDetails.gstin || '33AAAAA0000A1Z5'}
                   </div>
                 </div>
 
@@ -705,17 +709,20 @@ export function BillReceipt({
             >
               {/* Masthead */}
               <div className="flex justify-between items-start gap-8 pb-5 border-b-2 border-[#16150f]">
-                <div>
-                  <div className="text-[24px] font-extrabold tracking-[-0.01em]">
-                    {shopDetails.name || 'Sunrise Provisions'}
-                  </div>
-                  <div className="text-[12px] leading-relaxed text-[#55524a] pt-1.5">
-                    {shopDetails.address || '123 Main Street, City, State 12345'}
-                    <br />
-                    Tel {shopDetails.phone || '(555) 123-4567'} &middot; {shopDetails.email || 'accounts@sunriseprovisions.in'}
-                  </div>
-                  <div className="font-mono text-[11px] font-semibold pt-1.5">
-                    GSTIN {shopDetails.gstin || '29ABCDE1234F1Z5'} &nbsp; PAN {pan}
+                <div className="flex items-start gap-4">
+                  <img src={jmartLogo} alt="J MART" className="w-14 h-14 object-contain mt-1" />
+                  <div>
+                    <div className="text-[24px] font-extrabold tracking-[-0.01em]">
+                      {shopDetails.name || 'J MART'}
+                    </div>
+                    <div className="text-[12px] leading-relaxed text-[#55524a] pt-1.5">
+                      {shopDetails.address || 'Rayala Nagar Extension, near Koilpillai School, Ramapuram, Chennai 600089'}
+                      <br />
+                      Tel {shopDetails.phone || '+91 77088 00220'} &middot; {shopDetails.email || 'contact@jmart.store'}
+                    </div>
+                    <div className="font-mono text-[11px] font-semibold pt-1.5">
+                      GSTIN {shopDetails.gstin || '33AAAAA0000A1Z5'} &nbsp; PAN {pan}
+                    </div>
                   </div>
                 </div>
 
@@ -946,7 +953,7 @@ export function BillReceipt({
                 <div className="text-right">
                   <div className="w-[190px] border-b border-[#16150f] h-10" />
                   <div className="text-[11px] text-[#55524a] pt-1.5">
-                    For {shopDetails.name || 'Sunrise Provisions'}
+                    For {shopDetails.name || 'J MART'}
                   </div>
                 </div>
               </div>

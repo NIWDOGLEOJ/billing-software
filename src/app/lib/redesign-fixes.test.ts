@@ -461,9 +461,9 @@ describe('OTP Bill Handover / Pickup Verification', () => {
 });
 
 describe('Branding and Minimalist Interface Conformance', () => {
-  it('defaults shop name to Sunrise Provisions and provides reactive synchronization', async () => {
+  it('defaults shop name to J MART and provides reactive synchronization', async () => {
     const { DEFAULT_SHOP_DETAILS, getStoredShopDetails } = await import('./shop-details');
-    expect(DEFAULT_SHOP_DETAILS.name).toBe('Sunrise Provisions');
+    expect(DEFAULT_SHOP_DETAILS.name).toBe('J MART');
     const stored = getStoredShopDetails();
     expect(stored.name).toBeTruthy();
   });
@@ -491,9 +491,9 @@ describe('Branding and Minimalist Interface Conformance', () => {
     const hsnFilename = `${shopSlug}-gstr1-hsn-summary-${dateStr}.csv`;
     const employeesFilename = `${shopSlug}-employees-${dateStr}.csv`;
 
-    expect(catalogueFilename).toBe('sunrise-provisions-catalogue-2026-09-07.csv');
-    expect(hsnFilename).toBe('sunrise-provisions-gstr1-hsn-summary-2026-09-07.csv');
-    expect(employeesFilename).toBe('sunrise-provisions-employees-2026-09-07.csv');
+    expect(catalogueFilename).toBe('j-mart-catalogue-2026-09-07.csv');
+    expect(hsnFilename).toBe('j-mart-gstr1-hsn-summary-2026-09-07.csv');
+    expect(employeesFilename).toBe('j-mart-employees-2026-09-07.csv');
     expect(catalogueFilename).not.toContain('nexusflow');
   });
 });
