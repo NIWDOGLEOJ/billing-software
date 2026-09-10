@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Camera } from 'lucide-react';
+import { Camera, Edit2 } from 'lucide-react';
 import { api } from '../utils/api';
 import { useAuth } from '../contexts/auth-context';
 import { useTheme } from '../contexts/theme-context';
 import { useShopDetails } from '../lib/shop-details';
+import { useWebSocket } from '../hooks/useWebSocket';
 import { toast } from 'sonner';
 import { compressImageFileToDataUrl } from '../utils/imageCompressor';
 import { ProductPhotoCaptureModal } from './product-photo-capture-modal';
@@ -39,12 +40,21 @@ interface ProductItem {
   price: number;
   mrp?: number;
   purchase_price?: number;
+  wholesale_price?: number;
+  distributor_price?: number;
+  discount_percent?: number;
   gst: number;
   gst_rate?: number;
   stock: number;
   reorder: number;
   low_stock_threshold?: number;
   brand?: string;
+  batch_number?: string;
+  expiry_date?: string;
+  status?: string;
+  barcode_type?: string;
+  moq?: number;
+  image_url?: string;
 }
 
 const DEFAULT_PRODUCTS: ProductItem[] = [
@@ -93,7 +103,8 @@ const SAMPLE_CSV = [
 ].join('\n');
 
 export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 'inventory' | 'sales' | 'gst' }) {
-  const { user } = useAuth();
+  const { user, hasPermission, isOwner } = useAuth();
+  const canEditInventory = Boolean(isOwner?.() || (hasPermission && hasPermission('access_inventory')));
   const { theme, setTheme } = useTheme();
   const shopDetails = useShopDetails();
   const shopSlug = (shopDetails.name || 'store').toLowerCase().replace(/[^a-z0-9]+/g, '-');
@@ -235,6 +246,95 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
   const [expScope, setExpScope] = useState<'Whole catalogue' | 'Current filter' | 'Low stock only'>('Whole catalogue');
   const [expCost, setExpCost] = useState(false);
 
+  // Edit Product modal state
+  const [editOpen, setEditOpen] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<ProductItem | null>(null);
+  const [editForm, setEditForm] = useState({
+    sku: '',
+    name: '',
+    brand: '',
+    category: '',
+    uom: '',
+    stock: '',
+    reorder: '',
+    mrp: '',
+    price: '',
+    purchasePrice: '',
+    wholesalePrice: '',
+    distributorPrice: '',
+    discountPercent: '',
+    hsnCode: '',
+    batchNumber: '',
+    expiryDate: '',
+    status: 'Active',
+    barcodeType: 'EAN-13',
+    moq: '1',
+  });
+  const [editFormGst, setEditFormGst] = useState(5);
+  const [editCapturedImage, setEditCapturedImage] = useState<string | null>(null);
+  const [editTouched, setEditTouched] = useState(false);
+  const [isUpdatingProduct, setIsUpdatingProduct] = useState(false);
+  const editCameraInputRef = useRef<HTMLInputElement>(null);
+  const editGalleryInputRef = useRef<HTMLInputElement>(null);
+
+  const handleEditCameraCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await compressImageFileToDataUrl(file);
+      if (dataUrl) {
+        setEditCapturedImage(dataUrl);
+        flash('Product photo updated for website');
+      }
+    } catch {
+      const reader = new FileReader();
+      reader.onload = () => {
+        setEditCapturedImage(reader.result as string);
+        flash('Product photo updated for website');
+      };
+      reader.readAsDataURL(file);
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  // WebSocket Live Sync for Multi-computer LAN syncing
+  useWebSocket({
+    STOCK_UPDATED: (data: any) => {
+      if (Array.isArray(data) && data.length > 0) {
+        setApiProducts(data.map((p: any) => ({
+          id: p.id,
+          code: p.sku || p.code || '',
+          sku: p.sku || p.code || '',
+          hsn: p.hsn_code || p.hsn || '—',
+          hsn_code: p.hsn_code || p.hsn || '—',
+          name: p.name || 'Unnamed Product',
+          cat: p.category || p.cat || 'General',
+          category: p.category || p.cat || 'General',
+          uom: (p.uom || 'PC').toUpperCase(),
+          price: Number(p.price || p.mrp || 0),
+          mrp: Number(p.mrp || p.price || 0),
+          purchase_price: Number(p.purchase_price || 0),
+          wholesale_price: Number(p.wholesale_price || 0),
+          distributor_price: Number(p.distributor_price || 0),
+          discount_percent: Number(p.discount_percent || 0),
+          gst: Number(p.gst_rate ?? p.gst ?? 5),
+          gst_rate: Number(p.gst_rate ?? p.gst ?? 5),
+          stock: Number(p.stock || 0),
+          reorder: Number(p.low_stock_threshold || p.reorder || 10),
+          low_stock_threshold: Number(p.low_stock_threshold || 10),
+          brand: p.brand || '',
+          batch_number: p.batch_number || '',
+          expiry_date: p.expiry_date || '',
+          status: p.status || 'Active',
+          barcode_type: p.barcode_type || 'EAN-13',
+          moq: Number(p.moq || 1),
+          image_url: p.image_url || ''
+        })));
+      }
+    }
+  });
+
   // Clock ticker
   useEffect(() => {
     const updateClock = () => {
@@ -275,12 +375,21 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
           price: Number(p.price || p.mrp || 0),
           mrp: Number(p.mrp || p.price || 0),
           purchase_price: Number(p.purchase_price || 0),
+          wholesale_price: Number(p.wholesale_price || 0),
+          distributor_price: Number(p.distributor_price || 0),
+          discount_percent: Number(p.discount_percent || 0),
           gst: Number(p.gst_rate ?? p.gst ?? 5),
           gst_rate: Number(p.gst_rate ?? p.gst ?? 5),
           stock: Number(p.stock || 0),
           reorder: Number(p.low_stock_threshold || p.reorder || 10),
           low_stock_threshold: Number(p.low_stock_threshold || 10),
-          brand: p.brand || ''
+          brand: p.brand || '',
+          batch_number: p.batch_number || '',
+          expiry_date: p.expiry_date || '',
+          status: p.status || 'Active',
+          barcode_type: p.barcode_type || 'EAN-13',
+          moq: Number(p.moq || 1),
+          image_url: p.image_url || ''
         })));
       } else {
         setApiProducts(DEFAULT_PRODUCTS);
@@ -633,6 +742,161 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
     flash(`${newProduct.name} added to the catalogue`);
   };
 
+  // Open Edit Product Modal
+  const handleOpenEdit = (p: ProductItem) => {
+    if (!canEditInventory) {
+      flash('Permission required: access_inventory to edit products');
+      toast.error('Permission Denied: Inventory access required to edit products');
+      return;
+    }
+    setEditingProduct(p);
+    setEditForm({
+      sku: p.sku || p.code || '',
+      name: p.name || '',
+      brand: p.brand || '',
+      category: p.category || p.cat || 'General',
+      uom: p.uom || 'PCS',
+      stock: String(p.stock ?? 0),
+      reorder: String(p.low_stock_threshold ?? p.reorder ?? 10),
+      mrp: String(p.mrp ?? p.price ?? 0),
+      price: String(p.price ?? 0),
+      purchasePrice: String(p.purchase_price ?? 0),
+      wholesalePrice: String(p.wholesale_price ?? 0),
+      distributorPrice: String(p.distributor_price ?? 0),
+      discountPercent: String(p.discount_percent ?? 0),
+      hsnCode: p.hsn === '—' ? '' : (p.hsn_code || p.hsn || ''),
+      batchNumber: p.batch_number || '',
+      expiryDate: p.expiry_date || '',
+      status: p.status || 'Active',
+      barcodeType: p.barcode_type || 'EAN-13',
+      moq: String(p.moq || 1),
+    });
+    setEditFormGst(Number(p.gst_rate ?? p.gst ?? 5));
+    setEditCapturedImage(p.image_url || null);
+    setEditTouched(false);
+    setEditOpen(true);
+  };
+
+  // Update Product Action (PUT /api/products/:id)
+  const handleUpdateProduct = async () => {
+    if (!editingProduct) return;
+    if (!editForm.sku.trim() || !editForm.name.trim() || !editForm.mrp) {
+      setEditTouched(true);
+      flash('Barcode, description and MRP are required');
+      return;
+    }
+
+    setIsUpdatingProduct(true);
+    const targetId = editingProduct.id || editingProduct.code || editingProduct.sku || '';
+    const parsedPrice = parseFloat(editForm.price || editForm.mrp) || 0;
+    const parsedMrp = parseFloat(editForm.mrp) || parsedPrice;
+    const rawStock = parseFloat(editForm.stock);
+    const parsedStock = isNaN(rawStock) ? 0 : rawStock;
+    const rawReorder = parseFloat(editForm.reorder);
+    const parsedReorder = isNaN(rawReorder) ? Math.max(6, Math.round(parsedStock / 3)) : rawReorder;
+
+    const updatedItem: ProductItem = {
+      ...editingProduct,
+      id: targetId,
+      code: editForm.sku.trim(),
+      sku: editForm.sku.trim(),
+      name: editForm.name.trim(),
+      brand: editForm.brand.trim(),
+      cat: editForm.category.trim() || 'General',
+      category: editForm.category.trim() || 'General',
+      uom: (editForm.uom.trim() || 'PCS').toUpperCase(),
+      stock: parsedStock,
+      reorder: parsedReorder,
+      low_stock_threshold: parsedReorder,
+      price: parsedPrice,
+      mrp: parsedMrp,
+      purchase_price: parseFloat(editForm.purchasePrice) || 0,
+      wholesale_price: parseFloat(editForm.wholesalePrice) || 0,
+      distributor_price: parseFloat(editForm.distributorPrice) || 0,
+      discount_percent: parseFloat(editForm.discountPercent) || 0,
+      gst: editFormGst,
+      gst_rate: editFormGst,
+      hsn: editForm.hsnCode.trim() || '—',
+      hsn_code: editForm.hsnCode.trim() || '—',
+      batch_number: editForm.batchNumber.trim(),
+      expiry_date: editForm.expiryDate.trim(),
+      status: editForm.status,
+      barcode_type: editForm.barcodeType,
+      moq: parseFloat(editForm.moq) || 1,
+      image_url: editCapturedImage || ''
+    };
+
+    try {
+      const payload: any = {
+        sku: updatedItem.sku,
+        name: updatedItem.name,
+        brand: updatedItem.brand,
+        category: updatedItem.category,
+        uom: updatedItem.uom,
+        stock: updatedItem.stock,
+        low_stock_threshold: updatedItem.low_stock_threshold,
+        price: updatedItem.price,
+        mrp: updatedItem.mrp,
+        purchase_price: updatedItem.purchase_price,
+        wholesale_price: updatedItem.wholesale_price,
+        distributor_price: updatedItem.distributor_price,
+        discount_percent: updatedItem.discount_percent,
+        gst_rate: updatedItem.gst_rate,
+        hsn_code: updatedItem.hsn_code === '—' ? '' : updatedItem.hsn_code,
+        batch_number: updatedItem.batch_number,
+        expiry_date: updatedItem.expiry_date,
+        status: updatedItem.status,
+        barcode_type: updatedItem.barcode_type,
+        moq: updatedItem.moq,
+      };
+
+      if (editCapturedImage && editCapturedImage.startsWith('data:image/')) {
+        payload.image = editCapturedImage;
+      } else {
+        payload.image_url = editCapturedImage || '';
+      }
+
+      const res = await api.put<any>(`/products/${encodeURIComponent(targetId)}`, payload);
+
+      if (res) {
+        if (res.image_url !== undefined) updatedItem.image_url = res.image_url;
+        if (res.id !== undefined) updatedItem.id = res.id;
+        if (res.sku !== undefined) {
+          updatedItem.sku = res.sku;
+          updatedItem.code = res.sku;
+        }
+        if (res.name !== undefined) updatedItem.name = res.name;
+        if (res.price !== undefined) updatedItem.price = res.price;
+        if (res.mrp !== undefined) updatedItem.mrp = res.mrp;
+        if (res.stock !== undefined) updatedItem.stock = res.stock;
+        if (res.low_stock_threshold !== undefined) {
+          updatedItem.low_stock_threshold = res.low_stock_threshold;
+          updatedItem.reorder = res.low_stock_threshold;
+        }
+      }
+
+      setApiProducts(prev => prev.map(item => {
+        if ((item.id && item.id === targetId) || item.code === targetId || item.code === editingProduct.code || (item.sku && item.sku === editingProduct.sku)) {
+          return updatedItem;
+        }
+        return item;
+      }));
+
+      flash(`Updated ${updatedItem.name} successfully`);
+      toast.success(`Product "${updatedItem.name}" updated successfully`);
+      setEditOpen(false);
+      setEditingProduct(null);
+      setEditCapturedImage(null);
+    } catch (err: any) {
+      console.error('Failed to update product:', err);
+      const errMsg = err?.message || 'Failed to update product';
+      toast.error(`Update failed: ${errMsg}`);
+      flash(`Update failed: ${errMsg}`);
+    } finally {
+      setIsUpdatingProduct(false);
+    }
+  };
+
   // RFC-4180 Compliant CSV Parser
   const parseCsv = (text: string): string[][] => {
     const rows: string[][] = [];
@@ -958,7 +1222,7 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
             {/* Table */}
             <div className="overflow-x-auto">
               <div
-                className="grid grid-cols-[minmax(190px,1fr)_108px_92px_76px_86px_106px] min-w-[690px] gap-2.5 px-3.5 py-2.5 bg-[var(--sub)] border-b border-[var(--rule2)] text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--ink3)]"
+                className="grid grid-cols-[minmax(180px,1fr)_108px_88px_70px_80px_90px_64px] min-w-[700px] gap-2.5 px-3.5 py-2.5 bg-[var(--sub)] border-b border-[var(--rule2)] text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--ink3)]"
                 style={{ fontFamily: MONO }}
               >
                 <div>Item</div>
@@ -967,6 +1231,7 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
                 <div className="text-right">GST</div>
                 <div className="text-right">On hand</div>
                 <div className="text-right">Status</div>
+                <div className="text-right">Action</div>
               </div>
 
               {filteredProducts.map(p => {
@@ -975,10 +1240,17 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
                 return (
                   <div
                     key={p.code}
-                    className="grid grid-cols-[minmax(190px,1fr)_108px_92px_76px_86px_106px] min-w-[690px] gap-2.5 items-center px-3.5 py-3 border-b border-[var(--rule)] hover:bg-[var(--sub)]/40 transition-colors"
+                    onClick={() => {
+                      if (canEditInventory) {
+                        handleOpenEdit(p);
+                      }
+                    }}
+                    className={`grid grid-cols-[minmax(180px,1fr)_108px_88px_70px_80px_90px_64px] min-w-[700px] gap-2.5 items-center px-3.5 py-2.5 border-b border-[var(--rule)] transition-colors group ${
+                      canEditInventory ? 'hover:bg-[var(--sub)]/40 cursor-pointer' : ''
+                    }`}
                   >
                     <div className="min-w-0">
-                      <div className="text-[14px] font-semibold truncate text-[var(--ink)]">{p.name}</div>
+                      <div className={`text-[14px] font-semibold truncate text-[var(--ink)] ${canEditInventory ? 'group-hover:text-[var(--accent)]' : ''} transition-colors`}>{p.name}</div>
                       <div className="text-[11px] text-[var(--ink3)] mt-0.5 truncate" style={{ fontFamily: MONO }}>
                         {p.cat} · {p.uom}
                       </div>
@@ -1008,6 +1280,22 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
                       >
                         {isOut ? 'Out' : isLow ? 'Reorder' : 'In stock'}
                       </span>
+                    </div>
+                    <div className="text-right" onClick={e => e.stopPropagation()}>
+                      {canEditInventory ? (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEdit(p)}
+                          className="inline-flex items-center justify-center gap-1 h-[28px] px-2 rounded-[5px] border border-[var(--border2)] bg-[var(--panel)] hover:bg-[var(--accent-soft)] hover:border-[var(--accent)] hover:text-[var(--accent)] text-[11px] font-bold cursor-pointer transition-colors text-[var(--ink)]"
+                          title={`Edit ${p.name}`}
+                          aria-label={`Edit ${p.name}`}
+                        >
+                          <Edit2 className="w-3 h-3" />
+                          <span>Edit</span>
+                        </button>
+                      ) : (
+                        <span className="text-[11px] text-[var(--ink4)]" style={{ fontFamily: MONO }}>—</span>
+                      )}
                     </div>
                   </div>
                 );
@@ -1757,15 +2045,450 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
         </div>
       )}
 
+      {/* Hidden File Inputs for Edit Product modal */}
+      <input
+        type="file"
+        accept="image/*"
+        capture="environment"
+        ref={editCameraInputRef}
+        onChange={handleEditCameraCapture}
+        className="hidden"
+      />
+      <input
+        type="file"
+        accept="image/*"
+        ref={editGalleryInputRef}
+        onChange={handleEditCameraCapture}
+        className="hidden"
+      />
+
+      {/* MODAL: EDIT PRODUCT */}
+      {editOpen && editingProduct && (
+        <div className="fixed inset-0 z-40 bg-[rgba(8,9,8,0.62)] flex items-start justify-center p-7 overflow-y-auto">
+          <div className="w-full max-w-[880px] bg-[var(--panel)] border border-[var(--border)] rounded-[12px] overflow-hidden my-auto shadow-2xl">
+            <div className="flex items-center gap-3.5 px-5 py-4 border-b border-[var(--rule2)]">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--ink3)]" style={{ fontFamily: MONO }}>
+                    Catalogue · Edit Item
+                  </span>
+                  <span className="text-[11px] font-semibold text-[var(--accent)] px-2 py-0.5 rounded bg-[var(--accent-soft)]" style={{ fontFamily: MONO }}>
+                    #{editingProduct.code || editingProduct.sku}
+                  </span>
+                </div>
+                <div className="text-[19px] font-extrabold tracking-[-0.02em] mt-0.5 truncate text-[var(--ink)]">
+                  Edit: {editingProduct.name}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditOpen(false);
+                  setEditingProduct(null);
+                  setEditCapturedImage(null);
+                }}
+                className="w-[38px] h-[38px] border border-[var(--border2)] bg-[var(--sub)] rounded-[8px] text-[18px] font-semibold text-[var(--ink2)] hover:text-[var(--ink)] cursor-pointer flex items-center justify-center"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="p-5 flex flex-col gap-5 max-h-[75vh] overflow-y-auto">
+              {/* Product Photo section */}
+              <div className="p-3.5 rounded-[9px] border border-[var(--border2)] bg-[var(--sub)] flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  {editCapturedImage ? (
+                    <img
+                      src={editCapturedImage}
+                      alt="Product preview"
+                      className="w-12 h-12 object-contain rounded-[6px] border border-[var(--border2)] bg-white shrink-0"
+                    />
+                  ) : (
+                    <div
+                      className="w-12 h-12 rounded-[6px] bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center shrink-0 cursor-pointer"
+                      onClick={() => setShowProductCameraModal(true)}
+                      title="Open in-app camera viewfinder"
+                    >
+                      <Camera className="w-5 h-5" />
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <div className="text-[12px] font-bold text-[var(--ink)] truncate">
+                      {editCapturedImage ? 'Product photo attached' : 'Product photo for catalog & website'}
+                    </div>
+                    <div className="text-[10px] text-[var(--ink3)] truncate">
+                      {editCapturedImage ? 'High-resolution photo attached' : 'Take a photo with camera or choose from gallery'}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {editCapturedImage ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setShowProductCameraModal(true)}
+                        className="h-8 px-2.5 rounded-[6px] text-[11px] font-semibold border border-[var(--border2)] bg-[var(--panel)] text-[var(--ink)] cursor-pointer hover:bg-[var(--sub)]"
+                      >
+                        Retake
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditCapturedImage(null)}
+                        className="h-8 px-2 rounded-[6px] text-[12px] font-bold text-[var(--danger)] hover:bg-[var(--danger-soft)] cursor-pointer"
+                        title="Remove photo"
+                      >
+                        ×
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => editGalleryInputRef.current?.click()}
+                        className="h-8 px-2.5 rounded-[6px] text-[11px] font-semibold border border-[var(--border2)] bg-[var(--panel)] text-[var(--ink)] cursor-pointer hover:bg-[var(--sub)] hidden sm:inline-flex items-center"
+                        title="Upload from device gallery"
+                      >
+                        Gallery
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowProductCameraModal(true)}
+                        className="h-8 px-3 rounded-[6px] bg-[var(--accent)] text-white text-[11px] font-bold flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95 border-0"
+                      >
+                        <Camera className="w-3.5 h-3.5" />
+                        <span>Snap Photo</span>
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Identity Group */}
+              <div>
+                <div
+                  className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--ink3)] pb-2.5 border-b border-[var(--rule)]"
+                  style={{ fontFamily: MONO }}
+                >
+                  Identity &amp; Classification
+                </div>
+                <div className="grid grid-cols-[repeat(auto-fit,minmax(184px,1fr))] gap-3 mt-3">
+                  <div>
+                    <label className="flex items-baseline gap-1.5 text-[12px] font-semibold text-[var(--ink2)] mb-1.5">
+                      <span>Barcode / SKU</span>
+                      <span className="text-[10px] font-bold text-[var(--danger)]" style={{ fontFamily: MONO }}>required</span>
+                    </label>
+                    <input
+                      value={editForm.sku}
+                      onChange={e => setEditForm({ ...editForm, sku: e.target.value })}
+                      placeholder="Barcode No"
+                      className={`w-full h-[44px] px-3 text-[14px] bg-[var(--sub)] rounded-[7px] border text-[var(--ink)] ${
+                        editTouched && !editForm.sku.trim() ? 'border-[var(--danger-strong)]' : 'border-[var(--border2)]'
+                      }`}
+                      style={{ fontFamily: MONO }}
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="flex items-baseline gap-1.5 text-[12px] font-semibold text-[var(--ink2)] mb-1.5">
+                      <span>Product Description / Name</span>
+                      <span className="text-[10px] font-bold text-[var(--danger)]" style={{ fontFamily: MONO }}>required</span>
+                    </label>
+                    <input
+                      value={editForm.name}
+                      onChange={e => setEditForm({ ...editForm, name: e.target.value })}
+                      placeholder="Product name"
+                      className={`w-full h-[44px] px-3 text-[14px] bg-[var(--sub)] rounded-[7px] border text-[var(--ink)] ${
+                        editTouched && !editForm.name.trim() ? 'border-[var(--danger-strong)]' : 'border-[var(--border2)]'
+                      }`}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Brand</label>
+                    <input
+                      value={editForm.brand}
+                      onChange={e => setEditForm({ ...editForm, brand: e.target.value })}
+                      placeholder="e.g. Nestlé, Amul"
+                      className="w-full h-[44px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Category</label>
+                    <input
+                      value={editForm.category}
+                      onChange={e => setEditForm({ ...editForm, category: e.target.value })}
+                      placeholder="Category name"
+                      className="w-full h-[44px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Unit of measure (UOM)</label>
+                    <input
+                      value={editForm.uom}
+                      onChange={e => setEditForm({ ...editForm, uom: e.target.value })}
+                      placeholder="e.g. PCS, KG, BAG, PKT"
+                      className="w-full h-[44px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
+                      style={{ fontFamily: MONO }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Status</label>
+                    <select
+                      value={editForm.status}
+                      onChange={e => setEditForm({ ...editForm, status: e.target.value })}
+                      className="w-full h-[44px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
+                    >
+                      <option value="Active">Active</option>
+                      <option value="Inactive">Inactive</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Stock & Inventory */}
+              <div>
+                <div
+                  className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--ink3)] pb-2.5 border-b border-[var(--rule)]"
+                  style={{ fontFamily: MONO }}
+                >
+                  Stock &amp; Inventory Management
+                </div>
+                <div className="grid grid-cols-[repeat(auto-fit,minmax(184px,1fr))] gap-3 mt-3">
+                  <div>
+                    <label className="flex items-baseline gap-1.5 text-[12px] font-semibold text-[var(--ink2)] mb-1.5">
+                      <span>On Hand Stock</span>
+                      <span className="text-[10px] font-bold text-[var(--danger)]" style={{ fontFamily: MONO }}>required</span>
+                    </label>
+                    <input
+                      value={editForm.stock}
+                      onChange={e => setEditForm({ ...editForm, stock: e.target.value.replace(/[^\d.]/g, '') })}
+                      placeholder="0"
+                      className="w-full h-[44px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)] font-bold"
+                      style={{ fontFamily: MONO }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Reorder Alert Threshold</label>
+                    <input
+                      value={editForm.reorder}
+                      onChange={e => setEditForm({ ...editForm, reorder: e.target.value.replace(/[^\d.]/g, '') })}
+                      placeholder="10"
+                      className="w-full h-[44px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
+                      style={{ fontFamily: MONO }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Batch Number</label>
+                    <input
+                      value={editForm.batchNumber}
+                      onChange={e => setEditForm({ ...editForm, batchNumber: e.target.value })}
+                      placeholder="e.g. B204"
+                      className="w-full h-[44px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
+                      style={{ fontFamily: MONO }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Expiry Date</label>
+                    <input
+                      type="date"
+                      value={editForm.expiryDate}
+                      onChange={e => setEditForm({ ...editForm, expiryDate: e.target.value })}
+                      className="w-full h-[44px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
+                      style={{ fontFamily: MONO }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Pricing & Tiers */}
+              <div>
+                <div
+                  className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--ink3)] pb-2.5 border-b border-[var(--rule)]"
+                  style={{ fontFamily: MONO }}
+                >
+                  Pricing &amp; Rates
+                </div>
+                <div className="grid grid-cols-[repeat(auto-fit,minmax(184px,1fr))] gap-3 mt-3">
+                  <div>
+                    <label className="flex items-baseline gap-1.5 text-[12px] font-semibold text-[var(--ink2)] mb-1.5">
+                      <span>MRP (Maximum Retail Price)</span>
+                      <span className="text-[10px] font-bold text-[var(--danger)]" style={{ fontFamily: MONO }}>required</span>
+                    </label>
+                    <input
+                      value={editForm.mrp}
+                      onChange={e => setEditForm({ ...editForm, mrp: e.target.value.replace(/[^\d.]/g, '') })}
+                      placeholder="0.00"
+                      className={`w-full h-[44px] px-3 text-[14px] bg-[var(--sub)] rounded-[7px] border text-[var(--ink)] ${
+                        editTouched && !editForm.mrp ? 'border-[var(--danger-strong)]' : 'border-[var(--border2)]'
+                      }`}
+                      style={{ fontFamily: MONO }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="flex items-baseline gap-1.5 text-[12px] font-semibold text-[var(--ink2)] mb-1.5">
+                      <span>Selling Price (Retail)</span>
+                      <span className="text-[10px] font-bold text-[var(--danger)]" style={{ fontFamily: MONO }}>required</span>
+                    </label>
+                    <input
+                      value={editForm.price}
+                      onChange={e => setEditForm({ ...editForm, price: e.target.value.replace(/[^\d.]/g, '') })}
+                      placeholder="0.00"
+                      className="w-full h-[44px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)] font-bold"
+                      style={{ fontFamily: MONO }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Purchase Cost (Wholesale Buy)</label>
+                    <input
+                      value={editForm.purchasePrice}
+                      onChange={e => setEditForm({ ...editForm, purchasePrice: e.target.value.replace(/[^\d.]/g, '') })}
+                      placeholder="0.00"
+                      className="w-full h-[44px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
+                      style={{ fontFamily: MONO }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Wholesale Rate (B2B)</label>
+                    <input
+                      value={editForm.wholesalePrice}
+                      onChange={e => setEditForm({ ...editForm, wholesalePrice: e.target.value.replace(/[^\d.]/g, '') })}
+                      placeholder="0.00"
+                      className="w-full h-[44px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
+                      style={{ fontFamily: MONO }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Distributor Rate</label>
+                    <input
+                      value={editForm.distributorPrice}
+                      onChange={e => setEditForm({ ...editForm, distributorPrice: e.target.value.replace(/[^\d.]/g, '') })}
+                      placeholder="0.00"
+                      className="w-full h-[44px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
+                      style={{ fontFamily: MONO }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Default Discount %</label>
+                    <input
+                      value={editForm.discountPercent}
+                      onChange={e => setEditForm({ ...editForm, discountPercent: e.target.value.replace(/[^\d.]/g, '') })}
+                      placeholder="0"
+                      className="w-full h-[44px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
+                      style={{ fontFamily: MONO }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Tax & GST */}
+              <div>
+                <div
+                  className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--ink3)] pb-2.5 border-b border-[var(--rule)]"
+                  style={{ fontFamily: MONO }}
+                >
+                  GST &amp; Tax Structure
+                </div>
+                <div className="grid grid-cols-[repeat(auto-fit,minmax(184px,1fr))] gap-3 mt-3">
+                  <div>
+                    <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">HSN Code</label>
+                    <input
+                      value={editForm.hsnCode}
+                      onChange={e => setEditForm({ ...editForm, hsnCode: e.target.value })}
+                      placeholder="4, 6 or 8 digits"
+                      className="w-full h-[44px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
+                      style={{ fontFamily: MONO }}
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">GST Rate Slab</label>
+                    <div className="flex flex-wrap gap-2">
+                      {[0, 5, 12, 18, 28].map(sl => {
+                        const on = editFormGst === sl;
+                        return (
+                          <button
+                            key={sl}
+                            type="button"
+                            onClick={() => setEditFormGst(sl)}
+                            className={`h-[42px] min-w-[64px] px-3.5 rounded-[8px] text-[14px] font-bold cursor-pointer border-[1.5px] transition-colors ${
+                              on
+                                ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]'
+                                : 'border-[var(--border2)] bg-[var(--sub)] text-[var(--ink2)] hover:text-[var(--ink)]'
+                            }`}
+                            style={{ fontFamily: MONO }}
+                          >
+                            {sl}%
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex flex-wrap items-center gap-3 px-5 py-4 border-t border-[var(--rule2)] bg-[var(--sub)]">
+              <div className="flex-1 text-[12.5px] text-[var(--ink3)]">
+                Updates are saved to the SQLite database and pushed to all LAN terminals via WebSockets.
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditOpen(false);
+                  setEditingProduct(null);
+                  setEditCapturedImage(null);
+                }}
+                className="h-[46px] px-4 border border-[var(--border2)] bg-[var(--panel)] rounded-[8px] text-[13px] font-semibold text-[var(--ink)] cursor-pointer hover:bg-[var(--sub)]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isUpdatingProduct}
+                onClick={handleUpdateProduct}
+                className="h-[46px] px-5 rounded-[8px] bg-[var(--ink)] text-[var(--panel)] text-[13px] font-bold cursor-pointer hover:opacity-95 transition-opacity border-0 disabled:opacity-50 flex items-center gap-2"
+              >
+                {isUpdatingProduct ? (
+                  <>
+                    <span className="w-4 h-4 rounded-full border-2 border-[var(--panel)]/40 border-t-[var(--panel)] animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <span>Save Changes</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* In-App Live Camera Viewfinder for Product Photos */}
       <ProductPhotoCaptureModal
         isOpen={showProductCameraModal}
         onClose={() => setShowProductCameraModal(false)}
         onCapture={(dataUrl) => {
-          setCapturedImage(dataUrl);
+          if (editOpen) {
+            setEditCapturedImage(dataUrl);
+          } else {
+            setCapturedImage(dataUrl);
+          }
+          setShowProductCameraModal(false);
           flash('Product photo captured for website');
         }}
-        title="Add Product Photo"
+        title={editOpen ? 'Update Product Photo' : 'Add Product Photo'}
+        productName={editOpen ? (editForm.name || 'Product') : (form.name || 'New Product')}
       />
 
       {/* MODAL 2: IMPORT CSV */}

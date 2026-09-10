@@ -554,4 +554,253 @@ describe('Product Insertion & Route Column Matching', () => {
     db.prepare('DELETE FROM bills WHERE id = ?').run(billId);
     db.prepare('DELETE FROM products WHERE id = ?').run(testId);
   });
+
+  it('successfully updates product name, price, and stock via PUT /api/products/:id', async () => {
+    const testId = `prod_edit_${Date.now()}`;
+    const testSku = `SKU_EDIT_${Date.now()}`;
+
+    // 1. Create initial product
+    db.prepare(`
+      INSERT INTO products (id, sku, name, price, category, gst_rate, stock, low_stock_threshold, uom)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(testId, testSku, 'Initial Product Name', 99.0, 'Groceries', 5, 20, 5, 'PCS');
+
+    // 2. Perform update via PUT /api/products/:id
+    const res = await fetch(`${baseUrl}/api/products/${testId}`, {
+      method: 'PUT',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${ownerToken}`,
+      },
+      body: JSON.stringify({
+        name: 'Updated Product Name',
+        price: 129.50,
+        mrp: 140.00,
+        stock: 35,
+        low_stock_threshold: 8,
+        gst_rate: 18,
+        category: 'Dairy',
+        uom: 'KG',
+        wholesale_price: 110.0,
+        brand: 'BrandX',
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.name).toBe('Updated Product Name');
+    expect(body.price).toBe(129.50);
+    expect(body.mrp).toBe(140.00);
+    expect(body.stock).toBe(35);
+    expect(body.low_stock_threshold).toBe(8);
+    expect(body.gst_rate).toBe(18);
+    expect(body.category).toBe('Dairy');
+    expect(body.wholesale_price).toBe(110.0);
+    expect(body.brand).toBe('BrandX');
+
+    // 3. Verify in database
+    const row = db.prepare('SELECT * FROM products WHERE id = ?').get(testId) as any;
+    expect(row.name).toBe('Updated Product Name');
+    expect(row.price).toBe(129.50);
+    expect(row.stock).toBe(35);
+
+    // Clean up
+    db.prepare('DELETE FROM products WHERE id = ?').run(testId);
+  });
+
+  it('updates product using SKU as lookup identifier and allows setting stock to 0', async () => {
+    const testId = `prod_zero_${Date.now()}`;
+    const testSku = `BARCODE_ZERO_${Date.now()}`;
+
+    // 1. Create product
+    db.prepare(`
+      INSERT INTO products (id, sku, name, price, category, gst_rate, stock, low_stock_threshold)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(testId, testSku, 'Zero Stock Item', 45.0, 'General', 12, 10, 5);
+
+    // 2. Update by SKU with stock=0 and low_stock_threshold=0
+    const res = await fetch(`${baseUrl}/api/products/${testSku}`, {
+      method: 'PUT',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${ownerToken}`,
+      },
+      body: JSON.stringify({
+        stock: 0,
+        low_stock_threshold: 0,
+        price: 50.0,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.stock).toBe(0);
+    expect(body.low_stock_threshold).toBe(0);
+    expect(body.price).toBe(50.0);
+
+    // 3. Verify in database that 0 was not replaced with defaults
+    const row = db.prepare('SELECT * FROM products WHERE id = ?').get(testId) as any;
+    expect(row.stock).toBe(0);
+    expect(row.low_stock_threshold).toBe(0);
+    expect(row.price).toBe(50.0);
+
+    // Clean up
+    db.prepare('DELETE FROM products WHERE id = ?').run(testId);
+  });
+
+  it('rejects update if changing SKU to conflict with another existing product', async () => {
+    const id1 = `prod_c1_${Date.now()}`;
+    const sku1 = `SKU_CONFLICT_1_${Date.now()}`;
+    const id2 = `prod_c2_${Date.now()}`;
+    const sku2 = `SKU_CONFLICT_2_${Date.now()}`;
+
+    db.prepare('INSERT INTO products (id, sku, name, price) VALUES (?, ?, ?, ?)').run(id1, sku1, 'Item 1', 10);
+    db.prepare('INSERT INTO products (id, sku, name, price) VALUES (?, ?, ?, ?)').run(id2, sku2, 'Item 2', 20);
+
+    // Try to update product 2's SKU to sku1
+    const res = await fetch(`${baseUrl}/api/products/${id2}`, {
+      method: 'PUT',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${ownerToken}`,
+      },
+      body: JSON.stringify({
+        sku: sku1,
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain('already exists');
+
+    // Clean up
+    db.prepare('DELETE FROM products WHERE id IN (?, ?)').run(id1, id2);
+  });
+
+  it('preserves existing MRP during partial update when MRP is omitted', async () => {
+    const testId = `prod_mrp_preserve_${Date.now()}`;
+    const testSku = `SKU_MRP_PRESERVE_${Date.now()}`;
+
+    // 1. Create product with price=100 and mrp=140
+    db.prepare(`
+      INSERT INTO products (id, sku, name, price, mrp, category, gst_rate, stock, low_stock_threshold)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(testId, testSku, 'Premium Basmati Rice 1kg', 100.0, 140.0, 'Staples', 5, 20, 5);
+
+    // 2. Perform partial update updating only stock and name (mrp omitted)
+    const res = await fetch(`${baseUrl}/api/products/${testId}`, {
+      method: 'PUT',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${ownerToken}`,
+      },
+      body: JSON.stringify({
+        stock: 50,
+        name: 'Premium Basmati Rice 1kg (Special Edition)',
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.name).toBe('Premium Basmati Rice 1kg (Special Edition)');
+    expect(body.stock).toBe(50);
+    expect(body.price).toBe(100.0);
+    // MRP must remain 140, NOT be clobbered to 100!
+    expect(body.mrp).toBe(140.0);
+
+    const row = db.prepare('SELECT * FROM products WHERE id = ?').get(testId) as any;
+    expect(row.mrp).toBe(140.0);
+    expect(row.stock).toBe(50);
+
+    // Clean up
+    db.prepare('DELETE FROM products WHERE id = ?').run(testId);
+  });
+
+  it('supports fractional decimal stock quantities for weighted UOMs (KG, LTR)', async () => {
+    const testId = `prod_dec_stock_${Date.now()}`;
+    const testSku = `SKU_DEC_STOCK_${Date.now()}`;
+
+    db.prepare(`
+      INSERT INTO products (id, sku, name, price, uom, stock)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(testId, testSku, 'Loose Alphonso Mangoes', 250.0, 'KG', 10.0);
+
+    const res = await fetch(`${baseUrl}/api/products/${testId}`, {
+      method: 'PUT',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${ownerToken}`,
+      },
+      body: JSON.stringify({
+        stock: 2.75,
+        low_stock_threshold: 1.5,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.stock).toBe(2.75);
+    expect(body.low_stock_threshold).toBe(1.5);
+
+    const row = db.prepare('SELECT * FROM products WHERE id = ?').get(testId) as any;
+    expect(row.stock).toBe(2.75);
+    expect(row.low_stock_threshold).toBe(1.5);
+
+    // Clean up
+    db.prepare('DELETE FROM products WHERE id = ?').run(testId);
+  });
+
+  it('rejects invalid or negative numeric inputs for product updates', async () => {
+    const testId = `prod_val_${Date.now()}`;
+    const testSku = `SKU_VAL_${Date.now()}`;
+
+    db.prepare(`
+      INSERT INTO products (id, sku, name, price, stock)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(testId, testSku, 'Validation Test Item', 50.0, 10);
+
+    // Negative stock
+    const resNegStock = await fetch(`${baseUrl}/api/products/${testId}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${ownerToken}` },
+      body: JSON.stringify({ stock: -5 }),
+    });
+    expect(resNegStock.status).toBe(400);
+
+    // NaN stock
+    const resNaNStock = await fetch(`${baseUrl}/api/products/${testId}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${ownerToken}` },
+      body: JSON.stringify({ stock: 'invalid_number' }),
+    });
+    expect(resNaNStock.status).toBe(400);
+
+    // Negative price
+    const resNegPrice = await fetch(`${baseUrl}/api/products/${testId}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${ownerToken}` },
+      body: JSON.stringify({ price: -10 }),
+    });
+    expect(resNegPrice.status).toBe(400);
+
+    // Negative MRP
+    const resNegMrp = await fetch(`${baseUrl}/api/products/${testId}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${ownerToken}` },
+      body: JSON.stringify({ mrp: -1 }),
+    });
+    expect(resNegMrp.status).toBe(400);
+
+    // Invalid discount percent > 100
+    const resDiscount = await fetch(`${baseUrl}/api/products/${testId}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${ownerToken}` },
+      body: JSON.stringify({ discount_percent: 150 }),
+    });
+    expect(resDiscount.status).toBe(400);
+
+    // Clean up
+    db.prepare('DELETE FROM products WHERE id = ?').run(testId);
+  });
 });
+

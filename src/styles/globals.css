@@ -818,3 +818,23 @@ summary:focus-visible,
   font-family: var(--font-sans);
   white-space: nowrap;
 }
+
+/* Continuous live barcode scanner sweeping laser line animation */
+@keyframes barcodeLaser {
+  0% {
+    top: 8%;
+    opacity: 0.75;
+  }
+  50% {
+    top: 88%;
+    opacity: 1;
+  }
+  100% {
+    top: 8%;
+    opacity: 0.75;
+  }
+}
+
+.animate-barcode-laser {
+  animation: barcodeLaser 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}

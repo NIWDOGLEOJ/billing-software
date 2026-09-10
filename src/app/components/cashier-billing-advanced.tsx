@@ -1,6 +1,10 @@
 import { useState, useRef, useEffect, useCallback, useMemo, Fragment } from 'react';
 import { useNavigate } from 'react-router';
-import { Search, Trash2, Settings, History, Check, AlertTriangle, Keyboard, Save, ShoppingCart, Info, Camera, Store, Pill, UtensilsCrossed, Warehouse, Package } from 'lucide-react';
+import {
+  Search, Trash2, Settings, History, Check, AlertTriangle, Keyboard, Save,
+  ShoppingCart, Info, Camera, Store, Pill, UtensilsCrossed, Warehouse,
+  Package, Edit2, Zap, ZapOff, RefreshCw, X, ShieldAlert, Lock, CameraOff, AlertCircle
+} from 'lucide-react';
 import { motion } from 'motion/react';
 import { BillReceipt } from './bill-receipt-advanced';
 import { BillHistoryModal } from './bill-history-modal';
@@ -21,6 +25,15 @@ import { updatePointerGlare, SpecularGlareOverlay } from '../utils/glare';
 import { ProductPhotoCaptureModal } from './product-photo-capture-modal';
 import { compressImageFileToDataUrl } from '../utils/imageCompressor';
 import { isMobileDevice as checkIsMobileDevice } from '../lib/device';
+import {
+  decodeBarcodeFromFile,
+  hasLiveCameraSupport,
+  startLiveBarcodeScanner,
+  requestLiveCameraStream,
+  hasTorchSupport,
+  toggleCameraTorch,
+  type LiveBarcodeScannerController
+} from '../utils/barcodeDecoder';
 
 // Polyfill window event listeners in SSR / Node test environments to prevent motion-dom crashes
 if (typeof window !== 'undefined') {
@@ -86,6 +99,15 @@ export function createConfiguredZxingReader(): BrowserMultiFormatReader {
   return new BrowserMultiFormatReader(hints);
 }
 
+export {
+  hasLiveCameraSupport,
+  decodeBarcodeFromFile,
+  startLiveBarcodeScanner,
+  requestLiveCameraStream,
+  hasTorchSupport,
+  toggleCameraTorch
+};
+
 interface Product {
   id?: string;
   code: string;
@@ -101,6 +123,12 @@ interface Product {
   caseSize?: number;
   marginPercent?: number;
   moq?: number;
+  mrp?: number;
+  purchasePrice?: number;
+  wholesalePrice?: number;
+  distributorPrice?: number;
+  brand?: string;
+  imageUrl?: string;
 }
 
 interface BillItem {
@@ -344,7 +372,7 @@ const DIGITAL_NOTES: Record<string, (customerName: string) => string> = {
 };
 
 export function CashierBillingAdvanced() {
-  const { user, activeShift, logout, isOwner } = useAuth();
+  const { user, activeShift, logout, isOwner, hasPermission } = useAuth();
   const navigate = useNavigate();
   const { darkMode, toggleDarkMode, showSettings, setShowSettings } = useTheme();
   const [showShiftClose, setShowShiftClose] = useState(false);
@@ -352,11 +380,27 @@ export function CashierBillingAdvanced() {
   // Mobile UI States
   const [isMobileDevice, setIsMobileDevice] = useState(() => checkIsMobileDevice());
   const [showMobileScanner, setShowMobileScanner] = useState(false);
-  const [mobileScannerError, setMobileScannerError] = useState('');
+  const [scannerStream, setScannerStream] = useState<MediaStream | null>(null);
+  const [mobileScannerError, setMobileScannerError] = useState<'INSECURE_CONTEXT_OR_NO_GUM' | 'CAMERA_PERMISSION_DENIED' | 'CAMERA_STREAM_UNAVAILABLE' | ''>('');
+  const [scannerTorchOn, setScannerTorchOn] = useState(false);
+  const [scannerHasTorch, setScannerHasTorch] = useState(false);
+  const [scannerFacingMode, setScannerFacingMode] = useState<'environment' | 'user'>('environment');
+  const [scanSuccessFlash, setScanSuccessFlash] = useState(false);
+  const [lastScannedItem, setLastScannedItem] = useState<{ name: string; price: number; code: string; time: number } | null>(null);
+  const [unrecognizedBarcode, setUnrecognizedBarcode] = useState<string | null>(null);
+  const lastScannedCodeRef = useRef<string>('');
+  const lastScannedTimeRef = useRef<number>(0);
+  const clearedBarcodeViewRef = useRef<boolean>(true);
+  const unrecognizedBarcodeRef = useRef<string | null>(null);
+  const scannerControllerRef = useRef<LiveBarcodeScannerController | null>(null);
   const [isMobileShiftActive, setIsMobileShiftActive] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const sharedAudioCtxRef = useRef<any>(null);
   const zxingReaderRef = useRef<BrowserMultiFormatReader | null>(null);
+  const barcodePhotoInputRef = useRef<HTMLInputElement | null>(null);
+  const barcodeGalleryInputRef = useRef<HTMLInputElement | null>(null);
+  const [isProcessingPhotoScan, setIsProcessingPhotoScan] = useState(false);
 
   const getInitialQuickAddDraft = () => {
     if (typeof window === 'undefined') return null;
@@ -417,6 +461,44 @@ export function CashierBillingAdvanced() {
       // ignore
     }
   }, [showQuickAddModal, quickAddBarcode, quickAddForm, quickAddImage, isAddingCustomUom]);
+
+  // Edit Product Modal State
+  const [showEditProductModal, setShowEditProductModal] = useState(false);
+  const [productToEdit, setProductToEdit] = useState<Product | null>(null);
+  const [editProductForm, setEditProductForm] = useState({
+    name: '',
+    price: '',
+    mrp: '',
+    category: 'General',
+    gstRate: 5,
+    stock: '0',
+    lowStockThreshold: '10',
+    hsnCode: '',
+    uom: 'PCS',
+    wholesalePrice: '',
+    brand: '',
+  });
+  const [isUpdatingProduct, setIsUpdatingProduct] = useState(false);
+
+  const canEditInventory = isOwner() || (hasPermission && hasPermission('access_inventory'));
+
+  const handleOpenEditProduct = (p: Product) => {
+    setProductToEdit(p);
+    setEditProductForm({
+      name: p.name || '',
+      price: String(p.price ?? 0),
+      mrp: String(p.mrp ?? p.price ?? 0),
+      category: p.category || 'General',
+      gstRate: p.gstRate ?? 5,
+      stock: String(p.stock ?? 0),
+      lowStockThreshold: String(p.lowStockThreshold ?? 10),
+      hsnCode: p.hsnCode || '',
+      uom: p.uom || 'PCS',
+      wholesalePrice: String(p.wholesalePrice ?? ''),
+      brand: p.brand || '',
+    });
+    setShowEditProductModal(true);
+  };
 
   useEffect(() => {
     const handleResize = () => {
@@ -834,7 +916,13 @@ export function CashierBillingAdvanced() {
         hsnCode: p.hsn_code || '',
         uom: p.uom || 'PCS',
         discountPercent: p.discount_percent || 0,
-        moq: p.moq || 1
+        moq: p.moq || 1,
+        mrp: p.mrp || p.price,
+        purchasePrice: p.purchase_price,
+        wholesalePrice: p.wholesale_price,
+        distributorPrice: p.distributor_price,
+        brand: p.brand || '',
+        imageUrl: p.image_url || ''
       })));
 
       applySettings(settings);
@@ -882,7 +970,9 @@ export function CashierBillingAdvanced() {
   useWebSocket({
     STOCK_UPDATED: (data: any) => {
       if (Array.isArray(data)) {
+        const prodMap = new Map(data.map((p: any) => [p.sku || p.id, p]));
         setProducts(data.map(p => ({
+          id: p.id,
           code: p.sku || p.id,
           name: p.name,
           price: p.price,
@@ -890,8 +980,34 @@ export function CashierBillingAdvanced() {
           gstRate: p.gst_rate,
           stock: p.stock,
           lowStockThreshold: p.low_stock_threshold,
-          hsnCode: p.hsn_code || ''
+          hsnCode: p.hsn_code || '',
+          uom: p.uom || 'PCS',
+          discountPercent: p.discount_percent || 0,
+          moq: p.moq || 1,
+          mrp: p.mrp || p.price,
+          purchasePrice: p.purchase_price,
+          wholesalePrice: p.wholesale_price,
+          distributorPrice: p.distributor_price,
+          brand: p.brand || '',
+          imageUrl: p.image_url || ''
         })));
+
+        // Synchronize in-cart items if their price or GST was updated remotely
+        setBillItems(prev => prev.map(item => {
+          const fresh = prodMap.get(item.code) || (item.id ? prodMap.get(item.id) : undefined);
+          if (fresh) {
+            return {
+              ...item,
+              name: fresh.name,
+              price: fresh.price,
+              originalPrice: fresh.price,
+              gstRate: gstEnabled ? (fresh.gst_rate ?? item.gstRate) : 0,
+              hsnCode: fresh.hsn_code || item.hsnCode,
+              uom: fresh.uom || item.uom,
+            };
+          }
+          return item;
+        }));
       }
     },
     // The event carries the bill, so prepend it instead of re-fetching the
@@ -1113,7 +1229,17 @@ export function CashierBillingAdvanced() {
     if (type === 'chime' && !chimeEnabled) return;
 
     try {
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      if (typeof window === 'undefined') return;
+      const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtxClass) return;
+
+      if (!sharedAudioCtxRef.current) {
+        sharedAudioCtxRef.current = new AudioCtxClass();
+      }
+      const audioCtx = sharedAudioCtxRef.current;
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume().catch(() => {});
+      }
       const volumeFactor = soundVolume / 100;
 
       if (type === 'success') {
@@ -2023,6 +2149,144 @@ export function CashierBillingAdvanced() {
     }
   };
 
+  const handleSaveEditedProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!productToEdit) return;
+
+    if (!editProductForm.name.trim() || !editProductForm.price) {
+      toast.error('Product name and price are required');
+      return;
+    }
+
+    setIsUpdatingProduct(true);
+    const targetId = productToEdit.id || productToEdit.code;
+    const parsedPrice = parseFloat(editProductForm.price) || 0;
+    const parsedMrp = parseFloat(editProductForm.mrp) || parsedPrice;
+    const rawStock = parseFloat(editProductForm.stock);
+    const parsedStock = isNaN(rawStock) ? 0 : rawStock;
+    const rawThreshold = parseFloat(editProductForm.lowStockThreshold);
+    const parsedThreshold = isNaN(rawThreshold) ? 10 : rawThreshold;
+    const rawWholesale = parseFloat(editProductForm.wholesalePrice);
+    const parsedWholesale = isNaN(rawWholesale) ? 0 : rawWholesale;
+
+    try {
+      const payload: any = {
+        sku: productToEdit.code,
+        name: editProductForm.name.trim(),
+        price: parsedPrice,
+        mrp: parsedMrp,
+        stock: parsedStock,
+        category: editProductForm.category.trim() || 'General',
+        gst_rate: editProductForm.gstRate,
+        hsn_code: editProductForm.hsnCode.trim(),
+        uom: editProductForm.uom.trim() || 'PCS',
+        low_stock_threshold: parsedThreshold,
+        wholesale_price: parsedWholesale,
+        brand: editProductForm.brand.trim(),
+      };
+
+      const res = await api.put<any>(`/products/${encodeURIComponent(targetId)}`, payload);
+
+      if (res) {
+        const updated: Product = {
+          ...productToEdit,
+          id: res.id || targetId,
+          code: res.sku || productToEdit.code,
+          name: res.name || editProductForm.name,
+          price: res.price !== undefined ? res.price : parsedPrice,
+          mrp: res.mrp !== undefined ? res.mrp : parsedMrp,
+          category: res.category || editProductForm.category,
+          gstRate: res.gst_rate !== undefined ? res.gst_rate : editProductForm.gstRate,
+          stock: res.stock !== undefined ? res.stock : parsedStock,
+          lowStockThreshold: res.low_stock_threshold !== undefined ? res.low_stock_threshold : parsedThreshold,
+          hsnCode: res.hsn_code || editProductForm.hsnCode,
+          uom: res.uom || editProductForm.uom,
+          wholesalePrice: res.wholesale_price !== undefined ? res.wholesale_price : parsedWholesale,
+          brand: res.brand || editProductForm.brand,
+          imageUrl: res.image_url !== undefined ? res.image_url : productToEdit.imageUrl,
+        };
+
+        // 1. Update product catalog state locally
+        setProducts(prev => prev.map(p => (p.code === productToEdit.code || p.code === updated.code || p.id === targetId) ? updated : p));
+
+        // 2. Update cart items if already in cart
+        setBillItems(prev => prev.map(item => {
+          if (item.code === productToEdit.code || item.code === updated.code || (item.id && item.id === targetId)) {
+            return {
+              ...item,
+              code: updated.code,
+              name: updated.name,
+              price: updated.price,
+              originalPrice: updated.price,
+              gstRate: gstEnabled ? (updated.gstRate ?? item.gstRate) : 0,
+              hsnCode: updated.hsnCode,
+              uom: updated.uom
+            };
+          }
+          return item;
+        }));
+
+        // 3. Update held table orders if present
+        try {
+          const savedListStr = localStorage.getItem('nexusflowTablesList');
+          if (savedListStr) {
+            const list = JSON.parse(savedListStr);
+            let hasChanged = false;
+            const updatedList = list.map((t: any) => {
+              if (t.items && Array.isArray(t.items)) {
+                let tableItemChanged = false;
+                const newItems = t.items.map((item: any) => {
+                  if (item.code === productToEdit.code || item.code === updated.code || (item.id && item.id === targetId)) {
+                    tableItemChanged = true;
+                    hasChanged = true;
+                    return {
+                      ...item,
+                      code: updated.code,
+                      name: updated.name,
+                      price: updated.price,
+                      originalPrice: updated.price,
+                      gstRate: gstEnabled ? (updated.gstRate ?? item.gstRate) : 0,
+                      hsnCode: updated.hsnCode,
+                      uom: updated.uom
+                    };
+                  }
+                  return item;
+                });
+                if (tableItemChanged) {
+                  const newTotal = splitInclusiveGst(newItems, gstEnabled).subtotal;
+                  return { ...t, items: newItems, total: newTotal };
+                }
+              }
+              return t;
+            });
+            if (hasChanged) {
+              localStorage.setItem('nexusflowTablesList', JSON.stringify(updatedList));
+              window.dispatchEvent(new CustomEvent('nexusflow-tables-updated'));
+            }
+          }
+        } catch (e) {
+          console.error('Failed to sync held table items with updated product:', e);
+        }
+
+        setShowEditProductModal(false);
+        setProductToEdit(null);
+        toast.success(`Product "${updated.name}" updated successfully`);
+      }
+    } catch (err: any) {
+      console.error('Failed to update product:', err);
+      const errMsg = err?.message || 'Failed to update product';
+      if (errMsg.includes('Permission required') || errMsg.includes('403')) {
+        toast.error('Permission Denied', {
+          description: 'This cashier account does not have inventory privileges to edit products.'
+        });
+      } else {
+        toast.error(`Update failed: ${errMsg}`);
+      }
+    } finally {
+      setIsUpdatingProduct(false);
+    }
+  };
+
   const handleCloseReceipt = () => {
     setShowReceipt(false);
     if (!billLocked) {
@@ -2110,179 +2374,8 @@ export function CashierBillingAdvanced() {
   // machinery that went with it is gone.)
   const [activePanel, setActivePanel] = useState<'search' | 'cart' | 'customer' | 'payment'>('cart');
 
-  // ── Mobile-First Camera Barcode Scanner & View ──────────────────────────────
-  const startMobileScan = async () => {
-    setMobileScannerError('');
-    setShowMobileScanner(true);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { 
-          facingMode: 'environment', 
-          width: { ideal: 1920 }, 
-          height: { ideal: 1080 } 
-        }
-      });
-      streamRef.current = stream;
-
-      // Enable continuous autofocus capability dynamically if available
-      const track = stream.getVideoTracks()[0];
-      if (track && 'getCapabilities' in track) {
-        const capabilities = track.getCapabilities() as any;
-        const constraints: any = {};
-        if (capabilities.focusMode && capabilities.focusMode.includes('continuous')) {
-          constraints.focusMode = 'continuous';
-        }
-        if (Object.keys(constraints).length > 0) {
-          await track.applyConstraints(constraints);
-        }
-      }
-
-      setTimeout(() => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.play().catch(e => console.warn('Video play deferred:', e));
-        }
-      }, 150);
-    } catch (err: any) {
-      console.error('Camera access failed:', err);
-      setMobileScannerError('Could not access camera. Please check permissions or select manually.');
-    }
-  };
-
-  const stopMobileScan = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-    setShowMobileScanner(false);
-  };
-
-  // Run camera scanning detection (supporting both native BarcodeDetector and ZXing fallback)
-  useEffect(() => {
-    if (!showMobileScanner) return;
-    
-    let active = true;
-    let interval: NodeJS.Timeout;
-    
-    const runNativeDetector = async () => {
-      // @ts-ignore
-      if (videoRef.current && window.BarcodeDetector) {
-        try {
-          // @ts-ignore
-          const detector = new window.BarcodeDetector({ formats: ['code_128', 'ean_13', 'ean_8', 'qr_code', 'upc_a'] });
-          const barcodes = await detector.detect(videoRef.current);
-          if (barcodes.length > 0 && active) {
-            const scannedCode = barcodes[0].rawValue;
-            if (showQuickAddModal) {
-              playBarcodeBeep();
-              setQuickAddBarcode(scannedCode);
-              stopMobileScan();
-              toast.success(`Barcode Scanned: ${scannedCode}`);
-            } else {
-              const matched = products.find(p => p.code === scannedCode);
-              if (matched) {
-                playBarcodeBeep();
-                addToCart(matched);
-                toast.success(`Scanned: ${matched.name} (₹${matched.price})`);
-                stopMobileScan();
-              } else {
-                setQuickAddBarcode(scannedCode);
-                setQuickAddForm({
-                  name: '',
-                  price: '',
-                  category: 'General',
-                  gstRate: 18,
-                  stock: '100',
-                  hsnCode: '',
-                  uom: 'PCS'
-                });
-                setIsAddingCustomUom(false);
-                setShowQuickAddModal(true);
-                stopMobileScan();
-                toast.info(`Scanned code "${scannedCode}" not found. Opening Quick Add...`);
-              }
-            }
-          }
-        } catch (e) {
-          // Ignore
-        }
-      }
-    };
-
-    const runZXingFallback = async () => {
-      if (!videoRef.current || !active) return;
-      try {
-        if (!zxingReaderRef.current) {
-          zxingReaderRef.current = new BrowserMultiFormatReader();
-        }
-        
-        // decodeOnceFromVideoElement will wait until a barcode is found or stream stops
-        const result = await zxingReaderRef.current.decodeOnceFromVideoElement(videoRef.current);
-        if (result && active) {
-          const scannedCode = result.getText();
-          if (showQuickAddModal) {
-            playBarcodeBeep();
-            setQuickAddBarcode(scannedCode);
-            stopMobileScan();
-            toast.success(`Barcode Scanned: ${scannedCode}`);
-          } else {
-            const matched = products.find(p => p.code === scannedCode);
-            if (matched) {
-              playBarcodeBeep();
-              addToCart(matched);
-              toast.success(`Scanned: ${matched.name} (₹${matched.price})`);
-              stopMobileScan();
-            } else {
-              setQuickAddBarcode(scannedCode);
-              setQuickAddForm({
-                name: '',
-                price: '',
-                category: 'General',
-                gstRate: 18,
-                stock: '100',
-                hsnCode: '',
-                uom: 'PCS'
-              });
-              setIsAddingCustomUom(false);
-              setShowQuickAddModal(true);
-              stopMobileScan();
-              toast.info(`Scanned code "${scannedCode}" not found. Opening Quick Add...`);
-            }
-          }
-        }
-      } catch (err) {
-        // ZXing throws if it doesn't find any code in a frame or if it is reset.
-        // If still active, retry after a short delay
-        if (active) {
-          setTimeout(runZXingFallback, 400);
-        }
-      }
-    };
-
-    // @ts-ignore
-    if (window.BarcodeDetector) {
-      interval = setInterval(runNativeDetector, 400);
-    } else {
-      // Start the async recursive ZXing scanner
-      runZXingFallback();
-    }
-
-    return () => {
-      active = false;
-      if (interval) clearInterval(interval);
-      if (zxingReaderRef.current) {
-        try {
-          zxingReaderRef.current.reset();
-        } catch (e) {
-          console.warn('ZXing reset failed:', e);
-        }
-      }
-    };
-  }, [showMobileScanner, products]);
-
   // Standard addToCart helper
   const addToCart = (product: Product) => {
-
     setBillItems(prev => {
       const existing = prev.find(item => item.code === product.code);
       if (existing) {
@@ -2304,6 +2397,281 @@ export function CashierBillingAdvanced() {
       }
     });
   };
+
+  // Unified barcode result handler for continuous live video and photo capture
+  const handleScannedCode = (scannedCode: string) => {
+    if (!scannedCode) return;
+    const cleanCode = scannedCode.trim();
+    if (!cleanCode) return;
+
+    // If an unrecognized barcode modal is currently visible, pause scanning new codes
+    if (unrecognizedBarcodeRef.current) {
+      return;
+    }
+
+    // Cooldown check to prevent duplicate triggers while the exact same barcode remains in camera view.
+    // If user pulls item away (clearedBarcodeViewRef === true) or 2500ms has elapsed, allow immediate scan.
+    const now = Date.now();
+    if (
+      lastScannedCodeRef.current === cleanCode &&
+      now - lastScannedTimeRef.current < 2500 &&
+      !clearedBarcodeViewRef.current
+    ) {
+      return;
+    }
+    lastScannedCodeRef.current = cleanCode;
+    lastScannedTimeRef.current = now;
+    clearedBarcodeViewRef.current = false;
+
+    // Instant physical feedback: audio beep + mobile haptic vibration
+    playBarcodeBeep();
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+      try {
+        navigator.vibrate(60);
+      } catch {
+        // ignore
+      }
+    }
+
+    // Trigger visual green laser flash on the viewfinder
+    setScanSuccessFlash(true);
+    setTimeout(() => setScanSuccessFlash(false), 500);
+
+    // If scanning for the Quick Add modal barcode field
+    if (showQuickAddModal) {
+      setQuickAddBarcode(cleanCode);
+      stopMobileScan();
+      toast.success(`Barcode Scanned: ${cleanCode}`);
+      return;
+    }
+
+    // Cashier register live continuous scanning
+    const matched = products.find(p => p.code === cleanCode || (p as any).barcode === cleanCode);
+    if (matched) {
+      // Check if item is out of stock
+      if (matched.stock !== undefined && matched.stock <= 0) {
+        playBeep('warning');
+        toast.error(`${matched.name} is out of stock`);
+        return;
+      }
+
+      addToCart(matched);
+      setLastScannedItem({
+        name: matched.name,
+        price: matched.price,
+        code: matched.code,
+        time: now,
+      });
+      toast.success(`Scanned: ${matched.name} (₹${matched.price})`, { duration: 1500 });
+      // Keep scanner alive and open for continuous scanning of the next item!
+    } else {
+      // Unrecognized barcode
+      playBeep('warning');
+      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+        try {
+          navigator.vibrate([100, 50, 100]);
+        } catch {
+          // ignore
+        }
+      }
+      unrecognizedBarcodeRef.current = cleanCode;
+      setUnrecognizedBarcode(cleanCode);
+    }
+  };
+
+  // ── Mobile-First Camera Barcode Scanner & View ──────────────────────────────
+  const startMobileScan = async (overrideFacingMode?: 'environment' | 'user') => {
+    setMobileScannerError('');
+    unrecognizedBarcodeRef.current = null;
+    setUnrecognizedBarcode(null);
+    setShowMobileScanner(true);
+
+    // Pre-warm audio context during user gesture so mobile browsers allow instant beep sounds
+    try {
+      if (typeof window !== 'undefined') {
+        const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtxClass) {
+          if (!sharedAudioCtxRef.current) {
+            sharedAudioCtxRef.current = new AudioCtxClass();
+          }
+          if (sharedAudioCtxRef.current.state === 'suspended') {
+            sharedAudioCtxRef.current.resume().catch(() => {});
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    const targetFacingMode = overrideFacingMode || scannerFacingMode;
+
+    const hasCam = typeof navigator !== 'undefined' &&
+      Boolean(navigator?.mediaDevices?.getUserMedia) &&
+      (typeof window !== 'undefined' ? window.isSecureContext !== false : true);
+
+    if (!hasCam) {
+      if (typeof window !== 'undefined' && window.isSecureContext === false) {
+        setMobileScannerError('INSECURE_CONTEXT_OR_NO_GUM');
+      } else {
+        setMobileScannerError('CAMERA_STREAM_UNAVAILABLE');
+      }
+      return;
+    }
+
+    try {
+      // Stop any existing stream tracks first
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+      }
+      setScannerStream(null);
+
+      const stream = await requestLiveCameraStream(targetFacingMode);
+      streamRef.current = stream;
+      setScannerStream(stream);
+      setScannerHasTorch(hasTorchSupport(stream));
+      setScannerTorchOn(false);
+      clearedBarcodeViewRef.current = true;
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.muted = true;
+        videoRef.current.setAttribute('playsinline', 'true');
+        videoRef.current.setAttribute('webkit-playsinline', 'true');
+        await videoRef.current.play().catch(e => console.warn('Video play deferred:', e));
+      }
+    } catch (err: any) {
+      console.error('Camera access failed:', err);
+      if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') {
+        setMobileScannerError('CAMERA_PERMISSION_DENIED');
+      } else {
+        setMobileScannerError('CAMERA_STREAM_UNAVAILABLE');
+      }
+    }
+  };
+
+  const stopMobileScan = () => {
+    if (scannerControllerRef.current) {
+      scannerControllerRef.current.stop();
+      scannerControllerRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    setScannerStream(null);
+    setScannerTorchOn(false);
+    setScannerHasTorch(false);
+    setScanSuccessFlash(false);
+    unrecognizedBarcodeRef.current = null;
+    setUnrecognizedBarcode(null);
+    setShowMobileScanner(false);
+  };
+
+  const handleToggleTorch = async () => {
+    if (!streamRef.current) return;
+    const nextState = !scannerTorchOn;
+    const ok = await toggleCameraTorch(streamRef.current, nextState);
+    if (ok) {
+      setScannerTorchOn(nextState);
+    }
+  };
+
+  const handleFlipCamera = () => {
+    const nextFacing = scannerFacingMode === 'environment' ? 'user' : 'environment';
+    setScannerFacingMode(nextFacing);
+    startMobileScan(nextFacing);
+  };
+
+  // Photo-based barcode scanning for mobile devices over HTTP LAN or difficult barcodes
+  const handleBarcodePhotoInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsProcessingPhotoScan(true);
+    try {
+      const scannedCode = await decodeBarcodeFromFile(file);
+      if (scannedCode) {
+        handleScannedCode(scannedCode);
+      } else {
+        toast.error('No barcode detected in photo. Please ensure barcode is well-lit and in focus, then try again.');
+      }
+    } catch (err) {
+      console.error('[BarcodeScanner] Photo scan failed:', err);
+      toast.error('Failed to read barcode from photo. Please try again.');
+    } finally {
+      setIsProcessingPhotoScan(false);
+      if (e.target) {
+        e.target.value = '';
+      }
+    }
+  };
+
+  // Run continuous camera scanning detection (supporting both native BarcodeDetector and ZXing fallback)
+  useEffect(() => {
+    if (!showMobileScanner || !scannerStream || mobileScannerError) return;
+
+    let active = true;
+
+    const setupScanner = () => {
+      if (!videoRef.current || !active) return;
+
+      // Ensure video element has stream attached and is playing
+      if (videoRef.current.srcObject !== scannerStream) {
+        videoRef.current.srcObject = scannerStream;
+        videoRef.current.muted = true;
+        videoRef.current.setAttribute('playsinline', 'true');
+        videoRef.current.setAttribute('webkit-playsinline', 'true');
+        videoRef.current.play().catch(e => console.warn('Video play deferred:', e));
+      }
+
+      if (scannerControllerRef.current) {
+        scannerControllerRef.current.stop();
+      }
+
+      scannerControllerRef.current = startLiveBarcodeScanner({
+        videoElement: videoRef.current,
+        onScan: (scannedCode) => {
+          if (!active) return;
+          handleScannedCode(scannedCode);
+        },
+        onNoBarcode: () => {
+          if (!active) return;
+          clearedBarcodeViewRef.current = true;
+        },
+        onError: () => {
+          // Frame-to-frame retry
+        },
+        scanIntervalMs: 80,
+      });
+    };
+
+    const timer = setTimeout(setupScanner, 100);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+      if (scannerControllerRef.current) {
+        scannerControllerRef.current.stop();
+        scannerControllerRef.current = null;
+      }
+    };
+  }, [showMobileScanner, scannerStream, mobileScannerError, products]);
+
+  // Clean up camera stream and scanner when component unmounts
+  useEffect(() => {
+    return () => {
+      if (scannerControllerRef.current) {
+        scannerControllerRef.current.stop();
+        scannerControllerRef.current = null;
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+      }
+    };
+  }, []);
+
 
   const addWholesaleBulkItem = (product: Product, qty: number) => {
     if (billLocked) {
@@ -2434,7 +2802,7 @@ export function CashierBillingAdvanced() {
 
           {/* Live Mobile Camera Scanning trigger box */}
           <div 
-            onClick={startMobileScan}
+            onClick={() => startMobileScan()}
             className="cursor-pointer text-center flex flex-col items-center justify-center gap-2 transition-all"
             style={{
               padding: '18px 14px', borderRadius: 8, border: '1.5px dashed var(--border2)',
@@ -2496,6 +2864,32 @@ export function CashierBillingAdvanced() {
                           }}>
                             {item.selectedBatch}
                           </span>
+                        )}
+                        {canEditInventory && (
+                          <button
+                            type="button"
+                            title="Edit product master details"
+                            onClick={() => {
+                              const matchedProd = products.find(p => p.code === item.code);
+                              if (matchedProd) {
+                                handleOpenEditProduct(matchedProd);
+                              } else {
+                                handleOpenEditProduct({
+                                  id: item.code,
+                                  code: item.code,
+                                  name: item.name,
+                                  price: item.price,
+                                  category: 'General',
+                                  stock: 0,
+                                  gstRate: item.gstRate,
+                                });
+                              }
+                            }}
+                            className="p-1 rounded cursor-pointer transition-colors"
+                            style={{ color: 'var(--ink3)', background: 'transparent', border: 0 }}
+                          >
+                            <Edit2 size={12} />
+                          </button>
                         )}
                       </div>
                       <div className="flex items-center gap-2 mt-1 flex-wrap">
@@ -2653,60 +3047,321 @@ export function CashierBillingAdvanced() {
 
         {/* Live Camera Scanner Overlay Modal */}
         {showMobileScanner && (
-          <div className="fixed inset-0 z-50 bg-black flex flex-col justify-between p-4">
-            <div className="flex justify-between items-center text-white z-10 pt-4">
-              <div>
-                <h3 className="text-sm font-black">Align Barcode in Aim Box</h3>
-                <p className="text-[9px] text-gray-400 font-semibold mt-0.5">Camera scanning is active</p>
-              </div>
-              <button 
-                onClick={stopMobileScan}
-                className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700 text-white font-extrabold hover:bg-slate-700"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Glowing sweep viewport */}
-            <div className="relative flex-1 flex items-center justify-center my-6">
-              <div className="absolute inset-0 max-w-sm max-h-[70vh] rounded-3xl overflow-hidden border-2 border-purple-500/50 bg-slate-900 flex items-center justify-center shadow-2xl">
-                {mobileScannerError ? (
-                  <p className="text-rose-400 text-xs font-semibold p-6 text-center">{mobileScannerError}</p>
-                ) : (
-                  <video 
-                    ref={videoRef} 
-                    playsInline 
-                    className="w-full h-full object-cover" 
-                  />
-                )}
-                
-                {/* Aiming viewport box overlay */}
-                <div className="absolute inset-x-6 h-40 border-2 border-[var(--accent)] rounded-2xl flex items-center justify-center bg-[var(--accent)]/5">
-                  {/* Sweeping laser light */}
-                  <div className="w-full h-0.5 bg-[var(--accent)] shadow-[0_0_10px_var(--accent)]" />
+          <div className="fixed inset-0 z-50 bg-black flex flex-col justify-between p-4 select-none">
+            {/* Header bar */}
+            <div className="flex justify-between items-center text-white z-20 pt-2 px-1">
+              <div className="flex items-center gap-2.5">
+                <span className="relative flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                </span>
+                <div>
+                  <h3 className="text-sm font-black tracking-wide flex items-center gap-1.5">
+                    Live Barcode Scanner
+                  </h3>
+                  <p className="text-[10px] text-gray-400 font-medium">
+                    {mobileScannerError
+                      ? 'Camera setup required'
+                      : 'Point camera at product barcode — auto decodes'}
+                  </p>
                 </div>
               </div>
+
+              <div className="flex items-center gap-2">
+                {/* Flashlight button if torch supported */}
+                {scannerHasTorch && !mobileScannerError && (
+                  <button
+                    type="button"
+                    onClick={handleToggleTorch}
+                    className={`w-9 h-9 rounded-full flex items-center justify-center border transition-all cursor-pointer ${
+                      scannerTorchOn
+                        ? 'bg-amber-400 text-black border-amber-300 shadow-[0_0_12px_rgba(251,191,36,0.6)]'
+                        : 'bg-slate-800 text-white border-slate-700 hover:bg-slate-700'
+                    }`}
+                    title={scannerTorchOn ? 'Turn Flashlight Off' : 'Turn Flashlight On'}
+                  >
+                    {scannerTorchOn ? <Zap size={16} /> : <ZapOff size={16} />}
+                  </button>
+                )}
+
+                {/* Flip Camera button */}
+                {!mobileScannerError && (
+                  <button
+                    type="button"
+                    onClick={handleFlipCamera}
+                    className="w-9 h-9 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700 text-white hover:bg-slate-700 transition-colors cursor-pointer"
+                    title="Switch Camera (Front/Back)"
+                  >
+                    <RefreshCw size={15} />
+                  </button>
+                )}
+
+                {/* Close Button */}
+                <button
+                  type="button"
+                  onClick={stopMobileScan}
+                  className="w-9 h-9 rounded-full bg-slate-800/90 flex items-center justify-center border border-slate-700 text-white font-extrabold hover:bg-slate-700 transition-colors cursor-pointer"
+                  title="Close Scanner"
+                >
+                  <X size={18} />
+                </button>
+              </div>
             </div>
 
-            {/* Quick click simulated scan codes */}
-            <div className="z-10 bg-slate-900/90 border border-slate-800 p-3 rounded-2xl max-w-sm mx-auto w-full text-center">
-              <p className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">Quick Demo Scan (TAP TO SIMULATE CAMERA SCAN)</p>
-              <div className="flex justify-center flex-wrap gap-1.5">
-                {products.slice(0, 4).map(p => (
-                  <button 
-                    key={p.code}
-                    onClick={() => {
-                      playBarcodeBeep();
-                      addToCart(p);
-                      toast.success(`Simulated Scan: ${p.name}`);
-                      stopMobileScan();
-                    }}
-                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[10px] font-bold text-slate-200 border border-slate-700"
-                  >
-                    Scan {p.name}
-                  </button>
-                ))}
+            {/* Viewfinder Viewport */}
+            <div className="relative flex-1 flex items-center justify-center my-4">
+              <div className="relative w-full max-w-sm h-full max-h-[68vh] rounded-3xl overflow-hidden border-2 border-slate-700/80 bg-slate-950 flex items-center justify-center shadow-2xl">
+                {mobileScannerError ? (
+                  <div className="flex flex-col items-center justify-center p-6 text-center select-none w-full h-full max-w-xs">
+                    {mobileScannerError === 'INSECURE_CONTEXT_OR_NO_GUM' ? (
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                          <Lock size={26} />
+                        </div>
+                        <h4 className="text-sm font-bold text-white">HTTPS Required for Live Camera</h4>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Modern mobile browsers (Safari on iOS, Chrome on Android) require a secure HTTPS connection to stream live camera video.
+                        </p>
+                        <div className="flex flex-col gap-2 w-full pt-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (typeof window !== 'undefined') {
+                                window.location.href = window.location.href.replace(/^http:/, 'https:');
+                              }
+                            }}
+                            className="w-full h-11 rounded-xl text-xs font-black flex items-center justify-center gap-2 cursor-pointer transition-transform active:scale-95 shadow-xl text-white bg-emerald-600 hover:bg-emerald-500"
+                          >
+                            <Lock size={15} />
+                            <span>Switch to Secure HTTPS</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => startMobileScan()}
+                            className="w-full h-9 rounded-xl text-[11px] font-semibold flex items-center justify-center gap-2 cursor-pointer bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 transition-colors"
+                          >
+                            <RefreshCw size={13} />
+                            <span>Retry Camera</span>
+                          </button>
+                        </div>
+                        <p className="text-[9px] text-slate-500 pt-1">
+                          💡 Tip: For LAN dev, run <code className="text-slate-400">pnpm dev</code> (HTTPS is default) and accept the dev certificate.
+                        </p>
+                      </div>
+                    ) : mobileScannerError === 'CAMERA_PERMISSION_DENIED' ? (
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="w-14 h-14 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400">
+                          <CameraOff size={26} />
+                        </div>
+                        <h4 className="text-sm font-bold text-white">Camera Access Blocked</h4>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Camera permission was not granted. Please allow camera permissions in your browser or device settings to scan barcodes.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => startMobileScan()}
+                          className="w-full h-11 rounded-xl text-xs font-black flex items-center justify-center gap-2 cursor-pointer transition-transform active:scale-95 shadow-xl text-white bg-emerald-600 hover:bg-emerald-500 mt-2"
+                        >
+                          <RefreshCw size={15} />
+                          <span>Request Permission Again</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                          <AlertTriangle size={26} />
+                        </div>
+                        <h4 className="text-sm font-bold text-white">Camera Feed Inactive</h4>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Could not start camera video feed. Please check if another application is using the camera.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => startMobileScan()}
+                          className="w-full h-11 rounded-xl text-xs font-black flex items-center justify-center gap-2 cursor-pointer transition-transform active:scale-95 shadow-xl text-white bg-emerald-600 hover:bg-emerald-500 mt-2"
+                        >
+                          <RefreshCw size={15} />
+                          <span>Retry Camera</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="w-full h-full object-cover"
+                    />
+
+                    {/* Aiming Reticle Overlay Box */}
+                    <div
+                      className={`absolute w-[82%] max-w-[280px] h-44 rounded-2xl transition-all duration-300 pointer-events-none flex flex-col items-center justify-center ${
+                        scanSuccessFlash
+                          ? 'border-2 border-emerald-400 bg-emerald-500/15 shadow-[0_0_25px_rgba(16,185,129,0.5)]'
+                          : 'border-2 border-dashed border-sky-400/80 bg-sky-500/5'
+                      }`}
+                    >
+                      {/* Sweeping laser light */}
+                      <div
+                        className={`absolute inset-x-2 h-0.5 pointer-events-none transition-colors duration-200 animate-barcode-laser ${
+                          scanSuccessFlash
+                            ? 'bg-emerald-400 shadow-[0_0_14px_#10b981]'
+                            : 'bg-sky-400 shadow-[0_0_10px_#38bdf8]'
+                        }`}
+                      />
+
+                      {/* Viewfinder corner accents */}
+                      <div className="absolute top-2 left-2 w-4 h-4 border-t-2 border-l-2 border-white/80 rounded-tl pointer-events-none" />
+                      <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-white/80 rounded-tr pointer-events-none" />
+                      <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-white/80 rounded-bl pointer-events-none" />
+                      <div className="absolute bottom-2 right-2 w-4 h-4 border-b-2 border-r-2 border-white/80 rounded-br pointer-events-none" />
+                    </div>
+
+                    {/* Guidance hint below aim box */}
+                    <div className="absolute bottom-4 inset-x-4 flex justify-center pointer-events-none">
+                      <span className="text-[10px] font-semibold text-white/90 bg-black/60 backdrop-blur-xs px-3 py-1 rounded-full border border-white/10 shadow">
+                        Continuous Live Scanner • Decodes Automatically
+                      </span>
+                    </div>
+
+                    {/* Unrecognized Barcode Modal Overlay */}
+                    {unrecognizedBarcode && (
+                      <div className="absolute inset-x-4 max-w-xs mx-auto p-4 rounded-2xl bg-slate-900/95 border border-amber-500/60 text-center shadow-2xl backdrop-blur-md z-30 flex flex-col items-center gap-2.5">
+                        <div className="w-10 h-10 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center">
+                          <AlertCircle size={20} />
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-bold text-white">Item Not In Catalog</h4>
+                          <p className="text-[10px] font-mono text-amber-300 mt-0.5 break-all">
+                            "{unrecognizedBarcode}"
+                          </p>
+                        </div>
+                        <div className="flex gap-2 w-full pt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const code = unrecognizedBarcode;
+                              unrecognizedBarcodeRef.current = null;
+                              setUnrecognizedBarcode(null);
+                              stopMobileScan();
+                              setQuickAddBarcode(code);
+                              setQuickAddForm({
+                                name: '',
+                                price: '',
+                                category: 'General',
+                                gstRate: 18,
+                                stock: '100',
+                                hsnCode: '',
+                                uom: 'PCS',
+                              });
+                              setIsAddingCustomUom(false);
+                              setShowQuickAddModal(true);
+                              toast.info(`Opening Quick Add for ${code}`);
+                            }}
+                            className="flex-1 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold shadow cursor-pointer transition-colors"
+                          >
+                            + Quick Add
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const dismissed = unrecognizedBarcode;
+                              unrecognizedBarcodeRef.current = null;
+                              setUnrecognizedBarcode(null);
+                              if (dismissed) {
+                                lastScannedCodeRef.current = dismissed;
+                                lastScannedTimeRef.current = Date.now();
+                              }
+                              clearedBarcodeViewRef.current = false;
+                            }}
+                            className="flex-1 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold border border-slate-700 cursor-pointer transition-colors"
+                          >
+                            Scan Next
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
+            </div>
+
+            {/* Hidden file inputs for backward compatibility */}
+            <input
+              ref={barcodePhotoInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleBarcodePhotoInput}
+            />
+            <input
+              ref={barcodeGalleryInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleBarcodePhotoInput}
+            />
+
+            {/* Bottom HUD: Real-time scan result & Cart total */}
+            <div className="z-10 bg-slate-900/95 border border-slate-800 p-3.5 rounded-2xl max-w-sm mx-auto w-full flex flex-col gap-2.5 shadow-2xl backdrop-blur-md">
+              {/* Recently scanned item banner */}
+              {lastScannedItem && Date.now() - lastScannedItem.time < 5000 ? (
+                <div className="flex items-center justify-between bg-emerald-950/60 border border-emerald-500/40 rounded-xl px-3 py-2 text-emerald-300 text-xs">
+                  <div className="flex items-center gap-2 truncate">
+                    <Check size={14} className="text-emerald-400 shrink-0" />
+                    <span className="font-bold truncate">{lastScannedItem.name}</span>
+                  </div>
+                  <span className="font-mono font-bold shrink-0 text-emerald-400">
+                    ₹{lastScannedItem.price.toFixed(2)}
+                  </span>
+                </div>
+              ) : null}
+
+              {/* Running Cart Info & Finish Button */}
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
+                    Current Cart
+                  </p>
+                  <p className="text-sm font-mono font-extrabold text-white">
+                    {totalItemsCount} {totalItemsCount === 1 ? 'item' : 'items'} • {inr(finalTotal)}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={stopMobileScan}
+                  className="px-4 py-2.5 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 shadow-lg cursor-pointer transition-transform active:scale-95"
+                  style={{ background: 'var(--accent)' }}
+                >
+                  <ShoppingCart size={14} />
+                  <span>Done Scanning</span>
+                </button>
+              </div>
+
+              {/* Quick Demo simulated barcodes */}
+              {products.length > 0 && (
+                <div className="pt-1 border-t border-slate-800/80">
+                  <p className="text-[8px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                    Quick Demo Barcodes (Tap to Simulate Live Scan)
+                  </p>
+                  <div className="flex justify-start flex-wrap gap-1">
+                    {products.slice(0, 4).map((p) => (
+                      <button
+                        key={p.code}
+                        type="button"
+                        onClick={() => handleScannedCode(p.code)}
+                        className="px-2 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-[9px] font-medium text-slate-300 border border-slate-700/60 cursor-pointer transition-colors"
+                      >
+                        {p.name.slice(0, 14)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -2920,36 +3575,64 @@ export function CashierBillingAdvanced() {
                           const stock = p.stock ?? 0;
                           const low = (p.lowStockThreshold ?? 15);
                           return (
-                            <button
+                            <div
                               key={`${p.code}-${idx}`}
-                              type="button"
-                              onClick={() => addItem(p)}
-                              className="w-full grid items-center gap-3 text-left cursor-pointer"
+                              className="w-full grid items-center gap-3 text-left"
                               style={{
-                                gridTemplateColumns: 'minmax(0, 1fr) 96px 120px',
-                                padding: '11px 14px', border: 0,
+                                gridTemplateColumns: canEditInventory ? 'minmax(0, 1fr) 96px 100px 36px' : 'minmax(0, 1fr) 96px 120px',
+                                padding: '11px 14px',
                                 borderBottom: '1px solid var(--rule2)',
                                 background: idx === selectedResultIndex ? 'var(--accent-soft)' : 'var(--panel)',
                                 color: 'var(--ink)',
                               }}
                             >
-                              <div style={{ minWidth: 0 }}>
+                              <div
+                                onClick={() => addItem(p)}
+                                className="cursor-pointer"
+                                style={{ minWidth: 0 }}
+                              >
                                 <div className="truncate" style={{ fontSize: 15, fontWeight: 600 }}>{p.name}</div>
                                 <div style={{ fontFamily: MONO, fontSize: 11, color: 'var(--ink3)', marginTop: 2 }}>
                                   #{p.code} · {p.category}
                                   {gstEnabled && p.gstRate != null ? ` · ${p.gstRate}% GST` : ''}
                                 </div>
                               </div>
-                              <div style={{
-                                fontFamily: MONO, fontSize: 11, fontWeight: 600, textAlign: 'right',
-                                color: stock === 0 ? 'var(--danger)' : stock < low ? 'var(--warn)' : 'var(--ink3)',
-                              }}>
+                              <div
+                                onClick={() => addItem(p)}
+                                className="cursor-pointer"
+                                style={{
+                                  fontFamily: MONO, fontSize: 11, fontWeight: 600, textAlign: 'right',
+                                  color: stock === 0 ? 'var(--danger)' : stock < low ? 'var(--warn)' : 'var(--ink3)',
+                                }}
+                              >
                                 {stock === 0 ? 'Out' : `${stock} in stock`}
                               </div>
-                              <div style={{ ...NUM, fontSize: 16, fontWeight: 600, textAlign: 'right' }}>
+                              <div
+                                onClick={() => addItem(p)}
+                                className="cursor-pointer"
+                                style={{ ...NUM, fontSize: 16, fontWeight: 600, textAlign: 'right' }}
+                              >
                                 {inr(p.price)}
                               </div>
-                            </button>
+                              {canEditInventory && (
+                                <button
+                                  type="button"
+                                  title="Edit product master (price, stock, details)"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenEditProduct(p);
+                                  }}
+                                  className="w-8 h-8 rounded flex items-center justify-center cursor-pointer transition-colors"
+                                  style={{
+                                    border: '1px solid var(--border2)',
+                                    background: 'var(--sub)',
+                                    color: 'var(--ink2)',
+                                  }}
+                                >
+                                  <Edit2 size={13} />
+                                </button>
+                              )}
+                            </div>
                           );
                         })}
                       </div>
@@ -3031,7 +3714,35 @@ export function CashierBillingAdvanced() {
                             style={{ padding: '12px 14px', borderBottom: '1px solid var(--rule)' }}
                           >
                             <div style={{ minWidth: 0 }}>
-                              <div className="truncate" style={{ fontSize: 15, fontWeight: 600 }}>{item.name}</div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="truncate" style={{ fontSize: 15, fontWeight: 600 }}>{item.name}</span>
+                                {canEditInventory && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const matchedProd = products.find(p => p.code === item.code);
+                                      if (matchedProd) {
+                                        handleOpenEditProduct(matchedProd);
+                                      } else {
+                                        handleOpenEditProduct({
+                                          id: item.code,
+                                          code: item.code,
+                                          name: item.name,
+                                          price: item.price,
+                                          category: 'General',
+                                          stock: 0,
+                                          gstRate: item.gstRate,
+                                        });
+                                      }
+                                    }}
+                                    className="p-1 rounded cursor-pointer transition-colors"
+                                    style={{ color: 'var(--ink3)' }}
+                                    title="Edit product master details"
+                                  >
+                                    <Edit2 size={12} />
+                                  </button>
+                                )}
+                              </div>
                               <div style={{ fontFamily: MONO, fontSize: 11, color: 'var(--ink3)', marginTop: 2 }}>
                                 #{item.code}
                                 {gstEnabled && item.gstRate ? ` · ${item.gstRate}% GST` : ''}
@@ -3552,10 +4263,10 @@ export function CashierBillingAdvanced() {
                   />
                   <button
                     type="button"
-                    onClick={startMobileScan}
-                    className="px-3 rounded-md border flex items-center justify-center transition-all md:hidden cursor-pointer"
+                    onClick={() => startMobileScan()}
+                    className="px-3 rounded-md border flex items-center justify-center transition-all cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-800"
                     style={{ background: 'var(--sub)', border: '1px solid var(--border2)', color: 'var(--ink2)' }}
-                    title="Scan Barcode using phone camera"
+                    title="Scan Barcode using camera"
                   >
                     <Camera size={14} />
                   </button>
@@ -3797,6 +4508,226 @@ export function CashierBillingAdvanced() {
                   style={{ background: 'var(--ink)', color: 'var(--panel)', border: 0 }}
                 >
                   Save &amp; Add to Cart
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Edit Product Modal */}
+      {showEditProductModal && productToEdit && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 font-sans overflow-y-auto">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="w-full max-w-lg rounded-xl overflow-hidden flex flex-col shadow-2xl my-8"
+            style={{
+              background: 'var(--panel)',
+              border: '1px solid var(--border)',
+              color: 'var(--ink)',
+            }}
+          >
+            <div
+              className="flex justify-between items-center px-5 py-4"
+              style={{ borderBottom: '1px solid var(--rule2)' }}
+            >
+              <div>
+                <div style={EYEBROW}>Master Inventory &middot; SKU #{productToEdit.code}</div>
+                <h3 className="text-base font-bold tracking-tight text-[var(--ink)]">Edit Product Details</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEditProductModal(false);
+                  setProductToEdit(null);
+                }}
+                className="w-8 h-8 rounded-md flex items-center justify-center cursor-pointer transition-colors"
+                style={{
+                  background: 'var(--sub)',
+                  border: '1px solid var(--border2)',
+                  color: 'var(--ink3)',
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditedProduct} className="p-5 space-y-4 max-h-[80vh] overflow-y-auto">
+              <div>
+                <label style={EYEBROW} className="block mb-1">Product Name *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Amul Salted Butter 500g"
+                  value={editProductForm.name}
+                  onChange={e => setEditProductForm(prev => ({ ...prev, name: e.target.value }))}
+                  style={{ ...FIELD, height: 42, padding: '0 12px', fontSize: 13.5 }}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label style={EYEBROW} className="block mb-1">Selling Price (₹) *</label>
+                  <input
+                    type="number"
+                    required
+                    step="0.01"
+                    min="0"
+                    placeholder="0.00"
+                    value={editProductForm.price}
+                    onChange={e => setEditProductForm(prev => ({ ...prev, price: e.target.value }))}
+                    style={{ ...FIELD, ...NUM, height: 42, padding: '0 12px', fontSize: 14 }}
+                  />
+                </div>
+                <div>
+                  <label style={EYEBROW} className="block mb-1">MRP (₹)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="0.00"
+                    value={editProductForm.mrp}
+                    onChange={e => setEditProductForm(prev => ({ ...prev, mrp: e.target.value }))}
+                    style={{ ...FIELD, ...NUM, height: 42, padding: '0 12px', fontSize: 14 }}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label style={EYEBROW} className="block mb-1">Current Stock *</label>
+                  <input
+                    type="number"
+                    required
+                    step="any"
+                    min="0"
+                    value={editProductForm.stock}
+                    onChange={e => setEditProductForm(prev => ({ ...prev, stock: e.target.value }))}
+                    style={{ ...FIELD, ...NUM, height: 42, padding: '0 12px', fontSize: 14 }}
+                  />
+                </div>
+                <div>
+                  <label style={EYEBROW} className="block mb-1">Low Stock Alert Level</label>
+                  <input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={editProductForm.lowStockThreshold}
+                    onChange={e => setEditProductForm(prev => ({ ...prev, lowStockThreshold: e.target.value }))}
+                    style={{ ...FIELD, ...NUM, height: 42, padding: '0 12px', fontSize: 14 }}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label style={EYEBROW} className="block mb-1">Category</label>
+                  <select
+                    value={editProductForm.category}
+                    onChange={e => setEditProductForm(prev => ({ ...prev, category: e.target.value }))}
+                    style={{ ...FIELD, height: 42, padding: '0 10px', fontSize: 12.5 }}
+                  >
+                    {sectorConfig.categories.map((cat: string) => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                    {!sectorConfig.categories.includes(editProductForm.category) && editProductForm.category && (
+                      <option value={editProductForm.category}>{editProductForm.category}</option>
+                    )}
+                  </select>
+                </div>
+                <div>
+                  <label style={EYEBROW} className="block mb-1">GST Slab</label>
+                  <select
+                    value={editProductForm.gstRate}
+                    onChange={e => setEditProductForm(prev => ({ ...prev, gstRate: parseInt(e.target.value) }))}
+                    style={{ ...FIELD, ...NUM, height: 42, padding: '0 10px', fontSize: 12.5 }}
+                  >
+                    <option value="0">0% Exempt</option>
+                    <option value="5">5% GST</option>
+                    <option value="12">12% GST</option>
+                    <option value="18">18% GST</option>
+                    <option value="28">28% GST</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label style={EYEBROW} className="block mb-1">HSN Code</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 1905"
+                    value={editProductForm.hsnCode}
+                    onChange={e => setEditProductForm(prev => ({ ...prev, hsnCode: e.target.value }))}
+                    style={{ ...FIELD, ...NUM, height: 42, padding: '0 12px', fontSize: 13 }}
+                  />
+                </div>
+                <div>
+                  <label style={EYEBROW} className="block mb-1">Unit of Measure</label>
+                  <select
+                    value={editProductForm.uom}
+                    onChange={e => setEditProductForm(prev => ({ ...prev, uom: e.target.value }))}
+                    style={{ ...FIELD, height: 42, padding: '0 10px', fontSize: 12.5 }}
+                  >
+                    <option value="PCS">PCS (Pieces)</option>
+                    <option value="KG">KG (Kilograms)</option>
+                    <option value="GRAM">GRAM</option>
+                    <option value="LITRE">LITRE</option>
+                    <option value="ML">ML (Milliliters)</option>
+                    <option value="BOX">BOX</option>
+                    <option value="PACK">PACK</option>
+                    <option value="METER">METER</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label style={EYEBROW} className="block mb-1">Wholesale Price (₹)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="Optional"
+                    value={editProductForm.wholesalePrice}
+                    onChange={e => setEditProductForm(prev => ({ ...prev, wholesalePrice: e.target.value }))}
+                    style={{ ...FIELD, ...NUM, height: 42, padding: '0 12px', fontSize: 13 }}
+                  />
+                </div>
+                <div>
+                  <label style={EYEBROW} className="block mb-1">Brand / Manufacturer</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Britannia"
+                    value={editProductForm.brand}
+                    onChange={e => setEditProductForm(prev => ({ ...prev, brand: e.target.value }))}
+                    style={{ ...FIELD, height: 42, padding: '0 12px', fontSize: 13 }}
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2.5 pt-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditProductModal(false);
+                    setProductToEdit(null);
+                  }}
+                  disabled={isUpdatingProduct}
+                  className="flex-1 h-11 rounded-md text-xs font-semibold cursor-pointer disabled:opacity-50"
+                  style={{ background: 'var(--sub)', border: '1px solid var(--border2)', color: 'var(--ink2)' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUpdatingProduct}
+                  className="flex-1 h-11 rounded-md text-xs font-bold cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
+                  style={{ background: 'var(--ink)', color: 'var(--panel)', border: 0 }}
+                >
+                  {isUpdatingProduct ? 'Saving...' : 'Save Changes'}
                 </button>
               </div>
             </form>

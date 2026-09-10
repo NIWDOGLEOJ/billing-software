@@ -169,3 +169,90 @@ function fallbackFileReader(
     reader.readAsDataURL(file);
   });
 }
+
+/**
+ * Rotates an image Data URL by a given angle (e.g. 90, 180, 270 degrees clockwise).
+ * Returns the rotated image as a Data URL.
+ * Handles 0 degrees and non-browser/invalid inputs gracefully.
+ */
+export async function rotateImageDataUrl(
+  dataUrl: string,
+  degrees: number,
+  quality = 0.90
+): Promise<string> {
+  const normalizedDegrees = ((Math.round(degrees) % 360) + 360) % 360;
+  if (normalizedDegrees === 0 || !dataUrl) {
+    return dataUrl;
+  }
+
+  if (typeof window === 'undefined' || !window.Image) {
+    return dataUrl;
+  }
+
+  return new Promise<string>((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const width = img.naturalWidth || img.width;
+        const height = img.naturalHeight || img.height;
+
+        if (!width || !height) {
+          resolve(dataUrl);
+          return;
+        }
+
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(dataUrl);
+          return;
+        }
+
+        if (normalizedDegrees === 90 || normalizedDegrees === 270) {
+          canvas.width = height;
+          canvas.height = width;
+        } else {
+          canvas.width = width;
+          canvas.height = height;
+        }
+
+        const isPng = dataUrl.startsWith('data:image/png');
+        const mimeType = isPng ? 'image/png' : 'image/jpeg';
+
+        // Fill white background for JPEG exports to prevent transparent black border artifacts
+        if (!isPng && typeof ctx.fillRect === 'function') {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        ctx.save();
+        if (normalizedDegrees === 90) {
+          ctx.translate(canvas.width, 0);
+          ctx.rotate((90 * Math.PI) / 180);
+        } else if (normalizedDegrees === 180) {
+          ctx.translate(canvas.width, canvas.height);
+          ctx.rotate((180 * Math.PI) / 180);
+        } else if (normalizedDegrees === 270) {
+          ctx.translate(0, canvas.height);
+          ctx.rotate((270 * Math.PI) / 180);
+        } else {
+          // General arbitrary angle rotation fallback
+          ctx.translate(canvas.width / 2, canvas.height / 2);
+          ctx.rotate((normalizedDegrees * Math.PI) / 180);
+          ctx.translate(-width / 2, -height / 2);
+        }
+
+        ctx.drawImage(img, 0, 0);
+        ctx.restore();
+
+        resolve(canvas.toDataURL(mimeType, quality));
+      } catch (err) {
+        console.warn('[rotateImageDataUrl] Canvas rotation error:', err);
+        resolve(dataUrl);
+      }
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}

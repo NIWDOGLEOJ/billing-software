@@ -9,8 +9,7 @@ node_modules/
 # --- Build outputs ---
 dist/
 dist-server/
-website/dist/
-website/output/
+website/
 
 # --- SQLite databases ---
 *.db

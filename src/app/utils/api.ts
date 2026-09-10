@@ -52,8 +52,9 @@ async function request<T>(
     const err = await res.json().catch(() => ({ error: res.statusText }));
     
     // Auto-logout on 401 (Authentication required) or 403 (Invalid/expired token)
-    // but avoid doing it for the login request itself to allow invalid password errors to show normally
-    if ((res.status === 401 || res.status === 403) && path !== '/auth/login') {
+    // but avoid doing it for permission required errors or login request
+    const isSessionExpired = res.status === 401 || (res.status === 403 && err.error === 'Invalid or expired token');
+    if (isSessionExpired && path !== '/auth/login') {
       localStorage.removeItem('authToken');
       localStorage.removeItem('currentUser');
       localStorage.removeItem('currentSession');

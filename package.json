@@ -7,17 +7,18 @@
     "dev:client": "vite",
     "dev:server": "tsx watch server/index.ts",
     "dev": "node scripts/dev.js",
+    "dev:ssl": "HTTPS=true node scripts/dev.js",
     "dev:host": "concurrently \"pnpm dev:server\" \"pnpm dev:client -- --host\"",
+    "dev:host:ssl": "HTTPS=true concurrently \"pnpm dev:server\" \"pnpm dev:client -- --host\"",
     "build:client": "vite build",
     "build:server": "tsc -p tsconfig.server.json",
     "build": "vite build && tsc -p tsconfig.server.json",
     "start": "node dist-server/index.js",
-    "website:dev": "pnpm --dir website dev",
-    "website:build": "pnpm --dir website run build",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@imgly/background-removal-node": "^1.4.5",
     "@radix-ui/react-accordion": "1.2.3",
     "@radix-ui/react-accordion@1.2.3": "npm:@radix-ui/react-accordion@1.2.3",
     "@radix-ui/react-alert-dialog": "1.1.6",
@@ -126,6 +127,7 @@
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/ws": "^8.18.1",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
     "@vitejs/plugin-react": "4.7.0",
     "concurrently": "^9.2.1",
     "tailwindcss": "4.1.12",
@@ -136,12 +138,14 @@
   },
   "pnpm": {
     "overrides": {
-      "vite": "6.3.5"
+      "vite": "6.3.5",
+      "sharp": "^0.35.4"
     },
     "onlyBuiltDependencies": [
       "@tailwindcss/oxide",
       "better-sqlite3",
-      "esbuild"
+      "esbuild",
+      "onnxruntime-node"
     ]
   },
   "readme": "ERROR: No README data found!",

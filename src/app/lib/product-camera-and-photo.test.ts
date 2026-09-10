@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   compressImageFileToDataUrl,
-  captureVideoFrameToDataUrl
+  captureVideoFrameToDataUrl,
+  rotateImageDataUrl
 } from '../utils/imageCompressor';
 
 describe('Product Camera & In-App Photo Capture System', () => {
@@ -278,6 +279,157 @@ describe('Product Camera & In-App Photo Capture System', () => {
       expect(payload.image).toBe('data:image/jpeg;base64,greenteaphotodata');
       expect(payload.price).toBe(160);
       expect(payload.stock).toBe(30);
+    });
+    it('renders ProductPhotoCaptureModal markup in open state', async () => {
+      const React = (await import('react')).default;
+      const { renderToString } = await import('react-dom/server');
+      const { ProductPhotoCaptureModal } = await import('../components/product-photo-capture-modal');
+
+      const html = renderToString(
+        React.createElement(ProductPhotoCaptureModal, {
+          isOpen: true,
+          onClose: () => {},
+          onCapture: () => {},
+          title: 'Take Product Photo',
+        })
+      );
+
+      expect(html).toContain('Take Product Photo');
+      expect(html).toContain('Gallery');
+    });
+
+    it('returns empty string when isOpen is false', async () => {
+      const React = (await import('react')).default;
+      const { renderToString } = await import('react-dom/server');
+      const { ProductPhotoCaptureModal } = await import('../components/product-photo-capture-modal');
+
+      const html = renderToString(
+        React.createElement(ProductPhotoCaptureModal, {
+          isOpen: false,
+          onClose: () => {},
+          onCapture: () => {},
+        })
+      );
+
+      expect(html).toBe('');
+    });
+  });
+
+  describe('rotateImageDataUrl Function', () => {
+    it('returns original dataUrl when degrees is 0 or multiple of 360', async () => {
+      const dataUrl = 'data:image/jpeg;base64,samplephoto123';
+      expect(await rotateImageDataUrl(dataUrl, 0)).toBe(dataUrl);
+      expect(await rotateImageDataUrl(dataUrl, 360)).toBe(dataUrl);
+      expect(await rotateImageDataUrl(dataUrl, -360)).toBe(dataUrl);
+    });
+
+    it('returns empty string when given empty input', async () => {
+      expect(await rotateImageDataUrl('', 90)).toBe('');
+    });
+
+    it('rotates image by 90, 180, and 270 degrees clockwise', async () => {
+      const origImage = (global as any).Image;
+      const origDocument = (global as any).document;
+
+      let rotatedDegrees = 0;
+      let lastWidth = 0;
+      let lastHeight = 0;
+      let lastMime = '';
+
+      const mockCtx = {
+        save: vi.fn(),
+        restore: vi.fn(),
+        translate: vi.fn(),
+        rotate: vi.fn((rad: number) => {
+          rotatedDegrees = Math.round((rad * 180) / Math.PI);
+        }),
+        drawImage: vi.fn(),
+        fillRect: vi.fn(),
+      };
+
+      const mockCanvas = {
+        get width() {
+          return lastWidth;
+        },
+        set width(val: number) {
+          lastWidth = val;
+        },
+        get height() {
+          return lastHeight;
+        },
+        set height(val: number) {
+          lastHeight = val;
+        },
+        getContext: vi.fn(() => mockCtx),
+        toDataURL: vi.fn((mime: string) => {
+          lastMime = mime;
+          return `data:${mime};base64,rotated_image_result`;
+        }),
+      };
+
+      (global as any).document = {
+        createElement: vi.fn((tag: string) => {
+          if (tag === 'canvas') return mockCanvas;
+          return {};
+        }),
+      };
+
+      class MockImg {
+        width = 400;
+        height = 300;
+        naturalWidth = 400;
+        naturalHeight = 300;
+        onload: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        set src(_val: string) {
+          setTimeout(() => {
+            if (this.onload) this.onload();
+          }, 0);
+        }
+      }
+
+      (global as any).Image = MockImg;
+      (global as any).window.Image = MockImg;
+
+      // Rotate 90°
+      const res90 = await rotateImageDataUrl('data:image/jpeg;base64,rawinput', 90);
+      expect(res90).toBe('data:image/jpeg;base64,rotated_image_result');
+      expect(lastWidth).toBe(300);
+      expect(lastHeight).toBe(400);
+      expect(rotatedDegrees).toBe(90);
+      expect(lastMime).toBe('image/jpeg');
+
+      // Rotate 180°
+      const res180 = await rotateImageDataUrl('data:image/jpeg;base64,rawinput', 180);
+      expect(res180).toBe('data:image/jpeg;base64,rotated_image_result');
+      expect(lastWidth).toBe(400);
+      expect(lastHeight).toBe(300);
+      expect(rotatedDegrees).toBe(180);
+
+      // Rotate 270°
+      const res270 = await rotateImageDataUrl('data:image/jpeg;base64,rawinput', 270);
+      expect(res270).toBe('data:image/jpeg;base64,rotated_image_result');
+      expect(lastWidth).toBe(300);
+      expect(lastHeight).toBe(400);
+      expect(rotatedDegrees).toBe(270);
+
+      // Rotate negative angle (-90° normalizes to 270°)
+      const resNeg90 = await rotateImageDataUrl('data:image/jpeg;base64,rawinput', -90);
+      expect(resNeg90).toBe('data:image/jpeg;base64,rotated_image_result');
+      expect(rotatedDegrees).toBe(270);
+
+      // Preserves PNG mime type for transparent product images
+      const resPng = await rotateImageDataUrl('data:image/png;base64,transparent_input', 90);
+      expect(resPng).toBe('data:image/png;base64,rotated_image_result');
+      expect(lastMime).toBe('image/png');
+
+      // Restore
+      (global as any).Image = origImage;
+      if (origDocument) {
+        (global as any).document = origDocument;
+      } else {
+        delete (global as any).document;
+      }
     });
   });
 });

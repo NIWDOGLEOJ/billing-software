@@ -6,7 +6,9 @@ import { fileURLToPath } from 'url';
 import {
   enhanceImageWithPureWhiteBg,
   parseImageInput,
-  processProductImageAsync
+  processProductImageAsync,
+  evaluateImageClarity,
+  applyAdaptiveDeblurAndClarity
 } from './imageProcessor';
 import { db, initDb } from '../db';
 
@@ -350,5 +352,190 @@ describe('Product Camera & Pure White Background Image Enhancement Pipeline', ()
     const emptyBuffer = Buffer.alloc(0);
     // enhanceImageWithPureWhiteBg should reject or throw handled error on empty buffer
     await expect(enhanceImageWithPureWhiteBg(emptyBuffer)).rejects.toThrow();
+  });
+
+  it('segments complex store photos with neural background removal and smooth edges', async () => {
+    const width = 250;
+    const height = 250;
+    const raw = Buffer.alloc(width * height * 3);
+    for (let i = 0; i < width * height; i++) {
+      const o = i * 3;
+      const noise = (i % 23) * 3;
+      raw[o] = 35 + noise;
+      raw[o + 1] = 40 + noise;
+      raw[o + 2] = 45 + noise;
+    }
+
+    // Cylindrical red can in the center
+    for (let y = 30; y < 220; y++) {
+      for (let x = 70; x < 180; x++) {
+        const o = (y * width + x) * 3;
+        raw[o] = 210;
+        raw[o + 1] = 25;
+        raw[o + 2] = 30;
+      }
+    }
+
+    const inputBuffer = await sharp(raw, { raw: { width, height, channels: 3 } }).jpeg().toBuffer();
+    const outputBuffer = await enhanceImageWithPureWhiteBg(inputBuffer);
+    const { data: outData } = await sharp(outputBuffer).raw().toBuffer({ resolveWithObject: true });
+
+    // Perimeter corners must be pure white #FFFFFF
+    expect(outData[0]).toBe(255);
+    expect(outData[1]).toBe(255);
+    expect(outData[2]).toBe(255);
+
+    // Can center must remain vibrant red
+    const centerIdx = (125 * width + 125) * 3;
+    expect(outData[centerIdx]).toBeGreaterThan(180);
+    expect(outData[centerIdx + 1]).toBeLessThan(60);
+  });
+
+  describe('Adaptive De-blurring & Clarity Recovery Pipeline', () => {
+    it('evaluates sharpness and contrast metrics accurately, distinguishing sharp vs blurry vs low-contrast images', async () => {
+      // 1. Generate sharp barcode-like pattern
+      const width = 120;
+      const height = 120;
+      const sharpRaw = Buffer.alloc(width * height * 3, 230);
+      for (let x = 10; x < 110; x += 4) {
+        for (let y = 10; y < 110; y++) {
+          const idx = (y * width + x) * 3;
+          sharpRaw[idx] = 10;
+          sharpRaw[idx + 1] = 10;
+          sharpRaw[idx + 2] = 10;
+        }
+      }
+      const sharpBuffer = await sharp(sharpRaw, { raw: { width, height, channels: 3 } }).png().toBuffer();
+      const sharpMetrics = await evaluateImageClarity(sharpBuffer);
+
+      expect(sharpMetrics.sharpness).toBeGreaterThan(5.0);
+      expect(sharpMetrics.isBlurry).toBe(false);
+      expect(sharpMetrics.recommendedSigma).toBeLessThanOrEqual(1.05);
+
+      // 2. Generate blurred version
+      const blurryBuffer = await sharp(sharpBuffer).blur(2.5).png().toBuffer();
+      const blurryMetrics = await evaluateImageClarity(blurryBuffer);
+
+      expect(blurryMetrics.sharpness).toBeLessThan(sharpMetrics.sharpness);
+      expect(blurryMetrics.isBlurry).toBe(true);
+      expect(blurryMetrics.recommendedSigma).toBeGreaterThanOrEqual(1.4);
+
+      // 3. Generate low contrast washed-out image
+      const lowContrastRaw = Buffer.alloc(width * height * 3);
+      for (let i = 0; i < width * height * 3; i++) {
+        lowContrastRaw[i] = 128 + (i % 7); // tiny variance
+      }
+      const lowContrastBuffer = await sharp(lowContrastRaw, { raw: { width, height, channels: 3 } }).png().toBuffer();
+      const lowContrastMetrics = await evaluateImageClarity(lowContrastBuffer);
+
+      expect(lowContrastMetrics.isLowContrast).toBe(true);
+      expect(lowContrastMetrics.claheRequired).toBe(true);
+    });
+
+    it('applyAdaptiveDeblurAndClarity restores sharpness and edge definition on blurry product labels', async () => {
+      const width = 100;
+      const height = 100;
+      const raw = Buffer.alloc(width * height * 3, 210);
+      for (let x = 20; x < 80; x += 4) {
+        for (let y = 20; y < 80; y++) {
+          const idx = (y * width + x) * 3;
+          raw[idx] = 20;
+          raw[idx + 1] = 20;
+          raw[idx + 2] = 20;
+        }
+      }
+      const original = await sharp(raw, { raw: { width, height, channels: 3 } }).png().toBuffer();
+      const blurry = await sharp(original).blur(2.2).png().toBuffer();
+      const beforeStats = await evaluateImageClarity(blurry);
+
+      const recovered = await applyAdaptiveDeblurAndClarity(blurry, beforeStats);
+      const afterStats = await evaluateImageClarity(recovered);
+
+      // Sharpness should be substantially improved by the de-blurring filter
+      expect(afterStats.sharpness).toBeGreaterThan(beforeStats.sharpness);
+    });
+
+    it('enhances blurry product photos with pure white background and de-blurred foreground', async () => {
+      const width = 140;
+      const height = 140;
+      const raw = Buffer.alloc(width * height * 3, 170); // grey table
+
+      // Blue product in center (30..110)
+      for (let y = 30; y < 110; y++) {
+        for (let x = 30; x < 110; x++) {
+          const idx = (y * width + x) * 3;
+          raw[idx] = 30;
+          raw[idx + 1] = 90;
+          raw[idx + 2] = 220;
+        }
+      }
+
+      const inputSharp = await sharp(raw, { raw: { width, height, channels: 3 } }).png().toBuffer();
+      // Apply blur to simulate camera shake or soft focus
+      const blurryInput = await sharp(inputSharp).blur(1.8).png().toBuffer();
+
+      const outputBuffer = await enhanceImageWithPureWhiteBg(blurryInput);
+      const { data: outData, info: outInfo } = await sharp(outputBuffer).raw().toBuffer({ resolveWithObject: true });
+
+      // Corners must be pure white #FFFFFF
+      expect(outData[0]).toBe(255);
+      expect(outData[1]).toBe(255);
+      expect(outData[2]).toBe(255);
+
+      const trIdx = (outInfo.width - 1) * 3;
+      expect(outData[trIdx]).toBe(255);
+      expect(outData[trIdx + 1]).toBe(255);
+      expect(outData[trIdx + 2]).toBe(255);
+
+      // Center product detail must remain distinctly blue and vibrant (not washed out to white)
+      const centerOffset = (70 * outInfo.width + 70) * 3;
+      expect(outData[centerOffset + 2]).toBeGreaterThan(outData[centerOffset]);
+      expect(outData[centerOffset + 2]).toBeGreaterThan(outData[centerOffset + 1]);
+      expect(outData[centerOffset + 2]).toBeGreaterThan(150);
+    });
+
+    it('evaluates clarity on single-channel grayscale images without error', async () => {
+      const width = 80;
+      const height = 80;
+      const raw = Buffer.alloc(width * height, 180);
+      // Draw dark barcode stripe
+      for (let y = 10; y < 70; y++) {
+        for (let x = 20; x < 40; x++) {
+          raw[y * width + x] = 20;
+        }
+      }
+      const grayBuffer = await sharp(raw, { raw: { width, height, channels: 1 } }).png().toBuffer();
+      const metrics = await evaluateImageClarity(grayBuffer);
+
+      expect(metrics).toBeDefined();
+      expect(typeof metrics.sharpness).toBe('number');
+      expect(metrics.contrast).toBeGreaterThan(0);
+      expect(typeof metrics.claheRequired).toBe('boolean');
+    });
+
+    it('pre-downscales high-resolution images to max 1024px while maintaining #FFFFFF background', async () => {
+      // 1200x1200 image
+      const width = 1200;
+      const height = 1200;
+      const raw = Buffer.alloc(width * height * 3, 190); // grey table
+      // Red product in center
+      for (let y = 300; y < 900; y++) {
+        for (let x = 300; x < 900; x++) {
+          const idx = (y * width + x) * 3;
+          raw[idx] = 220;
+          raw[idx + 1] = 40;
+          raw[idx + 2] = 40;
+        }
+      }
+      const inputBuffer = await sharp(raw, { raw: { width, height, channels: 3 } }).jpeg({ quality: 80 }).toBuffer();
+      const outputBuffer = await enhanceImageWithPureWhiteBg(inputBuffer);
+      const { info, data: outData } = await sharp(outputBuffer).raw().toBuffer({ resolveWithObject: true });
+
+      expect(info.width).toBeLessThanOrEqual(1024);
+      expect(info.height).toBeLessThanOrEqual(1024);
+      expect(outData[0]).toBe(255);
+      expect(outData[1]).toBe(255);
+      expect(outData[2]).toBe(255);
+    });
   });
 });

@@ -2,7 +2,13 @@ import { defineConfig } from 'vite'
 import path from 'path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
+import basicSsl from '@vitejs/plugin-basic-ssl'
 
+// Enable HTTPS by default so modern mobile browsers (Safari on iOS, Chrome on Android)
+// and Android WebView grant navigator.mediaDevices.getUserMedia for live WebRTC barcode scanning without insecure context restrictions.
+// Can be explicitly disabled if needed via HTTPS=false, SSL=false, or NO_SSL=true.
+const isSslDisabled = process.env.HTTPS === 'false' || process.env.SSL === 'false' || process.env.NO_SSL === 'true'
+const isSslEnabled = !isSslDisabled
 
 function figmaAssetResolver() {
   return {
@@ -23,6 +29,7 @@ export default defineConfig({
     // Tailwind is not being actively used – do not remove them
     react(),
     tailwindcss(),
+    ...(isSslEnabled ? [basicSsl()] : []),
   ],
   resolve: {
     alias: {
@@ -31,6 +38,7 @@ export default defineConfig({
   },
   server: {
     host: true,
+    ...(isSslEnabled ? { https: true } : {}),
     allowedHosts: [
       'civilian-wallet-flying-poster.trycloudflare.com',
       '.trycloudflare.com',

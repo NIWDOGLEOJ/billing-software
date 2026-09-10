@@ -14,6 +14,12 @@ const clientCmd = args.length > 0
 const serverCmd = 'pnpm dev:server';
 
 console.log(`🚀 Starting NexusFlow services...`);
+const isSslDisabled = process.env.HTTPS === 'false' || process.env.SSL === 'false' || process.env.NO_SSL === 'true';
+if (!isSslDisabled) {
+  console.log(`🔒 SSL mode active: Serving over HTTPS for secure mobile WebRTC & camera live scanning.`);
+} else {
+  console.log(`⚠️ HTTP mode active: Note that mobile camera WebRTC requires HTTPS or chrome://flags.`);
+}
 console.log(`📡 Forwarding arguments to client: ${args.length > 0 ? args.join(' ') : 'None'}\n`);
 
 const { result } = concurrently(
@@ -23,7 +29,8 @@ const { result } = concurrently(
   ],
   {
     prefix: 'name',
-    killOthers: ['failure', 'success'],
+    killOthersOn: ['failure', 'success'],
+    killOthers: true,
     restartTries: 0,
   }
 );

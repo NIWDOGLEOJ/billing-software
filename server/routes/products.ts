@@ -286,39 +286,55 @@ router.put('/:id', authenticateToken, requirePermission('access_inventory'), asy
     image_url
   } = req.body;
 
-  const trimmedName = (name !== undefined && name !== null) ? String(name).trim() : '';
-  if (
-    !trimmedName ||
-    price === undefined ||
-    price === null ||
-    price === '' ||
-    isNaN(Number(price)) ||
-    Number(price) < 0 ||
-    gst_rate === undefined ||
-    gst_rate === null ||
-    gst_rate === '' ||
-    isNaN(Number(gst_rate)) ||
-    Number(gst_rate) < 0
-  ) {
-    return res.status(400).json({ error: 'Missing required Indian GST billing fields (name, price, gst_rate, uom)' });
-  }
-
   try {
-    const product = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
+    let product = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
+    if (!product) {
+      product = db.prepare('SELECT * FROM products WHERE sku = ?').get(id);
+    }
     if (!product) {
       return res.status(404).json({ error: 'Product not found' });
     }
 
+    const targetId = (product as any).id;
+    const existingProd = product as any;
+
+    let finalName = existingProd.name;
+    if (name !== undefined && name !== null) {
+      const trimmed = String(name).trim();
+      if (!trimmed) {
+        return res.status(400).json({ error: 'Missing required Indian GST billing fields (name, price, gst_rate, uom)' });
+      }
+      finalName = trimmed;
+    }
+
+    let effectivePrice = existingProd.price;
+    if (price !== undefined && price !== null && price !== '') {
+      const num = Number(price);
+      if (isNaN(num) || num < 0) {
+        return res.status(400).json({ error: 'Price must be a non-negative number' });
+      }
+      effectivePrice = num;
+    }
+
+    let targetGstRate = existingProd.gst_rate ?? 0;
+    if (gst_rate !== undefined && gst_rate !== null && gst_rate !== '') {
+      const num = Number(gst_rate);
+      if (isNaN(num) || num < 0) {
+        return res.status(400).json({ error: 'GST rate must be a non-negative number' });
+      }
+      targetGstRate = num;
+    }
+
     const trimmedSku = (sku !== undefined && sku !== null) ? String(sku).trim() : '';
     // Check if sku is being updated to a duplicate
-    if (trimmedSku && trimmedSku !== (product as any).sku) {
-      const existing = db.prepare('SELECT id FROM products WHERE sku = ?').get(trimmedSku);
+    if (trimmedSku && trimmedSku !== existingProd.sku) {
+      const existing = db.prepare('SELECT id FROM products WHERE sku = ? AND id != ?').get(trimmedSku, targetId);
       if (existing) {
-        return res.status(400).json({ error: `SKU "${trimmedSku}" is already in use by another product` });
+        return res.status(400).json({ error: `Product with SKU "${trimmedSku}" already exists` });
       }
     }
 
-    let finalImageUrl = image_url !== undefined ? image_url : ((product as any).image_url || '');
+    let finalImageUrl = image_url !== undefined ? image_url : (existingProd.image_url || '');
     if (image && typeof image === 'string' && image.trim()) {
       const trimmed = image.trim();
       if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('/uploads/')) {
@@ -326,7 +342,7 @@ router.put('/:id', authenticateToken, requirePermission('access_inventory'), asy
       } else {
         try {
           finalImageUrl = await processProductImageAsync({
-            productId: id,
+            productId: targetId,
             imageData: trimmed,
             broadcast: req.app.get('broadcast')
           });
@@ -336,11 +352,90 @@ router.put('/:id', authenticateToken, requirePermission('access_inventory'), asy
       }
     }
 
-    const effectivePrice = Number(price);
-    const parsedMrp = Number(mrp !== undefined && mrp !== null && mrp !== '' ? mrp : 0);
-    const effectiveMrp = parsedMrp > 0 ? parsedMrp : (effectivePrice > 0 ? effectivePrice : ((product as any).mrp || 0));
-    const finalUom = (uom !== undefined && String(uom).trim()) ? String(uom).trim().toUpperCase() : ((product as any).uom || 'PCS');
-    const cleanHsn = hsn_code !== undefined ? String(hsn_code).replace(/^—$/, '').trim() : (product as any).hsn_code;
+    let effectiveMrp = existingProd.mrp;
+    if (mrp !== undefined && mrp !== null && mrp !== '') {
+      const num = Number(mrp);
+      if (isNaN(num) || num < 0) {
+        return res.status(400).json({ error: 'MRP must be a non-negative number' });
+      }
+      effectiveMrp = num > 0 ? num : (effectivePrice > 0 ? effectivePrice : 0);
+    } else if (effectiveMrp === undefined || effectiveMrp === null || effectiveMrp <= 0) {
+      effectiveMrp = effectivePrice > 0 ? effectivePrice : 0;
+    }
+
+    const finalUom = (uom !== undefined && String(uom).trim()) ? String(uom).trim().toUpperCase() : (existingProd.uom || 'PCS');
+    const cleanHsn = hsn_code !== undefined ? String(hsn_code).replace(/^—$/, '').trim() : (existingProd.hsn_code || '');
+
+    let targetStock = existingProd.stock ?? 0;
+    if (stock !== undefined && stock !== null && stock !== '') {
+      const num = Number(stock);
+      if (isNaN(num) || num < 0) {
+        return res.status(400).json({ error: 'Stock must be a non-negative number' });
+      }
+      targetStock = num;
+    }
+
+    let targetThreshold = existingProd.low_stock_threshold ?? 10;
+    if (low_stock_threshold !== undefined && low_stock_threshold !== null && low_stock_threshold !== '') {
+      const num = Number(low_stock_threshold);
+      if (isNaN(num) || num < 0) {
+        return res.status(400).json({ error: 'Low stock threshold must be a non-negative number' });
+      }
+      targetThreshold = num;
+    }
+
+    const targetCategory = category !== undefined ? (String(category).trim() || 'General') : (existingProd.category || 'General');
+    const targetBrand = brand !== undefined ? String(brand).trim() : (existingProd.brand || '');
+
+    let targetPurchasePrice = existingProd.purchase_price ?? 0;
+    if (purchase_price !== undefined && purchase_price !== null && purchase_price !== '') {
+      const num = Number(purchase_price);
+      if (isNaN(num) || num < 0) {
+        return res.status(400).json({ error: 'Purchase price must be a non-negative number' });
+      }
+      targetPurchasePrice = num;
+    }
+
+    let targetWholesalePrice = existingProd.wholesale_price ?? 0;
+    if (wholesale_price !== undefined && wholesale_price !== null && wholesale_price !== '') {
+      const num = Number(wholesale_price);
+      if (isNaN(num) || num < 0) {
+        return res.status(400).json({ error: 'Wholesale price must be a non-negative number' });
+      }
+      targetWholesalePrice = num;
+    }
+
+    let targetDistributorPrice = existingProd.distributor_price ?? 0;
+    if (distributor_price !== undefined && distributor_price !== null && distributor_price !== '') {
+      const num = Number(distributor_price);
+      if (isNaN(num) || num < 0) {
+        return res.status(400).json({ error: 'Distributor price must be a non-negative number' });
+      }
+      targetDistributorPrice = num;
+    }
+
+    let targetDiscountPercent = existingProd.discount_percent ?? 0;
+    if (discount_percent !== undefined && discount_percent !== null && discount_percent !== '') {
+      const num = Number(discount_percent);
+      if (isNaN(num) || num < 0 || num > 100) {
+        return res.status(400).json({ error: 'Discount percent must be between 0 and 100' });
+      }
+      targetDiscountPercent = num;
+    }
+
+    const targetBatchNumber = batch_number !== undefined ? String(batch_number).trim() : (existingProd.batch_number || '');
+    const targetExpiryDate = expiry_date !== undefined ? String(expiry_date).trim() : (existingProd.expiry_date || '');
+    const targetStatus = status !== undefined ? String(status).trim() : (existingProd.status || 'Active');
+    const targetBarcodeType = barcode_type !== undefined ? String(barcode_type).trim() : (existingProd.barcode_type || 'EAN-13');
+
+    let targetMoq = existingProd.moq ?? 1;
+    if (moq !== undefined && moq !== null && moq !== '') {
+      const num = Number(moq);
+      if (isNaN(num) || num <= 0) {
+        return res.status(400).json({ error: 'MOQ must be greater than 0' });
+      }
+      targetMoq = num;
+    }
 
     db.prepare(`
       UPDATE products
@@ -349,31 +444,31 @@ router.put('/:id', authenticateToken, requirePermission('access_inventory'), asy
           batch_number = ?, expiry_date = ?, status = ?, barcode_type = ?, moq = ?, distributor_price = ?, image_url = ?
       WHERE id = ?
     `).run(
-      trimmedSku || (product as any).sku,
-      trimmedName,
+      trimmedSku || existingProd.sku,
+      finalName,
       effectivePrice,
-      category !== undefined ? (String(category).trim() || 'General') : (product as any).category,
-      Number(gst_rate || 0),
-      stock !== undefined ? Number(stock || 0) : (product as any).stock,
-      low_stock_threshold !== undefined ? Number(low_stock_threshold || 10) : (product as any).low_stock_threshold,
-      cleanHsn || '',
-      brand !== undefined ? String(brand).trim() : ((product as any).brand || ''),
+      targetCategory,
+      targetGstRate,
+      targetStock,
+      targetThreshold,
+      cleanHsn,
+      targetBrand,
       finalUom,
-      purchase_price !== undefined ? Number(purchase_price) : ((product as any).purchase_price || 0),
-      wholesale_price !== undefined ? Number(wholesale_price) : ((product as any).wholesale_price || 0),
+      targetPurchasePrice,
+      targetWholesalePrice,
       effectiveMrp,
-      discount_percent !== undefined ? Number(discount_percent) : ((product as any).discount_percent || 0),
-      batch_number !== undefined ? String(batch_number).trim() : ((product as any).batch_number || ''),
-      expiry_date !== undefined ? String(expiry_date).trim() : ((product as any).expiry_date || ''),
-      status !== undefined ? String(status).trim() : ((product as any).status || 'Active'),
-      barcode_type !== undefined ? String(barcode_type).trim() : ((product as any).barcode_type || 'EAN-13'),
-      moq !== undefined ? Number(moq || 1) : ((product as any).moq || 1),
-      distributor_price !== undefined ? Number(distributor_price) : ((product as any).distributor_price || 0),
+      targetDiscountPercent,
+      targetBatchNumber,
+      targetExpiryDate,
+      targetStatus,
+      targetBarcodeType,
+      targetMoq,
+      targetDistributorPrice,
       finalImageUrl,
-      id
+      targetId
     );
 
-    const updated = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
+    const updated = db.prepare('SELECT * FROM products WHERE id = ?').get(targetId);
 
     // Broadcast WS update for stock
     const broadcast = req.app.get('broadcast');
