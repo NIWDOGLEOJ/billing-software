@@ -21,11 +21,11 @@
     "noFallthroughCasesInSwitch": true,
 
     /* Path aliases — mirrors vite.config.ts */
+    "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/app/*"]
     }
   },
-  "include": ["src"],
-  "references": [{ "path": "./tsconfig.node.json" }]
+  "include": ["src"]
 }

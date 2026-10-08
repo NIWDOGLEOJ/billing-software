@@ -64,14 +64,12 @@ interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   login: (username: string, password: string, rememberDevice?: boolean) => Promise<{ success: boolean; error?: string }>;
-  loginWithToken: (token: string, user: any) => void;
   logout: () => void;
   activeShift: ShiftRecord | null;
   startShift: (initialCash: number) => Promise<void>;
   endShift: (actualCash: number, actualUpi: number, actualCard: number, notes?: string) => Promise<ShiftRecord>;
   hasPermission: (permission: Permission) => boolean;
   isOwner: () => boolean;
-  isPrimaryOwner: () => boolean;
   currentSession: LoginSession | null;
   startBreak: () => Promise<void>;
   endBreak: () => Promise<void>;
@@ -139,7 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Auto-logout after 8 hours of inactivity
   useEffect(() => {
-    let timeout: NodeJS.Timeout;
+    let timeout: ReturnType<typeof setTimeout>;
     
     const resetTimeout = () => {
       clearTimeout(timeout);
@@ -441,30 +439,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const loginWithToken = (token: string, userData: any) => {
-    setToken(token);
-    const parsedUser: User = {
-      id: userData.id,
-      username: userData.username,
-      email: userData.email || '',
-      name: userData.name,
-      role: userData.role,
-      permissions: userData.permissions || [],
-      phone: userData.phone || '',
-      createdAt: userData.created_at || new Date().toISOString(),
-      isActive: true,
-    };
-    const session: LoginSession = {
-      id: userData.sessionId || `sess_${Date.now()}`,
-      userId: userData.id,
-      loginTime: new Date().toISOString(),
-    };
-    setUser(parsedUser);
-    setCurrentSession(session);
-    localStorage.setItem('currentUser', JSON.stringify(parsedUser));
-    localStorage.setItem('currentSession', JSON.stringify(session));
-  };
-
   const logout = async () => {
     if (isOnBreak && currentSession) {
       try {
@@ -545,10 +519,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return user?.role === 'owner' || user?.role === 'co-owner';
   }, [user?.role]);
 
-  const isPrimaryOwner = useCallback((): boolean => {
-    return user?.role === 'owner';
-  }, [user?.role]);
-
   const startBreak = async () => {
     if (!user || isOnBreak) return;
 
@@ -599,14 +569,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         isAuthenticated: !!user,
         login,
-        loginWithToken,
         logout,
         activeShift,
         startShift,
         endShift,
         hasPermission,
         isOwner,
-        isPrimaryOwner,
         currentSession,
         startBreak,
         endBreak,

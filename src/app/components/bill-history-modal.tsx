@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { X, Search, Eye } from 'lucide-react';
 import type { SavedBill } from './cashier-billing-advanced';
 import { MONO, NUM, EYEBROW, inr } from '../lib/design-system';
+import { sendWhatsAppReceipt } from '../utils/whatsapp';
+import { toast } from 'sonner';
 
 interface BillHistoryModalProps {
   billHistory: SavedBill[];
@@ -63,6 +65,37 @@ export function BillHistoryModal({
   };
 
   const totalRevenue = billHistory.reduce((sum, b) => sum + (Number(b.total) || 0), 0);
+
+  const handleShareWhatsApp = async (bill: SavedBill) => {
+    let phone = bill.customerPhone;
+    if (!phone) {
+      phone = window.prompt('Enter customer WhatsApp mobile number (10 digits):', '') || '';
+      if (!phone.trim()) return;
+    }
+    try {
+      await sendWhatsAppReceipt({
+        shopDetails: bill.shopDetails,
+        billNumber: bill.billNumber,
+        items: (bill.items || []).map(i => ({
+          name: i.name,
+          quantity: i.quantity,
+          price: i.price,
+          uom: i.uom,
+        })),
+        total: bill.total,
+        subtotal: bill.subtotal,
+        gstAmount: bill.gstAmount ?? (bill as any).tax,
+        customerName: bill.customerName,
+        customerPhone: phone,
+        cashierName: bill.cashierName,
+        paymentMode: bill.paymentMode,
+        changeAmount: bill.changeAmount ?? (bill as any).change,
+        dateTime: bill.date,
+      });
+    } catch (err: any) {
+      toast.error(err.message || 'Could not send WhatsApp receipt');
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 font-sans">
@@ -225,19 +258,38 @@ export function BillHistoryModal({
                         <div className="truncate flex-1" style={{ color: 'var(--ink3)', fontSize: 11.5 }}>
                           {bill.items.map(i => `${i.name} (${i.quantity})`).join(', ')}
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => onViewBill(bill)}
-                          className="h-7 px-3 rounded text-[11px] font-semibold cursor-pointer shrink-0 flex items-center gap-1 transition-colors"
-                          style={{
-                            background: 'var(--panel)',
-                            border: '1px solid var(--border2)',
-                            color: 'var(--ink2)',
-                          }}
-                        >
-                          <Eye size={12} />
-                          <span>View Receipt</span>
-                        </button>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleShareWhatsApp(bill);
+                            }}
+                            className="h-7 px-2.5 rounded text-[11px] font-semibold cursor-pointer shrink-0 flex items-center gap-1 transition-colors hover:brightness-110"
+                            style={{
+                              background: 'rgba(37, 211, 102, 0.12)',
+                              border: '1px solid rgba(37, 211, 102, 0.35)',
+                              color: '#25D366',
+                            }}
+                            title="Share bill on WhatsApp"
+                          >
+                            <span className="text-xs">💬</span>
+                            <span>WhatsApp</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onViewBill(bill)}
+                            className="h-7 px-3 rounded text-[11px] font-semibold cursor-pointer shrink-0 flex items-center gap-1 transition-colors"
+                            style={{
+                              background: 'var(--panel)',
+                              border: '1px solid var(--border2)',
+                              color: 'var(--ink2)',
+                            }}
+                          >
+                            <Eye size={12} />
+                            <span>View</span>
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>

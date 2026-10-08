@@ -23,7 +23,9 @@ import inventoryRoutes from './routes/inventory';
 import batchRoutes from './routes/batches';
 import reservationRoutes from './routes/reservations';
 import couponRoutes from './routes/coupons';
-import inviteRoutes from './routes/invites';
+import whatsappRoutes from './routes/whatsapp';
+import emailRoutes from './routes/email';
+import { whatsappManager } from './services/whatsappManager';
 import fs from 'fs';
 import BonjourService from 'bonjour-service';
 const { Bonjour } = BonjourService;
@@ -75,7 +77,9 @@ function broadcast(data: any) {
   // Tag the message with the client whose request triggered it. Receivers use
   // this to skip their own echo — the tab that just rang up a sale already has
   // the result and shouldn't re-fetch the whole catalog because of it.
-  const originClientId = requestContext.getStore()?.clientId;
+  // Exception: System events like WHATSAPP_STATUS_CHANGED must reach all clients.
+  const isSystemBroadcast = data?.type === 'WHATSAPP_STATUS_CHANGED';
+  const originClientId = isSystemBroadcast ? undefined : requestContext.getStore()?.clientId;
   const payload = JSON.stringify(
     originClientId ? { ...data, originClientId } : data
   );
@@ -111,6 +115,7 @@ function broadcastActiveUsers() {
 }
 
 app.set('broadcast', broadcast);
+whatsappManager.setBroadcast(broadcast);
 
 // Mount API Routes
 app.use('/api/auth', authRoutes);
@@ -128,7 +133,8 @@ app.use('/api/inventory', inventoryRoutes);
 app.use('/api/batches', batchRoutes);
 app.use('/api/reservations', reservationRoutes);
 app.use('/api/coupons', couponRoutes);
-app.use('/api/invites', inviteRoutes);
+app.use('/api/whatsapp', whatsappRoutes);
+app.use('/api/email', emailRoutes);
 
 // Serves uploaded product images with CORS for customer website
 const uploadsDir = path.join(__dirname, '..', 'uploads');

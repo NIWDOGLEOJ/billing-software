@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router';
 import { toast } from 'sonner';
 import { SectorPage, Panel, Pill, Button, SearchField, Th, Td, Eyebrow, MONO, inr } from './sector-ui';
 import { api } from '../utils/api';
+import { useBetaFeatures } from '../lib/beta-features';
 
 /**
  * B2B GST ledger — was `panel === 'gstin'`.
@@ -66,6 +68,7 @@ export function splitInvoice(inv: Invoice, homeState: string = DEFAULT_HOME_STAT
 }
 
 export function GstLedgerPage() {
+  const { gstLedger } = useBetaFeatures();
   const [invoices, setInvoices] = useState<Invoice[]>(SEED);
   const [homeState, setHomeState] = useState<string>(() => {
     try {
@@ -166,6 +169,30 @@ export function GstLedgerPage() {
     { label: 'SGST', value: totals.sgst },
     { label: 'IGST', value: totals.igst },
   ];
+
+  if (!gstLedger) {
+    return (
+      <SectorPage
+        eyebrow="Retail & Wholesale"
+        title="GST ledger"
+        meta="Feature disabled in settings"
+      >
+        <Panel>
+          <div className="py-12 px-6 text-center max-w-md mx-auto">
+            <h3 className="text-base font-bold text-[var(--text-primary)]">GST Ledger is currently disabled</h3>
+            <p className="text-xs text-[var(--text-muted)] mt-2 leading-relaxed">
+              This feature has been turned off under Beta options in Settings. You can enable it anytime from Settings &gt; Beta features.
+            </p>
+            <div className="mt-6 flex justify-center gap-3">
+              <Link to="/config" className="px-4 py-2 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] text-xs font-bold inline-flex items-center">
+                Open Settings
+              </Link>
+            </div>
+          </div>
+        </Panel>
+      </SectorPage>
+    );
+  }
 
   return (
     <SectorPage

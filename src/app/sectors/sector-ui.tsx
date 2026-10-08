@@ -50,7 +50,7 @@ export function SectorPage({
   children: ReactNode;
 }) {
   return (
-    <div className="p-[14px] flex flex-col gap-[14px] min-h-0">
+    <div className="h-full overflow-y-auto p-[14px] flex flex-col gap-[14px] min-h-0">
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
           <Eyebrow>{eyebrow}</Eyebrow>

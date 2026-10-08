@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { toast } from 'sonner';
 import { useTheme } from '../contexts/theme-context';
+import { sendWhatsAppReceipt } from '../utils/whatsapp';
 import jmartLogo from '../../assets/logos/jmart_logo.png';
 
 export interface BillItem {
@@ -162,6 +163,38 @@ export function BillReceipt({
   const [selectedTemplate, setSelectedTemplate] = useState<'thermal' | 'invoice'>('thermal');
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
+  const [phonePromptOpen, setPhonePromptOpen] = useState(false);
+  const [manualPhone, setManualPhone] = useState(customerPhone || '');
+  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
+
+  const handleWhatsAppShare = async (overridePhone?: string) => {
+    const targetPhone = overridePhone || manualPhone || customerPhone;
+    if (!targetPhone || targetPhone.trim().length < 8) {
+      setPhonePromptOpen(true);
+      return;
+    }
+    setIsSendingWhatsApp(true);
+    try {
+      await sendWhatsAppReceipt({
+        shopDetails,
+        billNumber,
+        items: items.map(i => ({ name: i.name, quantity: i.quantity, price: i.price, uom: i.uom })),
+        total,
+        subtotal,
+        gstAmount,
+        customerName,
+        customerPhone: targetPhone,
+        cashierName,
+        paymentMode,
+        changeAmount,
+      });
+      setPhonePromptOpen(false);
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to send WhatsApp message');
+    } finally {
+      setIsSendingWhatsApp(false);
+    }
+  };
 
   const { theme, setTheme } = useTheme();
 
@@ -424,6 +457,16 @@ export function BillReceipt({
             className="h-8 px-3.5 border border-[var(--border2)] rounded-[7px] bg-[var(--sub)] text-[12px] font-semibold text-[var(--ink)] hover:bg-[var(--rule)] transition-colors cursor-pointer"
           >
             Email bill
+          </button>
+
+          <button
+            type="button"
+            disabled={isSendingWhatsApp}
+            onClick={() => handleWhatsAppShare()}
+            className="h-8 px-3.5 border border-[#25d366]/40 rounded-[7px] bg-[#25d366]/15 hover:bg-[#25d366]/25 text-[#128c7e] dark:text-[#25d366] text-[12px] font-bold transition-colors cursor-pointer flex items-center gap-1.5"
+            title="Send digital receipt via WhatsApp"
+          >
+            <span>💬 WhatsApp</span>
           </button>
 
           <button
@@ -956,6 +999,78 @@ export function BillReceipt({
                     For {shopDetails.name || 'J MART'}
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* WhatsApp Phone Prompt Modal */}
+        {phonePromptOpen && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in"
+            onClick={() => setPhonePromptOpen(false)}
+          >
+            <div
+              className="w-full max-w-[380px] bg-[var(--panel)] border border-[var(--border2)] rounded-[12px] shadow-2xl p-5"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-full bg-[#25d366]/20 text-[#128c7e] dark:text-[#25d366] flex items-center justify-center text-xl shrink-0">
+                  💬
+                </div>
+                <div>
+                  <h3 className="text-[15px] font-bold text-[var(--ink)]">Send WhatsApp Receipt</h3>
+                  <p className="text-[11.5px] text-[var(--ink3)]">Bill #{billNumber}</p>
+                </div>
+              </div>
+
+              <p className="text-[12.5px] text-[var(--ink2)] mb-3 leading-relaxed">
+                Enter the customer&apos;s 10-digit mobile number to send their digital tax invoice via WhatsApp.
+              </p>
+
+              <div className="mb-4">
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-[var(--ink3)] mb-1">
+                  Customer Mobile Number
+                </label>
+                <div className="flex items-center gap-2">
+                  <span className="h-[42px] px-3 bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[13px] font-mono font-bold flex items-center text-[var(--ink2)]">
+                    +91
+                  </span>
+                  <input
+                    type="tel"
+                    autoFocus
+                    value={manualPhone}
+                    onChange={e => setManualPhone(e.target.value)}
+                    placeholder="98450 12345"
+                    className="flex-1 h-[42px] px-3 bg-[var(--panel)] border border-[var(--border2)] rounded-[7px] text-[14px] font-mono text-[var(--ink)] focus:outline-none focus:border-[var(--accent)]"
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleWhatsAppShare(manualPhone);
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setPhonePromptOpen(false)}
+                  className="h-[38px] px-3.5 border border-[var(--border2)] bg-[var(--panel)] rounded-[7px] text-[12.5px] font-semibold text-[var(--ink2)] hover:bg-[var(--sub)] cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isSendingWhatsApp || !manualPhone.trim()}
+                  onClick={() => handleWhatsAppShare(manualPhone)}
+                  className="h-[38px] px-4 rounded-[7px] bg-[#25d366] text-black font-bold text-[12.5px] hover:bg-[#20ba59] cursor-pointer disabled:opacity-50 flex items-center gap-1.5 border-0"
+                >
+                  {isSendingWhatsApp ? 'Sending…' : 'Send WhatsApp'}
+                </button>
               </div>
             </div>
           </div>

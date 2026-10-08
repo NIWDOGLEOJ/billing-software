@@ -4,7 +4,6 @@ import { useTheme } from '../contexts/theme-context';
 import { useShopDetails } from '../lib/shop-details';
 import { api } from '../utils/api';
 import { toast } from 'sonner';
-import { Lock, Shield } from 'lucide-react';
 
 const MONO = "'IBM Plex Mono', ui-monospace, monospace";
 
@@ -39,7 +38,7 @@ interface ExtendedEmployee extends User {
 }
 
 export function EmployeeManagement() {
-  const { isOwner, isPrimaryOwner, user } = useAuth();
+  const { isOwner, user } = useAuth();
   const { theme, setTheme } = useTheme();
   const shopDetails = useShopDetails();
   const shopSlug = (shopDetails.name || 'store').toLowerCase().replace(/[^a-z0-9]+/g, '-');
@@ -54,6 +53,9 @@ export function EmployeeManagement() {
   const [editOpen, setEditOpen] = useState(false);
   const [resetPwOpen, setResetPwOpen] = useState(false);
   const [tallyOpen, setTallyOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [employeeToDelete, setEmployeeToDelete] = useState<ExtendedEmployee | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Add / Edit Form State
   const [formData, setFormData] = useState({
@@ -355,6 +357,38 @@ export function EmployeeManagement() {
     }
   };
 
+  // Delete Employee handler
+  const handleDeleteEmployee = async () => {
+    if (!employeeToDelete) return;
+    if (user?.id === employeeToDelete.id) {
+      flash('Cannot delete your own logged-in account');
+      setDeleteConfirmOpen(false);
+      return;
+    }
+    if (employeeToDelete.username === 'developer' || employeeToDelete.id === 'dev_1') {
+      flash('System developer account cannot be deleted');
+      setDeleteConfirmOpen(false);
+      return;
+    }
+
+    try {
+      setIsDeleting(true);
+      await api.delete(`/users/${employeeToDelete.id}`);
+      setEmployees(prev => prev.filter(u => u.id !== employeeToDelete.id));
+      if (selectedId === employeeToDelete.id) {
+        const remaining = employees.filter(u => u.id !== employeeToDelete.id);
+        setSelectedId(remaining[0]?.id || '');
+      }
+      flash(`Employee "${employeeToDelete.name}" deleted successfully`);
+      setDeleteConfirmOpen(false);
+      setEmployeeToDelete(null);
+    } catch (err: any) {
+      flash(err?.message || 'Failed to delete employee');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   // Calculator Tally handlers
   const handleDenomQty = (denom: number, val: string) => {
     const clean = val.replace(/\D/g, '').slice(0, 4);
@@ -475,7 +509,7 @@ export function EmployeeManagement() {
   ];
 
   return (
-    <div className="min-h-screen flex flex-col bg-[var(--bg)] text-[var(--ink)] antialiased select-none">
+    <div className="h-full flex flex-col bg-[var(--bg)] text-[var(--ink)] antialiased select-none overflow-hidden">
       {/* Sub-Header Toolbar */}
       <div className="min-h-[52px] px-5 py-2 bg-[var(--panel)] border-b border-[var(--border)] flex flex-wrap items-center gap-4 shrink-0 z-10">
         <div className="flex items-baseline gap-2.5">
@@ -527,7 +561,7 @@ export function EmployeeManagement() {
       </div>
 
       {/* Main 2-Column Layout */}
-      <div className="flex-1 p-[14px] flex flex-wrap gap-[14px] items-start overflow-y-auto">
+      <div className="flex-1 min-h-0 p-[14px] flex flex-wrap gap-[14px] items-start overflow-y-auto">
         {/* Left Column: Accounts Table */}
         <div className="flex-[1_1_700px] min-w-[580px] bg-[var(--panel)] border border-[var(--border)] rounded-[10px] overflow-hidden flex flex-col">
           <div className="px-3.5 py-3 border-b border-[var(--rule2)] flex items-center gap-2.5">
@@ -547,7 +581,7 @@ export function EmployeeManagement() {
 
           <div className="overflow-x-auto">
             <div
-              className="grid grid-cols-[minmax(210px,1fr)_116px_104px_128px_118px_78px] gap-2.5 min-w-[780px] px-3.5 py-2.5 bg-[var(--sub)] border-b border-[var(--rule2)] text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--ink3)]"
+              className="grid grid-cols-[minmax(200px,1fr)_110px_96px_120px_110px_130px] gap-2.5 min-w-[780px] px-3.5 py-2.5 bg-[var(--sub)] border-b border-[var(--rule2)] text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--ink3)]"
               style={{ fontFamily: MONO }}
             >
               <div>Employee</div>
@@ -555,7 +589,7 @@ export function EmployeeManagement() {
               <div>Account</div>
               <div>Permissions</div>
               <div>Shift now</div>
-              <div />
+              <div className="text-right">Actions</div>
             </div>
 
             {employees.map(p => {
@@ -577,7 +611,7 @@ export function EmployeeManagement() {
                 <div
                   key={p.id}
                   onClick={() => setSelectedId(p.id)}
-                  className={`grid grid-cols-[minmax(210px,1fr)_116px_104px_128px_118px_78px] gap-2.5 min-w-[780px] items-center px-3.5 py-3 border-b border-[var(--rule)] cursor-pointer transition-colors ${
+                  className={`grid grid-cols-[minmax(200px,1fr)_110px_96px_120px_110px_130px] gap-2.5 min-w-[780px] items-center px-3.5 py-3 border-b border-[var(--rule)] cursor-pointer transition-colors ${
                     isSelected ? 'bg-[var(--accent-soft)] border-l-[3px] border-l-[var(--accent)]' : 'border-l-[3px] border-l-transparent hover:bg-[var(--sub)]/50'
                   }`}
                 >
@@ -618,12 +652,23 @@ export function EmployeeManagement() {
                     </span>
                   </div>
 
-                  <div className="text-right">
+                  <div className="text-right flex items-center justify-end gap-1.5" onClick={e => e.stopPropagation()}>
                     <button
                       onClick={e => handleToggleActive(p, e)}
-                      className="h-[30px] px-2.5 border border-[var(--border2)] bg-[var(--sub)] rounded-[6px] text-[11px] font-semibold text-[var(--ink)] hover:bg-[var(--rule)] cursor-pointer transition-colors"
+                      className="h-[28px] px-2 border border-[var(--border2)] bg-[var(--sub)] rounded-[5px] text-[11px] font-semibold text-[var(--ink)] hover:bg-[var(--rule)] cursor-pointer transition-colors"
                     >
                       {p.isActive ? 'Disable' : 'Enable'}
+                    </button>
+                    <button
+                      onClick={e => {
+                        e.stopPropagation();
+                        setEmployeeToDelete(p);
+                        setDeleteConfirmOpen(true);
+                      }}
+                      className="h-[28px] px-2 border border-[var(--danger-line)] bg-[var(--danger-soft)] text-[var(--danger)] hover:bg-[var(--danger-soft2)] rounded-[5px] text-[11px] font-semibold cursor-pointer transition-colors"
+                      title={`Delete ${p.name}`}
+                    >
+                      Delete
                     </button>
                   </div>
                 </div>
@@ -657,54 +702,54 @@ export function EmployeeManagement() {
                     @{selectedEmployee.username} · {selectedEmployee.role} · {selectedEmployee.phone || 'No phone'} · joined {selectedEmployee.joinedFormatted}
                   </div>
                 </div>
-                {selectedEmployee.role === 'owner' && !isPrimaryOwner() ? (
-                  <span className="h-[34px] px-2.5 flex items-center gap-1.5 border border-[var(--border2)] bg-[var(--sub)] rounded-[7px] text-[11px] font-semibold text-[var(--ink3)]" style={{ fontFamily: MONO }}>
-                    <Lock className="w-3 h-3" /> Protected
-                  </span>
-                ) : (
-                  <button
-                    onClick={() => {
-                      setFormData({
-                        id: selectedEmployee.id,
-                        name: selectedEmployee.name,
-                        username: selectedEmployee.username,
-                        email: selectedEmployee.email || '',
-                        phone: selectedEmployee.phone || '',
-                        password: '',
-                        role: selectedEmployee.role,
-                        permissions: selectedEmployee.permissions || []
-                      });
-                      setEditOpen(true);
-                    }}
-                    className="h-[34px] px-3 border border-[var(--border2)] bg-[var(--sub)] rounded-[7px] text-[12px] font-semibold text-[var(--ink)] hover:bg-[var(--rule)] cursor-pointer transition-colors"
-                  >
-                    Edit
-                  </button>
-                )}
+                <button
+                  onClick={() => {
+                    setFormData({
+                      id: selectedEmployee.id,
+                      name: selectedEmployee.name,
+                      username: selectedEmployee.username,
+                      email: selectedEmployee.email || '',
+                      phone: selectedEmployee.phone || '',
+                      password: '',
+                      role: selectedEmployee.role,
+                      permissions: selectedEmployee.permissions || []
+                    });
+                    setEditOpen(true);
+                  }}
+                  className="h-[34px] px-3 border border-[var(--border2)] bg-[var(--sub)] rounded-[7px] text-[12px] font-semibold text-[var(--ink)] hover:bg-[var(--rule)] cursor-pointer transition-colors"
+                >
+                  Edit
+                </button>
               </div>
 
               <div className="flex gap-2 mt-3.5 flex-wrap">
-                {(selectedEmployee.role !== 'owner' || isPrimaryOwner() || user?.id === selectedEmployee.id) && (
-                  <button
-                    onClick={() => {
-                      setNewPassword('');
-                      setConfirmPassword('');
-                      setResetPwOpen(true);
-                    }}
-                    className="h-[36px] px-3 border border-[var(--border2)] bg-[var(--sub)] rounded-[7px] text-[12px] font-semibold text-[var(--ink)] hover:bg-[var(--rule)] cursor-pointer transition-colors"
-                  >
-                    Reset password
-                  </button>
-                )}
+                <button
+                  onClick={() => {
+                    setNewPassword('');
+                    setConfirmPassword('');
+                    setResetPwOpen(true);
+                  }}
+                  className="h-[36px] px-3 border border-[var(--border2)] bg-[var(--sub)] rounded-[7px] text-[12px] font-semibold text-[var(--ink)] hover:bg-[var(--rule)] cursor-pointer transition-colors"
+                >
+                  Reset password
+                </button>
 
-                {selectedEmployee.role !== 'owner' && (
-                  <button
-                    onClick={() => handleToggleActive(selectedEmployee)}
-                    className="h-[36px] px-3 border border-[var(--border2)] bg-[var(--sub)] rounded-[7px] text-[12px] font-semibold text-[var(--ink)] hover:bg-[var(--rule)] cursor-pointer transition-colors"
-                  >
-                    {selectedEmployee.isActive ? 'Deactivate account' : 'Activate account'}
-                  </button>
-                )}
+                <button
+                  onClick={() => handleToggleActive(selectedEmployee)}
+                  className="h-[36px] px-3 border border-[var(--border2)] bg-[var(--sub)] rounded-[7px] text-[12px] font-semibold text-[var(--ink)] hover:bg-[var(--rule)] cursor-pointer transition-colors"
+                >
+                  {selectedEmployee.isActive ? 'Deactivate account' : 'Activate account'}
+                </button>
+
+                <button
+                  onClick={() => {
+                    setEmployeeToDelete(selectedEmployee);
+                    setDeleteConfirmOpen(true);
+                  }}
+                  className="h-[36px] px-3 border border-[var(--danger-line)] bg-[var(--danger-soft)] text-[var(--danger)] hover:bg-[var(--danger-soft2)] rounded-[7px] text-[12px] font-semibold cursor-pointer transition-colors"
+                >
+                  Delete employee
+                </button>
               </div>
             </div>
 
@@ -868,23 +913,12 @@ export function EmployeeManagement() {
                   <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Role</label>
                   <select
                     value={formData.role}
-                    onChange={e => {
-                      const r = e.target.value;
-                      if (r === 'co-owner' || r === 'owner') {
-                        setFormData({
-                          ...formData,
-                          role: r,
-                          permissions: ALL_PERMISSIONS.map(p => p.value)
-                        });
-                      } else {
-                        setFormData({ ...formData, role: r });
-                      }
-                    }}
+                    onChange={e => setFormData({ ...formData, role: e.target.value })}
                     className="w-full h-[44px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)] cursor-pointer"
                   >
                     <option value="employee">Employee</option>
                     <option value="co-owner">Co-owner</option>
-                    {isPrimaryOwner() && <option value="owner">Owner</option>}
+                    <option value="owner">Owner</option>
                   </select>
                 </div>
               </div>
@@ -991,19 +1025,12 @@ export function EmployeeManagement() {
                 <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Role</label>
                 <select
                   value={formData.role}
-                  disabled={selectedEmployee?.role === 'owner'}
                   onChange={e => setFormData({ ...formData, role: e.target.value })}
-                  className={`w-full h-[44px] px-3 text-[14px] border rounded-[7px] ${
-                    selectedEmployee?.role === 'owner'
-                      ? 'bg-[var(--rule)] border-[var(--rule2)] text-[var(--ink3)] cursor-not-allowed'
-                      : 'bg-[var(--sub)] border-[var(--border2)] text-[var(--ink)] cursor-pointer'
-                  }`}
+                  className="w-full h-[44px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)] cursor-pointer"
                 >
                   <option value="employee">Employee</option>
                   <option value="co-owner">Co-owner</option>
-                  {(isPrimaryOwner() || selectedEmployee?.role === 'owner') && (
-                    <option value="owner">Owner {selectedEmployee?.role === 'owner' ? '(Fixed)' : ''}</option>
-                  )}
+                  <option value="owner">Owner</option>
                 </select>
               </div>
             </div>
@@ -1292,6 +1319,61 @@ export function EmployeeManagement() {
                   Close shift &amp; print Z-report
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: DELETE EMPLOYEE CONFIRMATION */}
+      {deleteConfirmOpen && employeeToDelete && (
+        <div className="fixed inset-0 z-50 bg-[rgba(8,9,8,0.62)] flex items-center justify-center p-4">
+          <div className="w-full max-w-[440px] bg-[var(--panel)] border border-[var(--border)] rounded-[12px] overflow-hidden shadow-2xl">
+            <div className="p-5 border-b border-[var(--rule2)] flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full bg-[var(--danger-soft)] text-[var(--danger)] border border-[var(--danger-line)] flex items-center justify-center font-bold text-sm">
+                ✕
+              </div>
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--danger)]" style={{ fontFamily: MONO }}>
+                  Confirm Deletion
+                </div>
+                <h2 className="text-[16px] font-bold text-[var(--ink)]">Delete Employee Account</h2>
+              </div>
+            </div>
+
+            <div className="p-5 text-[13px] leading-relaxed text-[var(--ink2)] space-y-3">
+              <p>
+                Are you sure you want to permanently delete <strong className="text-[var(--ink)]">{employeeToDelete.name}</strong> (@{employeeToDelete.username})?
+              </p>
+              <div className="p-3 bg-[var(--sub)] border border-[var(--border)] rounded-[8px] text-[12px] space-y-1" style={{ fontFamily: MONO }}>
+                <div>Role: {employeeToDelete.role}</div>
+                <div>Status: {employeeToDelete.isActive ? 'Active' : 'Inactive'}</div>
+                <div>Joined: {employeeToDelete.joinedFormatted}</div>
+              </div>
+              <p className="text-[12px] text-[var(--ink3)]">
+                This user will no longer be able to log in to this terminal. This action cannot be undone.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 px-5 py-3.5 bg-[var(--sub)] border-t border-[var(--rule2)]">
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteConfirmOpen(false);
+                  setEmployeeToDelete(null);
+                }}
+                disabled={isDeleting}
+                className="h-[38px] px-4 border border-[var(--border2)] bg-[var(--panel)] rounded-[7px] text-[12.5px] font-semibold text-[var(--ink)] cursor-pointer hover:bg-[var(--sub)]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteEmployee}
+                disabled={isDeleting}
+                className="h-[38px] px-4 rounded-[7px] bg-[var(--danger)] text-white text-[12.5px] font-bold cursor-pointer hover:opacity-90 transition-opacity flex items-center gap-2 border-0 disabled:opacity-50"
+              >
+                {isDeleting ? 'Deleting...' : 'Delete permanently'}
+              </button>
             </div>
           </div>
         </div>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { SectorPage, Panel, Pill, Button, Row, EmptyRail, SearchField, Th, Td, MONO, inr } from './sector-ui';
 import { api } from '../utils/api';
+import { sendWhatsAppReminder } from '../utils/whatsapp';
 
 /**
  * Khata — credit customers and outstanding dues. Was `panel === 'crm'`.
@@ -227,6 +228,47 @@ export function KhataPage() {
                   value={inr(Math.max(0, selected.limit - selected.outstanding))}
                 />
               </div>
+
+              {selected.outstanding > 0 && (
+                <div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        let shop = 'J MART';
+                        let upi = 'retail@upi';
+                        const stored = localStorage.getItem('shopDetails');
+                        if (stored) {
+                          try {
+                            const parsed = JSON.parse(stored);
+                            if (parsed.name) shop = parsed.name;
+                            if (parsed.phone) upi = `${parsed.phone.replace(/\D/g, '')}@upi`;
+                          } catch {}
+                        }
+                        await sendWhatsAppReminder({
+                          shopName: shop,
+                          customerName: selected.name,
+                          customerPhone: selected.phone,
+                          outstanding: selected.outstanding,
+                          terms: selected.terms,
+                          upiId: upi,
+                        });
+                      } catch (err: any) {
+                        toast.error(err.message || 'Failed to send WhatsApp reminder');
+                      }
+                    }}
+                    className="w-full h-9 rounded-[7px] text-[12px] font-semibold flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                    style={{
+                      background: 'rgba(37, 211, 102, 0.12)',
+                      border: '1px solid rgba(37, 211, 102, 0.35)',
+                      color: '#25D366',
+                    }}
+                  >
+                    <span className="text-sm">💬</span>
+                    <span>Send WhatsApp Dues Reminder</span>
+                  </button>
+                </div>
+              )}
 
               <div className="pt-3 border-t border-[var(--rule2)] flex flex-col gap-2">
                 <label

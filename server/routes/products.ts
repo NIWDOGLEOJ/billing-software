@@ -537,12 +537,12 @@ router.delete('/:id', authenticateToken, requirePermission('access_inventory'), 
   const { id } = req.params;
 
   try {
-    const product = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
+    const product = db.prepare('SELECT * FROM products WHERE id = ? OR sku = ?').get(id, id) as any;
     if (!product) {
       return res.status(404).json({ error: 'Product not found' });
     }
 
-    db.prepare('DELETE FROM products WHERE id = ?').run(id);
+    db.prepare('DELETE FROM products WHERE id = ?').run(product.id);
 
     // Broadcast WS update for stock
     const broadcast = req.app.get('broadcast');

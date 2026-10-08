@@ -35,7 +35,7 @@ export function useWebSocket(handlers: Record<string, WSHandler>) {
         // already applied the result locally, so acting on the echo would mean
         // re-fetching data we have and firing a "synced" toast at the person who
         // caused the sync.
-        if (originClientId && originClientId === CLIENT_ID) return;
+        if (originClientId && originClientId === CLIENT_ID && type !== 'WHATSAPP_STATUS_CHANGED') return;
 
         if (handlersRef.current[type]) {
           handlersRef.current[type](data);

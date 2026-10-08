@@ -1,7 +1,10 @@
-import { useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { X, Check } from 'lucide-react';
+import { X, Check, Mail } from 'lucide-react';
 import { MONO, NUM, EYEBROW, inr } from '../lib/design-system';
+import { sendWhatsAppReceipt } from '../utils/whatsapp';
+import { sendBillEmail } from '../utils/email';
+import { toast } from 'sonner';
 
 interface CompletionModalProps {
   billNumber: string;
@@ -9,6 +12,16 @@ interface CompletionModalProps {
   total: number;
   paymentMode: string;
   changeAmount: number;
+  customerPhone?: string;
+  customerName?: string;
+  customerEmail?: string;
+  cashierName?: string;
+  shopDetails?: any;
+  items?: any[];
+  subtotal?: number;
+  gstAmount?: number;
+  autoSentWhatsApp?: boolean;
+  autoSentEmail?: boolean;
   onClose: () => void;
   onNewBill: () => void;
 }
@@ -19,9 +32,95 @@ export function CompletionModal({
   total,
   paymentMode,
   changeAmount,
+  customerPhone,
+  customerName,
+  customerEmail,
+  cashierName,
+  shopDetails,
+  items,
+  subtotal,
+  gstAmount,
+  autoSentWhatsApp = false,
+  autoSentEmail = false,
   onClose,
   onNewBill,
 }: CompletionModalProps) {
+  const [phoneInput, setPhoneInput] = useState(customerPhone || '');
+  const [emailInput, setEmailInput] = useState(customerEmail || '');
+  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [waSent, setWaSent] = useState(autoSentWhatsApp || false);
+  const [emailSent, setEmailSent] = useState(autoSentEmail || Boolean(customerEmail));
+
+  const handleSendWhatsApp = async (phoneToSend?: string) => {
+    const targetPhone = phoneToSend || phoneInput;
+    if (!targetPhone || targetPhone.trim().length < 8) {
+      toast.error('Please enter customer mobile number');
+      return;
+    }
+
+    setIsSendingWhatsApp(true);
+    try {
+      await sendWhatsAppReceipt({
+        shopDetails,
+        billNumber,
+        items: (items || []).map(i => ({
+          name: i.name,
+          quantity: i.quantity,
+          price: i.price,
+          uom: i.uom,
+        })),
+        total,
+        subtotal,
+        gstAmount,
+        customerName,
+        customerPhone: targetPhone,
+        cashierName,
+        paymentMode,
+        changeAmount,
+      });
+      setWaSent(true);
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to dispatch WhatsApp receipt');
+    } finally {
+      setIsSendingWhatsApp(false);
+    }
+  };
+
+  const handleSendEmail = async (emailToSend?: string) => {
+    const targetEmail = (emailToSend || emailInput || '').trim().toLowerCase();
+    if (!targetEmail || !targetEmail.includes('@')) {
+      toast.error('Please enter a valid customer email address');
+      return;
+    }
+
+    setIsSendingEmail(true);
+    try {
+      await sendBillEmail({
+        toEmail: targetEmail,
+        customerName,
+        customerPhone,
+        billNumber,
+        items: (items || []).map(i => ({
+          name: i.name,
+          quantity: i.quantity,
+          price: i.price,
+          uom: i.uom,
+        })),
+        total,
+        subtotal,
+        gstAmount,
+        paymentMode,
+        changeAmount,
+        shopDetails,
+      });
+      setEmailSent(true);
+    } catch (e: any) {
+      // Toast already shown by sendBillEmail on error
+    } finally {
+      setIsSendingEmail(false);
+    }
+  };
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -151,6 +250,103 @@ export function CompletionModal({
                 </span>
               </div>
             )}
+          </div>
+
+          {/* WhatsApp E-Bill Quick Send Box */}
+          <div
+            className="rounded-lg p-3.5 border transition-colors"
+            style={{
+              background: waSent ? 'var(--ok-soft)' : 'var(--sub)',
+              borderColor: waSent ? 'var(--ok-line)' : 'var(--border2)',
+            }}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold flex items-center gap-1.5 text-[var(--ink)]">
+                <span>💬</span>
+                <span>{waSent ? 'Sent to Customer via Shop WhatsApp' : 'Send Digital Bill via WhatsApp'}</span>
+              </span>
+              {waSent && (
+                <span className="text-[10px] font-bold uppercase text-[var(--ok)] font-mono">
+                  ✓ Sent
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="flex items-center flex-1 h-[38px] px-2.5 rounded-md border bg-[var(--panel)] border-[var(--border2)]">
+                <span className="text-xs font-mono text-[var(--ink3)] font-bold pr-1.5 border-r border-[var(--border2)]">
+                  +91
+                </span>
+                <input
+                  type="tel"
+                  placeholder="Customer 10-digit mobile"
+                  value={phoneInput}
+                  onChange={e => setPhoneInput(e.target.value)}
+                  className="flex-1 bg-transparent px-2 text-xs font-mono text-[var(--ink)] focus:outline-none"
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSendWhatsApp(phoneInput);
+                    }
+                  }}
+                />
+              </div>
+              <button
+                type="button"
+                disabled={isSendingWhatsApp || !phoneInput.trim()}
+                onClick={() => handleSendWhatsApp(phoneInput)}
+                className="h-[38px] px-3.5 rounded-md text-xs font-bold cursor-pointer disabled:opacity-50 flex items-center gap-1 border-0 bg-[#25d366] text-black hover:bg-[#20ba59] transition-colors"
+              >
+                <span>{isSendingWhatsApp ? 'Sending…' : waSent ? 'Resend' : 'Send'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Email E-Invoice Quick Send Box */}
+          <div
+            className="rounded-lg p-3.5 border transition-colors"
+            style={{
+              background: emailSent ? 'var(--ok-soft)' : 'var(--sub)',
+              borderColor: emailSent ? 'var(--ok-line)' : 'var(--border2)',
+            }}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold flex items-center gap-1.5 text-[var(--ink)]">
+                <Mail size={14} className={emailSent ? 'text-[var(--ok)]' : 'text-[var(--accent)]'} />
+                <span>{emailSent ? 'Tax Invoice Sent via Store Email' : 'Email Tax Invoice & E-Bill'}</span>
+              </span>
+              {emailSent && (
+                <span className="text-[10px] font-bold uppercase text-[var(--ok)] font-mono">
+                  ✓ Dispatched
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="flex items-center flex-1 h-[38px] px-2.5 rounded-md border bg-[var(--panel)] border-[var(--border2)]">
+                <input
+                  type="email"
+                  placeholder="customer@example.com"
+                  value={emailInput}
+                  onChange={e => setEmailInput(e.target.value)}
+                  className="flex-1 bg-transparent px-1 text-xs font-sans text-[var(--ink)] focus:outline-none"
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSendEmail(emailInput);
+                    }
+                  }}
+                />
+              </div>
+              <button
+                type="button"
+                disabled={isSendingEmail || !emailInput.trim()}
+                onClick={() => handleSendEmail(emailInput)}
+                className="h-[38px] px-3.5 rounded-md text-xs font-bold cursor-pointer disabled:opacity-50 flex items-center gap-1 border-0 bg-[var(--accent)] text-white hover:opacity-90 transition-opacity"
+              >
+                <span>{isSendingEmail ? 'Sending…' : emailSent ? 'Resend' : 'Send'}</span>
+              </button>
+            </div>
           </div>
 
           <div

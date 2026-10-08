@@ -260,7 +260,7 @@ export function EmployeePerformance() {
   const isDark = theme === 'dark' || (theme === 'system' && typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches);
 
   return (
-    <div className="min-h-screen flex flex-col bg-[var(--bg)] text-[var(--ink)] antialiased select-none">
+    <div className="h-full flex flex-col bg-[var(--bg)] text-[var(--ink)] antialiased select-none overflow-hidden">
       {/* Sub-Header Toolbar */}
       <div className="min-h-[52px] px-5 py-2 bg-[var(--panel)] border-b border-[var(--border)] flex flex-wrap items-center gap-4 shrink-0 z-10">
         <div className="flex items-baseline gap-2.5">
@@ -299,7 +299,7 @@ export function EmployeePerformance() {
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 p-[14px] flex flex-col gap-[14px] overflow-y-auto">
+      <div className="flex-1 min-h-0 p-[14px] flex flex-col gap-[14px] overflow-y-auto">
         {/* KPI Summary Cards */}
         <div className="grid grid-cols-[repeat(auto-fit,minmax(190px,1fr))] gap-[14px]">
           <div className="bg-[var(--panel)] border border-[var(--border)] rounded-[10px] p-4">

@@ -205,7 +205,7 @@ export function Layout() {
       />
 
       {/* Main Content */}
-      <main className="flex-1 overflow-hidden relative min-w-0">
+      <main className="flex-1 min-h-0 overflow-hidden relative min-w-0 flex flex-col">
         <Suspense fallback={<PageLoader />}>
           <Outlet />
         </Suspense>

@@ -17,6 +17,7 @@ import { api } from '../utils/api';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useDeferredLocalStorage } from '../hooks/useDeferredLocalStorage';
 import { computeBillTotals, splitInclusiveGst } from '../lib/bill-totals';
+import { sendWhatsAppReceipt } from '../utils/whatsapp';
 import { MONO, NUM, EYEBROW, PANEL, PANEL_HEAD, FIELD, KBD, KBD_ON_FILL, inr } from '../lib/design-system';
 import { ShiftStartModal } from './shift-start-modal';
 import { ShiftClosingModal } from './shift-closing-modal';
@@ -186,6 +187,7 @@ export interface SavedBill {
   shopDetails: ShopDetails;
   customerName?: string;
   customerPhone?: string;
+  customerEmail?: string;
   paymentMode?: string;
   amountReceived?: number;
   changeAmount?: number;
@@ -479,6 +481,8 @@ export function CashierBillingAdvanced() {
     brand: '',
   });
   const [isUpdatingProduct, setIsUpdatingProduct] = useState(false);
+  const [isDeletingProduct, setIsDeletingProduct] = useState(false);
+  const [showDeleteProductConfirm, setShowDeleteProductConfirm] = useState(false);
 
   const canEditInventory = isOwner() || (hasPermission && hasPermission('access_inventory'));
 
@@ -527,6 +531,9 @@ export function CashierBillingAdvanced() {
   const [showReceipt, setShowReceipt] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showCompletion, setShowCompletion] = useState(false);
+  const [autoSentWhatsApp, setAutoSentWhatsApp] = useState(false);
+  const [autoSentEmail, setAutoSentEmail] = useState(false);
+  const [whatsappAutoSend, setWhatsappAutoSend] = useState(true);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [error, setError] = useState('');
   const [recentlyAddedCode, setRecentlyAddedCode] = useState<string | null>(null);
@@ -585,6 +592,7 @@ export function CashierBillingAdvanced() {
   });
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [customerEmail, setCustomerEmail] = useState('');
   const [currentCustomer, setCurrentCustomer] = useState<Customer | null>(null);
   const [loyaltyPointsToRedeem, setLoyaltyPointsToRedeem] = useState(0);
   const [redeemLoyalty, setRedeemLoyalty] = useState(false);
@@ -873,6 +881,9 @@ export function CashierBillingAdvanced() {
       const c = settings.chimeEnabled === 'true';
       setChimeEnabled(c);
       localStorage.setItem('chimeEnabled', String(c));
+    }
+    if (settings.whatsapp_enabled !== undefined) {
+      setWhatsappAutoSend(settings.whatsapp_enabled !== 'false');
     }
     setShopDetails({
       name: settings.shopName || 'RETAIL SUPERMARKET',
@@ -1694,10 +1705,13 @@ export function CashierBillingAdvanced() {
     setCurrentBillNumber('');
     setCustomerName('');
     setCustomerPhone('');
+    setCustomerEmail('');
     setAmountReceived('');
     setPaymentMode('cash');
     setBillLocked(false);
     setActiveReservationId(null);
+    setAutoSentWhatsApp(false);
+    setAutoSentEmail(false);
     localStorage.removeItem('draftBill');
   };
 
@@ -1837,6 +1851,9 @@ export function CashierBillingAdvanced() {
             if (existing.gstin) {
               setCustomerGstin(existing.gstin);
             }
+            if (existing.email && !customerEmail) {
+              setCustomerEmail(existing.email);
+            }
             setCurrentCustomer(mappedCustomer);
             if (!customerName) {
               setCustomerName(mappedCustomer.name);
@@ -1931,6 +1948,16 @@ export function CashierBillingAdvanced() {
     isSubmittingBillRef.current = true;
     setIsSubmittingBill(true);
 
+    // Pre-open window during user click gesture to prevent browser popup blockers on auto WhatsApp dispatch
+    let waWindow: Window | null = null;
+    if (whatsappAutoSend && customerPhone && customerPhone.replace(/\D/g, '').length >= 10) {
+      try {
+        waWindow = window.open('', '_blank');
+      } catch {
+        // popup fallback
+      }
+    }
+
     try {
       const res = await api.post<any>('/bills', {
         id: billNumber,
@@ -1938,6 +1965,7 @@ export function CashierBillingAdvanced() {
         date: new Date().toISOString(),
         customer_phone: customerPhone || null,
         customer_name: customerName || null,
+        customer_email: customerEmail || null,
         subtotal,
         gst_amount: totalGst,
         cgst,
@@ -1976,6 +2004,7 @@ export function CashierBillingAdvanced() {
         shopDetails: typeof res.bill.shop_details === 'string' ? JSON.parse(res.bill.shop_details) : (res.bill.shop_details || shopDetails),
         customerName: res.bill.customer_name || undefined,
         customerPhone: res.bill.customer_phone || undefined,
+        customerEmail: res.bill.customer_email || customerEmail || undefined,
         paymentMode: res.bill.payment_mode,
         amountReceived: res.bill.amount_received || undefined,
         changeAmount: res.bill.change_amount || undefined,
@@ -2032,12 +2061,45 @@ export function CashierBillingAdvanced() {
       setShowCompletion(true);
       setIsMobileShiftActive(true);
 
-      // NOTE: there used to be a toast here claiming "Bill receipt sent to
-      // <phone> — Message delivery confirmed". Nothing in this codebase sends
-      // SMS or WhatsApp, so that confirmation was false. Removed rather than
-      // reworded: a cashier who reads it will tell the customer their receipt
-      // is on its way. Wire up a real messaging provider before reinstating it.
+      // Automatically dispatch digital bill via WhatsApp from shop WhatsApp
+      if (whatsappAutoSend && customerPhone && customerPhone.replace(/\D/g, '').length >= 10) {
+        try {
+          await sendWhatsAppReceipt({
+            shopDetails,
+            billNumber,
+            items: billItems.map(i => ({
+              name: i.name,
+              quantity: i.quantity,
+              price: i.price,
+              uom: i.uom,
+            })),
+            total: finalTotal,
+            subtotal,
+            gstAmount: totalGst,
+            customerName,
+            customerPhone,
+            cashierName,
+            paymentMode,
+            changeAmount: changeAmount > 0 ? Math.max(0, amountReceivedNum - finalTotal) : undefined,
+          }, waWindow);
+          setAutoSentWhatsApp(true);
+        } catch (waErr: any) {
+          console.warn('Automatic WhatsApp dispatch error:', waErr);
+          setAutoSentWhatsApp(false);
+        }
+      } else {
+        setAutoSentWhatsApp(false);
+      }
+
+      if (customerEmail && customerEmail.includes('@')) {
+        setAutoSentEmail(true);
+      } else {
+        setAutoSentEmail(false);
+      }
     } catch (e: any) {
+      if (waWindow && !waWindow.closed) {
+        waWindow.close();
+      }
       console.error('Checkout failed:', e);
       // Play warning buzz
       playBeep('warning');
@@ -2287,6 +2349,59 @@ export function CashierBillingAdvanced() {
     }
   };
 
+  const handleDeleteEditedProduct = async () => {
+    if (!productToEdit) return;
+    const targetId = productToEdit.id || productToEdit.code;
+    setIsDeletingProduct(true);
+    try {
+      await api.delete(`/products/${encodeURIComponent(targetId)}`);
+      setProducts(prev => prev.filter(p => p.id !== targetId && p.code !== productToEdit.code));
+      setBillItems(prev => prev.filter(i => i.code !== productToEdit.code && (!i.id || i.id !== targetId)));
+
+      try {
+        const savedListStr = localStorage.getItem('nexusflowTablesList');
+        if (savedListStr) {
+          const list = JSON.parse(savedListStr);
+          let hasChanged = false;
+          const updatedList = list.map((t: any) => {
+            if (t.items && Array.isArray(t.items)) {
+              const remaining = t.items.filter((item: any) => item.code !== productToEdit.code && item.id !== targetId);
+              if (remaining.length !== t.items.length) {
+                hasChanged = true;
+                const newTotal = splitInclusiveGst(remaining, gstEnabled).subtotal;
+                return { ...t, items: remaining, total: newTotal };
+              }
+            }
+            return t;
+          });
+          if (hasChanged) {
+            localStorage.setItem('nexusflowTablesList', JSON.stringify(updatedList));
+            window.dispatchEvent(new CustomEvent('nexusflow-tables-updated'));
+          }
+        }
+      } catch (e) {
+        console.error('Failed to sync held table items with deleted product:', e);
+      }
+
+      setShowDeleteProductConfirm(false);
+      setShowEditProductModal(false);
+      setProductToEdit(null);
+      toast.success(`Product "${productToEdit.name}" deleted successfully`);
+    } catch (err: any) {
+      console.error('Failed to delete product:', err);
+      const errMsg = err?.message || 'Failed to delete product';
+      if (errMsg.includes('Permission required') || errMsg.includes('403')) {
+        toast.error('Permission Denied', {
+          description: 'This cashier account does not have inventory privileges to delete products.'
+        });
+      } else {
+        toast.error(`Delete failed: ${errMsg}`);
+      }
+    } finally {
+      setIsDeletingProduct(false);
+    }
+  };
+
   const handleCloseReceipt = () => {
     setShowReceipt(false);
     if (!billLocked) {
@@ -2307,6 +2422,7 @@ export function CashierBillingAdvanced() {
     setCurrentBillNumber(bill.billNumber);
     setCustomerName(bill.customerName || '');
     setCustomerPhone(bill.customerPhone || '');
+    setCustomerEmail(bill.customerEmail || '');
     setPaymentMode(bill.paymentMode as any || 'cash');
     setBillLocked(true);
     setShowReceipt(true);
@@ -2961,6 +3077,14 @@ export function CashierBillingAdvanced() {
               placeholder="10-digit mobile number..."
               maxLength={10}
               style={{ ...FIELD, ...NUM, width: '100%', height: 44, padding: '0 12px', fontSize: 14 }}
+            />
+
+            <input 
+              type="email"
+              value={customerEmail}
+              onChange={(e) => setCustomerEmail(e.target.value)}
+              placeholder="Email for digital tax invoice (optional)..."
+              style={{ ...FIELD, width: '100%', height: 44, padding: '0 12px', fontSize: 14 }}
             />
 
             {customerPhone && validatePhone(customerPhone) && !currentCustomer && (
@@ -3968,6 +4092,13 @@ export function CashierBillingAdvanced() {
                       inputMode="numeric"
                       style={{ ...FIELD, ...NUM, height: 42, padding: '0 12px', fontSize: 14 }}
                     />
+                    <input
+                      type="email"
+                      value={customerEmail}
+                      onChange={(e) => setCustomerEmail(e.target.value)}
+                      placeholder="Email — digital tax invoice (optional)"
+                      style={{ ...FIELD, height: 42, padding: '0 12px', fontSize: 14 }}
+                    />
 
                     {currentCustomer && (() => {
                       const tier = getLoyaltyTier(currentCustomer.totalSpent);
@@ -4190,6 +4321,16 @@ export function CashierBillingAdvanced() {
           total={roundedTotal}
           paymentMode={paymentMode}
           changeAmount={changeAmount}
+          customerPhone={customerPhone}
+          customerName={customerName}
+          customerEmail={customerEmail}
+          cashierName={cashierName}
+          shopDetails={shopDetails}
+          items={billItems}
+          subtotal={subtotal}
+          gstAmount={totalGst}
+          autoSentWhatsApp={autoSentWhatsApp}
+          autoSentEmail={autoSentEmail}
           onClose={() => setShowCompletion(false)}
           onNewBill={handleNewBill}
         />
@@ -4708,14 +4849,27 @@ export function CashierBillingAdvanced() {
                 </div>
               </div>
 
-              <div className="flex gap-2.5 pt-3">
+              <div className="flex gap-2.5 pt-3 items-center">
+                {productToEdit && (
+                  <button
+                    type="button"
+                    disabled={isUpdatingProduct || isDeletingProduct}
+                    onClick={() => setShowDeleteProductConfirm(true)}
+                    className="h-11 px-3.5 rounded-md text-xs font-semibold cursor-pointer disabled:opacity-50 flex items-center gap-1.5 transition-colors"
+                    style={{ background: 'var(--danger-soft)', border: '1px solid rgba(220, 38, 38, 0.25)', color: 'var(--danger)' }}
+                    title="Delete product from catalogue"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>Delete</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
                     setShowEditProductModal(false);
                     setProductToEdit(null);
                   }}
-                  disabled={isUpdatingProduct}
+                  disabled={isUpdatingProduct || isDeletingProduct}
                   className="flex-1 h-11 rounded-md text-xs font-semibold cursor-pointer disabled:opacity-50"
                   style={{ background: 'var(--sub)', border: '1px solid var(--border2)', color: 'var(--ink2)' }}
                 >
@@ -4723,7 +4877,7 @@ export function CashierBillingAdvanced() {
                 </button>
                 <button
                   type="submit"
-                  disabled={isUpdatingProduct}
+                  disabled={isUpdatingProduct || isDeletingProduct}
                   className="flex-1 h-11 rounded-md text-xs font-bold cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
                   style={{ background: 'var(--ink)', color: 'var(--panel)', border: 0 }}
                 >
@@ -4732,6 +4886,65 @@ export function CashierBillingAdvanced() {
               </div>
             </form>
           </motion.div>
+        </div>
+      )}
+
+      {/* Delete Product Confirmation Modal */}
+      {showDeleteProductConfirm && productToEdit && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-[2px] flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => {
+            if (!isDeletingProduct) setShowDeleteProductConfirm(false);
+          }}
+        >
+          <div
+            className="w-full max-w-[420px] bg-[var(--panel)] border border-[var(--border2)] rounded-[12px] shadow-2xl p-5"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-full bg-[var(--danger-soft)] text-[var(--danger)] flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-[16px] font-bold text-[var(--ink)]">Delete Product</h3>
+                <p className="text-[12px] text-[var(--ink3)]" style={{ fontFamily: MONO }}>
+                  SKU: {productToEdit.code}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-[13px] text-[var(--ink2)] leading-relaxed mb-4">
+              Are you sure you want to delete <span className="font-semibold text-[var(--ink)]">{productToEdit.name}</span>? This product will be removed from your store inventory catalogue and billing search.
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                disabled={isDeletingProduct}
+                onClick={() => setShowDeleteProductConfirm(false)}
+                className="h-[38px] px-3.5 rounded-[7px] border border-[var(--border2)] bg-[var(--panel)] text-[var(--ink2)] hover:text-[var(--ink)] text-[12.5px] font-semibold cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingProduct}
+                onClick={handleDeleteEditedProduct}
+                className="h-[38px] px-4 rounded-[7px] bg-[var(--danger)] text-white hover:bg-[var(--danger)]/90 text-[12.5px] font-bold cursor-pointer disabled:opacity-50 flex items-center gap-2"
+              >
+                {isDeletingProduct ? (
+                  <>
+                    <span className="w-3.5 h-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <span>Delete Product</span>
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

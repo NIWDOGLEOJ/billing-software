@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { db } from '../db';
 import { AuthRequest, authenticateToken } from '../middleware/auth';
+import { emailManager } from '../services/emailManager';
 
 const router = Router();
 
@@ -29,6 +30,7 @@ router.post('/', authenticateToken, (req: AuthRequest, res: Response) => {
     date,
     customer_phone,
     customer_name,
+    customer_email,
     subtotal,
     gst_amount,
     cgst,
@@ -110,11 +112,11 @@ router.post('/', authenticateToken, (req: AuthRequest, res: Response) => {
     db.prepare(`
       INSERT INTO bills (
         id, bill_number, date, cashier_id, cashier_name,
-        customer_phone, customer_name, subtotal, gst_amount, cgst, sgst, igst,
+        customer_phone, customer_name, customer_email, subtotal, gst_amount, cgst, sgst, igst,
         total, payment_mode, amount_received, change_amount, rounding_adjustment,
         points_earned, points_redeemed, items, shop_details, gst_enabled, gst_rate,
         customer_gstin, pricing_tier, coupon_code, coupon_discount
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       bill_number,
@@ -123,6 +125,7 @@ router.post('/', authenticateToken, (req: AuthRequest, res: Response) => {
       req.user?.name || null,
       customer_phone || null,
       customer_name || null,
+      customer_email || null,
       Number(subtotal || 0),
       Number(gst_amount || 0),
       Number(cgst || 0),
@@ -202,7 +205,7 @@ router.post('/', authenticateToken, (req: AuthRequest, res: Response) => {
         }
         db.prepare(`
           UPDATE customers
-          SET name = ?, loyalty_points = ?, total_spent = ?, visit_count = ?, last_visit = ?, outstanding_balance = ?, gstin = COALESCE(?, gstin)
+          SET name = ?, loyalty_points = ?, total_spent = ?, visit_count = ?, last_visit = ?, outstanding_balance = ?, gstin = COALESCE(?, gstin), email = COALESCE(?, email)
           WHERE phone = ?
         `).run(
           customer_name || existingCust.name,
@@ -212,13 +215,14 @@ router.post('/', authenticateToken, (req: AuthRequest, res: Response) => {
           date || new Date().toISOString(),
           newOutstanding,
           customer_gstin || null,
+          customer_email || null,
           customer_phone
         );
       } else {
         const newOutstanding = payment_mode === 'ledger' ? Number(total) : 0;
         db.prepare(`
-          INSERT INTO customers (phone, name, loyalty_points, total_spent, visit_count, last_visit, outstanding_balance, gstin)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO customers (phone, name, loyalty_points, total_spent, visit_count, last_visit, outstanding_balance, gstin, email)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           customer_phone,
           customer_name || 'Walk-in Customer',
@@ -227,7 +231,8 @@ router.post('/', authenticateToken, (req: AuthRequest, res: Response) => {
           1,
           date || new Date().toISOString(),
           newOutstanding,
-          customer_gstin || null
+          customer_gstin || null,
+          customer_email || null
         );
       }
     }
@@ -247,6 +252,30 @@ router.post('/', authenticateToken, (req: AuthRequest, res: Response) => {
       createdBill.items = JSON.parse(createdBill.items || '[]');
       createdBill.shop_details = createdBill.shop_details ? JSON.parse(createdBill.shop_details) : null;
       createdBill.gst_enabled = Boolean(createdBill.gst_enabled);
+    }
+
+    // Background automated dispatch of digital tax invoice via Email
+    const targetCustomerEmail = (customer_email || createdBill?.customer_email || '').trim().toLowerCase();
+    if (targetCustomerEmail && targetCustomerEmail.includes('@')) {
+      emailManager.sendBillEmail({
+        toEmail: targetCustomerEmail,
+        customerName: createdBill?.customer_name || undefined,
+        customerPhone: createdBill?.customer_phone || undefined,
+        billNumber: createdBill?.bill_number || bill_number,
+        items: createdBill?.items || items || [],
+        total: Number(createdBill?.total || total || 0),
+        subtotal: createdBill?.subtotal !== undefined ? Number(createdBill.subtotal) : undefined,
+        gstAmount: createdBill?.gst_amount !== undefined ? Number(createdBill.gst_amount) : undefined,
+        cgst: createdBill?.cgst !== undefined ? Number(createdBill.cgst) : undefined,
+        sgst: createdBill?.sgst !== undefined ? Number(createdBill.sgst) : undefined,
+        igst: createdBill?.igst !== undefined ? Number(createdBill.igst) : undefined,
+        paymentMode: createdBill?.payment_mode || payment_mode,
+        changeAmount: createdBill?.change_amount !== undefined ? Number(createdBill.change_amount) : undefined,
+        dateTime: createdBill?.date || date,
+        shopDetails: createdBill?.shop_details || shop_details,
+      }).catch(err => {
+        console.warn('⚠️ [Email] Background bill dispatch failed:', err.message);
+      });
     }
 
     // Broadcast WS update for stock and bills to all connected LAN clients

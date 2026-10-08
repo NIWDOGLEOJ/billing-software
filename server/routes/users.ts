@@ -21,19 +21,12 @@ router.get('/', authenticateToken, requireOwner, (req, res) => {
 });
 
 // POST /api/users (requires owner/co-owner)
-router.post('/', authenticateToken, requireOwner, (req: AuthRequest, res: Response) => {
+router.post('/', authenticateToken, requireOwner, (req, res) => {
   const { id, username, email, name, role, password, permissions, phone } = req.body;
 
-  // Only the primary owner can create an owner account
-  if (role === 'owner' && req.user?.role !== 'owner') {
-    return res.status(403).json({ error: 'Only the store owner can create an owner account' });
+  if (!id || !username || !name || !role || !password) {
+    return res.status(400).json({ error: 'Missing required fields (id, username, name, role, password)' });
   }
-
-  if (!username || !name || !role || !password) {
-    return res.status(400).json({ error: 'Missing required fields (username, name, role, password)' });
-  }
-
-  const finalId = id || `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
   try {
     const existing = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
@@ -44,32 +37,22 @@ router.post('/', authenticateToken, requireOwner, (req: AuthRequest, res: Respon
     const passwordHash = bcrypt.hashSync(password, 10);
     const now = new Date().toISOString();
 
-    // Default full permissions for co-owners if not explicitly specified
-    let userPermissions = permissions || [];
-    if (role === 'co-owner' && (!permissions || permissions.length === 0)) {
-      userPermissions = [
-        'access_billing','edit_product_price','delete_bill_items',
-        'apply_discounts','view_analytics','access_inventory',
-        'view_transaction_history','generate_reports','access_settings','manage_employees'
-      ];
-    }
-
     db.prepare(`
       INSERT INTO users (id, username, email, name, role, password_hash, permissions, phone, is_active, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
     `).run(
-      finalId,
+      id,
       username,
       email || null,
       name,
       role,
       passwordHash,
-      JSON.stringify(userPermissions),
+      JSON.stringify(permissions || []),
       phone || null,
       now
     );
 
-    const created = db.prepare('SELECT id, username, email, name, role, permissions, phone, is_active, created_at FROM users WHERE id = ?').get(finalId) as any;
+    const created = db.prepare('SELECT id, username, email, name, role, permissions, phone, is_active, created_at FROM users WHERE id = ?').get(id) as any;
     created.permissions = JSON.parse(created.permissions || '[]');
     created.is_active = Boolean(created.is_active);
 
@@ -80,7 +63,7 @@ router.post('/', authenticateToken, requireOwner, (req: AuthRequest, res: Respon
 });
 
 // PUT /api/users/:id (requires owner/co-owner)
-router.put('/:id', authenticateToken, requireOwner, (req: AuthRequest, res: Response) => {
+router.put('/:id', authenticateToken, requireOwner, (req, res) => {
   const { id } = req.params;
   const { email, name, role, permissions, phone, is_active } = req.body;
 
@@ -90,49 +73,19 @@ router.put('/:id', authenticateToken, requireOwner, (req: AuthRequest, res: Resp
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Security guard: Only the primary store owner can edit an owner account
-    if (user.role === 'owner') {
-      if (req.user?.role !== 'owner') {
-        return res.status(403).json({ error: 'Only the store owner can edit the owner profile' });
-      }
-      if (role && role !== 'owner') {
-        return res.status(400).json({ error: 'Cannot change the primary owner role' });
-      }
-      if (is_active === false) {
-        return res.status(400).json({ error: 'Cannot deactivate the primary owner' });
-      }
-    }
-
-    // Only the primary owner can promote a user to owner
-    if (role === 'owner' && user.role !== 'owner' && req.user?.role !== 'owner') {
-      return res.status(403).json({ error: 'Only an owner can grant owner privileges' });
-    }
-
-    const newName = name !== undefined ? name.trim() : user.name;
-    const newRole = role !== undefined ? role : user.role;
-    const newEmail = email !== undefined ? email : user.email;
-    const newPhone = phone !== undefined ? phone : user.phone;
-    const newActive = is_active !== undefined ? (is_active ? 1 : 0) : user.is_active;
-    const newPermissions = permissions !== undefined ? JSON.stringify(permissions) : user.permissions;
-
     db.prepare(`
       UPDATE users
       SET email = ?, name = ?, role = ?, permissions = ?, phone = ?, is_active = ?
       WHERE id = ?
     `).run(
-      newEmail,
-      newName,
-      newRole,
-      newPermissions,
-      newPhone,
-      newActive,
+      email !== undefined ? email : user.email,
+      name !== undefined ? name : user.name,
+      role !== undefined ? role : user.role,
+      permissions !== undefined ? JSON.stringify(permissions) : user.permissions,
+      phone !== undefined ? phone : user.phone,
+      is_active !== undefined ? (is_active ? 1 : 0) : user.is_active,
       id
     );
-
-    // If owner name was updated by the owner, sync to settings.owner_name
-    if (user.role === 'owner' && name !== undefined && req.user?.role === 'owner') {
-      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('owner_name', ?)").run(newName);
-    }
 
     const updated = db.prepare('SELECT id, username, email, name, role, permissions, phone, is_active, created_at FROM users WHERE id = ?').get(id) as any;
     updated.permissions = JSON.parse(updated.permissions || '[]');
@@ -156,12 +109,6 @@ router.put('/:id/password', authenticateToken, (req: AuthRequest, res: Response)
   // Permission guard: Only the user themselves OR an owner/co-owner can change this password
   if (req.user?.id !== id && req.user?.role !== 'owner' && req.user?.role !== 'co-owner') {
     return res.status(403).json({ error: 'Permission denied to modify password' });
-  }
-
-  // Co-owners cannot change the primary owner's password
-  const targetUser = db.prepare('SELECT role FROM users WHERE id = ?').get(id) as any;
-  if (targetUser && targetUser.role === 'owner' && req.user?.id !== id && req.user?.role !== 'owner') {
-    return res.status(403).json({ error: 'Only the store owner can modify the owner password' });
   }
 
   try {
@@ -188,14 +135,12 @@ router.delete('/:id', authenticateToken, requireOwner, (req: AuthRequest, res: R
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Owner can never be deleted
-    if (user.role === 'owner') {
-      return res.status(403).json({ error: 'Primary store owner cannot be deleted' });
+    if (user.username === 'developer' || user.id === 'dev_1') {
+      return res.status(403).json({ error: 'The developer system account cannot be deleted' });
     }
 
-    // Only the primary owner can revoke/delete a co-owner
-    if (user.role === 'co-owner' && req.user?.role !== 'owner') {
-      return res.status(403).json({ error: 'Only the store owner can revoke a co-owner' });
+    if (req.user?.id === id) {
+      return res.status(400).json({ error: 'You cannot delete your own active account' });
     }
 
     db.prepare('DELETE FROM users WHERE id = ?').run(id);

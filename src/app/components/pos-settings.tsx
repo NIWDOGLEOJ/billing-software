@@ -5,20 +5,41 @@ import { useTheme } from '../contexts/theme-context';
 import { api } from '../utils/api';
 import { toast } from 'sonner';
 import { saveStoredShopDetails } from '../lib/shop-details';
+import { useBetaFeatures } from '../lib/beta-features';
 import {
-  Lock,
-  Copy,
-  Check,
-  UserPlus,
-  Mail,
-  Link as LinkIcon,
-  Trash2,
-  X,
+  sanitizeWhatsAppPhone,
+  formatWhatsAppReceipt,
+  generateWhatsAppLink,
+  openWhatsAppLink,
+  getWhatsAppConnectionStatus,
+  connectWhatsAppSession,
+  disconnectWhatsAppSession,
+  testWhatsAppSending,
+} from '../utils/whatsapp';
+import { useWebSocket } from '../hooks/useWebSocket';
+import {
+  QrCode,
+  Smartphone,
+  CheckCircle2,
   RefreshCw,
+  LogOut,
+  Send,
   AlertCircle,
-  Shield,
-  Clock
+  ExternalLink,
+  ShieldCheck,
+  Check,
+  Mail,
+  Server,
+  Lock,
+  Sparkles,
 } from 'lucide-react';
+import {
+  EmailConfig,
+  getEmailConfig,
+  saveEmailConfig,
+  verifyEmailConnection,
+  testEmailSending,
+} from '../utils/email';
 
 const MONO = "'IBM Plex Mono', ui-monospace, monospace";
 
@@ -45,7 +66,10 @@ export type SettingsPanelKey =
   | 'printer'
   | 'theme'
   | 'data'
-  | 'sound';
+  | 'sound'
+  | 'beta'
+  | 'whatsapp'
+  | 'email';
 
 interface POSSettingsProps {
   onClose?: () => void;
@@ -80,7 +104,8 @@ const GROUPS: [string, SettingsPanelKey[]][] = [
   ['Store', ['shop', 'workspace', 'warehouses']],
   ['Money', ['gst', 'loyalty', 'restock', 'zreports']],
   ['People', ['owners', 'password']],
-  ['Device', ['printer', 'theme', 'data', 'sound']]
+  ['Device', ['printer', 'theme', 'data', 'sound', 'whatsapp', 'email']],
+  ['Beta', ['beta']]
 ];
 
 const PANEL_META: { [key in SettingsPanelKey]: { group: string; title: string; desc: string; label: string } } = {
@@ -96,7 +121,10 @@ const PANEL_META: { [key in SettingsPanelKey]: { group: string; title: string; d
   printer: { group: 'Device', title: 'Printer & drawer', desc: 'Receipt printer, paper size and the cash drawer kick.', label: 'Printer & drawer' },
   theme: { group: 'Device', title: 'Theme & colours', desc: 'Appearance, accent colour and surface weight for this terminal — or pushed to all of them.', label: 'Theme & colours' },
   data: { group: 'Device', title: 'Data management', desc: 'Exports, backups and how long archived bills are kept.', label: 'Data management' },
-  sound: { group: 'Device', title: 'Sound & diagnostics', desc: 'Scanner beep, alert volume and the LAN connection tests for this terminal.', label: 'Sound & diagnostics' }
+  sound: { group: 'Device', title: 'Sound & diagnostics', desc: 'Scanner beep, alert volume and the LAN connection tests for this terminal.', label: 'Sound & diagnostics' },
+  whatsapp: { group: 'Device', title: 'WhatsApp Web Login', desc: 'Connect shop WhatsApp via Web QR to automatically send digital bills and receipts to customers.', label: 'WhatsApp' },
+  email: { group: 'Device', title: 'Email & SMTP Invoices', desc: 'Configure outgoing SMTP mail server to automatically deliver branded digital GST tax invoices and receipts to customers.', label: 'Email / SMTP' },
+  beta: { group: 'Beta', title: 'Beta features', desc: 'Enable or disable experimental and modular features across the terminal.', label: 'Beta' }
 };
 
 const SECTORS = [
@@ -216,11 +244,27 @@ function SettingsModalWrapper({ children, onClose }: { children: React.ReactNode
 
 export function POSSettings({ onClose, isModal = false, defaultPanel = 'shop' }: POSSettingsProps) {
   const navigate = useNavigate();
-  const { user, isPrimaryOwner } = useAuth();
+  const { user } = useAuth();
   const { theme, setTheme, accentColor, setAccentColor } = useTheme();
+  const {
+    gstLedger,
+    warehouses: warehousesEnabled,
+    loyalty: loyaltyEnabled,
+    advancedSmtp,
+    setFeature,
+  } = useBetaFeatures();
 
   const [panel, setPanel] = useState<SettingsPanelKey>(defaultPanel);
   const [toastMessage, setToastMessage] = useState('');
+
+  // Fallback if current panel gets disabled
+  useEffect(() => {
+    if (panel === 'warehouses' && !warehousesEnabled) {
+      setPanel('shop');
+    } else if (panel === 'loyalty' && !loyaltyEnabled) {
+      setPanel('gst');
+    }
+  }, [panel, warehousesEnabled, loyaltyEnabled]);
 
   // Close full-page settings on Escape (returns to Register)
   useEffect(() => {
@@ -254,35 +298,11 @@ export function POSSettings({ onClose, isModal = false, defaultPanel = 'shop' }:
 
   // Shop Details
   const [shopName, setShopName] = useState('J MART');
-  const [ownerName, setOwnerName] = useState('Store Owner');
   const [gstin, setGstin] = useState('33AAAAA0000A1Z5');
   const [shopPhone, setShopPhone] = useState('+91 77088 00220');
   const [shopState, setShopState] = useState('Tamil Nadu');
   const [shopAddr, setShopAddr] = useState('Rayala Nagar Extension, near Koilpillai School\nRamapuram, Chennai 600089');
   const [footer, setFooter] = useState('Thank you. Goods once sold are not returnable.');
-
-  // Co-Owners & Invites State
-  const [ownersList, setOwnersList] = useState<any[]>([]);
-  const [invitesList, setInvitesList] = useState<any[]>([]);
-  const [isOwnersLoading, setIsOwnersLoading] = useState(false);
-
-  // Invite Modal State
-  const [inviteModalOpen, setInviteModalOpen] = useState(false);
-  const [inviteName, setInviteName] = useState('');
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [invitePhone, setInvitePhone] = useState('');
-  const [inviteDays, setInviteDays] = useState(7);
-  const [generatedInvite, setGeneratedInvite] = useState<{ token: string; url: string; expires_at: string } | null>(null);
-  const [copiedToken, setCopiedToken] = useState(false);
-  const [copiedUrl, setCopiedUrl] = useState(false);
-
-  // Direct Add Co-Owner Modal State
-  const [directAddOpen, setDirectAddOpen] = useState(false);
-  const [directName, setDirectName] = useState('');
-  const [directUsername, setDirectUsername] = useState('');
-  const [directPassword, setDirectPassword] = useState('');
-  const [directPhone, setDirectPhone] = useState('');
-  const [directEmail, setDirectEmail] = useState('');
 
   // Workspace Profile
   const [activeSector, setActiveSector] = useState('retail');
@@ -328,11 +348,111 @@ export function POSSettings({ onClose, isModal = false, defaultPanel = 'shop' }:
   const [pingMs, setPingMs] = useState<number | null>(4);
   const [retention, setRetention] = useState('540 days');
 
+  // WhatsApp settings (Shop Linked Device Web QR & Automated Dispatch)
+  const [waEnabled, setWaEnabled] = useState(true);
+  const [waAutoPrompt, setWaAutoPrompt] = useState(true);
+  const [waStatus, setWaStatus] = useState<'disconnected' | 'connecting' | 'qr_ready' | 'connected'>('disconnected');
+  const [waQrDataUrl, setWaQrDataUrl] = useState<string | null>(null);
+  const [waConnectedNumber, setWaConnectedNumber] = useState<string | null>(null);
+  const [waConnectedName, setWaConnectedName] = useState<string | null>(null);
+  const [waConnectedAt, setWaConnectedAt] = useState<string | null>(null);
+  const [waLastError, setWaLastError] = useState<string | null>(null);
+  const [waLoadingAction, setWaLoadingAction] = useState<string | null>(null);
+  const [waTestPhone, setWaTestPhone] = useState('');
+  const [waTestResult, setWaTestResult] = useState<{ success: boolean; message: string; sampleLink?: string } | null>(null);
+
+  // Email & SMTP settings (Store Tax Invoices & Digital Receipts)
+  const [emailConfig, setEmailConfig] = useState<EmailConfig>({
+    enabled: true,
+    autoSend: true,
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false,
+    user: '',
+    pass: '',
+    senderName: '',
+    senderEmail: '',
+    subjectTemplate: 'Tax Invoice #{billNumber} - {shopName}',
+  });
+  const [emailLoading, setEmailLoading] = useState(false);
+  const [emailVerifying, setEmailVerifying] = useState(false);
+  const [emailTesting, setEmailTesting] = useState(false);
+  const [emailTestTarget, setEmailTestTarget] = useState('');
+  const [emailVerifyResult, setEmailVerifyResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [emailTestResult, setEmailTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [selectedEmailPreset, setSelectedEmailPreset] = useState<'gmail' | 'outlook' | 'zoho' | 'custom'>('gmail');
+
   const flash = useCallback((msg: string) => {
     setToastMessage(msg);
     toast(msg);
     setTimeout(() => setToastMessage(''), 2200);
   }, []);
+
+  // Real-time WebSocket listener for WhatsApp Web status changes
+  useWebSocket({
+    WHATSAPP_STATUS_CHANGED: (data: any) => {
+      if (data) {
+        setWaStatus(data.status || 'disconnected');
+        setWaQrDataUrl(data.qrDataUrl || null);
+        setWaConnectedNumber(data.connectedNumber || null);
+        setWaConnectedName(data.connectedName || null);
+        setWaConnectedAt(data.connectedAt || null);
+        setWaLastError(data.lastError || null);
+      }
+    },
+  });
+
+  const fetchWaStatus = useCallback(async () => {
+    try {
+      const res = await getWhatsAppConnectionStatus();
+      if (res) {
+        setWaStatus(res.status);
+        setWaQrDataUrl(res.qrDataUrl);
+        setWaConnectedNumber(res.connectedNumber);
+        setWaConnectedName(res.connectedName);
+        setWaConnectedAt(res.connectedAt);
+        setWaLastError(res.lastError);
+        if (res.enabled !== undefined) setWaEnabled(res.enabled);
+        if (res.autoPrompt !== undefined) setWaAutoPrompt(res.autoPrompt);
+      }
+    } catch (e) {
+      console.error('Failed to fetch WhatsApp status:', e);
+    }
+  }, []);
+
+  const fetchEmailConfig = useCallback(async () => {
+    try {
+      setEmailLoading(true);
+      const res = await getEmailConfig();
+      if (res) {
+        setEmailConfig(res);
+        const hostLower = (res.host || '').toLowerCase();
+        if (hostLower.includes('gmail')) setSelectedEmailPreset('gmail');
+        else if (hostLower.includes('office365') || hostLower.includes('outlook')) setSelectedEmailPreset('outlook');
+        else if (hostLower.includes('zoho')) setSelectedEmailPreset('zoho');
+        else setSelectedEmailPreset('custom');
+      }
+    } catch (err: any) {
+      console.error('Failed to fetch email settings:', err);
+    } finally {
+      setEmailLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (panel === 'whatsapp') {
+      fetchWaStatus();
+      // Poll every 1.5s while on WhatsApp panel so QR code renders immediately
+      // and phone scan triggers instant transition to connected state
+      const interval = setInterval(() => {
+        fetchWaStatus();
+      }, 1500);
+      return () => clearInterval(interval);
+    }
+    if (panel === 'email') {
+      fetchEmailConfig();
+    }
+  }, [panel, fetchWaStatus, fetchEmailConfig]);
 
   // Load settings from backend
   useEffect(() => {
@@ -346,11 +466,6 @@ export function POSSettings({ onClose, isModal = false, defaultPanel = 'shop' }:
         if (settingsRes.status === 'fulfilled' && settingsRes.value) {
           const s = settingsRes.value;
           if (s.shop_name) setShopName(s.shop_name);
-          if (s.owner_name) {
-            setOwnerName(s.owner_name);
-          } else if (user?.role === 'owner' && user.name) {
-            setOwnerName(user.name);
-          }
           if (s.gst_number) setGstin(s.gst_number);
           if (s.counter_phone) setShopPhone(s.counter_phone);
           if (s.shop_address) setShopAddr(s.shop_address);
@@ -360,6 +475,9 @@ export function POSSettings({ onClose, isModal = false, defaultPanel = 'shop' }:
           if (s.point_value) setPointValue(s.point_value);
           if (s.paper_width) setPaper(s.paper_width as any);
           if (s.active_sector) setActiveSector(s.active_sector);
+
+          if (s.whatsapp_enabled !== undefined) setWaEnabled(s.whatsapp_enabled !== 'false');
+          if (s.whatsapp_auto_prompt !== undefined) setWaAutoPrompt(s.whatsapp_auto_prompt === 'true');
         }
 
         if (ipRes.status === 'fulfilled' && ipRes.value?.ip) {
@@ -371,138 +489,23 @@ export function POSSettings({ onClose, isModal = false, defaultPanel = 'shop' }:
     };
 
     fetchSettings();
-  }, [user]);
+  }, []);
 
   const toggleFlag = (key: keyof typeof flags) => {
     setFlags(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  // Co-Owners & Invites fetcher
-  const loadCoOwnersAndInvites = useCallback(async () => {
-    setIsOwnersLoading(true);
-    try {
-      const [usersRes, invitesRes] = await Promise.allSettled([
-        api.get<any[]>('/users'),
-        isPrimaryOwner() ? api.get<any[]>('/invites') : Promise.resolve([])
-      ]);
-
-      if (usersRes.status === 'fulfilled' && Array.isArray(usersRes.value)) {
-        const filtered = usersRes.value.filter(u => u.role === 'owner' || u.role === 'co-owner');
-        setOwnersList(filtered);
-        const ownerUser = usersRes.value.find(u => u.role === 'owner');
-        if (ownerUser && ownerUser.name) {
-          setOwnerName(ownerUser.name);
-        }
-      }
-      if (invitesRes.status === 'fulfilled' && Array.isArray(invitesRes.value)) {
-        setInvitesList(invitesRes.value);
-      }
-    } catch (err: any) {
-      console.error('Failed to load co-owners or invites:', err);
-    } finally {
-      setIsOwnersLoading(false);
-    }
-  }, [isPrimaryOwner]);
-
-  useEffect(() => {
-    if (panel === 'owners') {
-      loadCoOwnersAndInvites();
-    }
-  }, [panel, loadCoOwnersAndInvites]);
-
-  const handleCreateInvite = async () => {
-    try {
-      const res = await api.post<any>('/invites', {
-        name: inviteName.trim(),
-        email: inviteEmail.trim(),
-        phone: invitePhone.trim(),
-        expiresInDays: Number(inviteDays) || 7
-      });
-      const origin = typeof window !== 'undefined' ? window.location.origin : '';
-      const fullUrl = `${origin}/invite?token=${res.token}`;
-      setGeneratedInvite({
-        token: res.token,
-        url: fullUrl,
-        expires_at: res.expires_at
-      });
-      flash('Co-owner invite created');
-      loadCoOwnersAndInvites();
-    } catch (err: any) {
-      flash(err?.message || 'Failed to create invite');
-    }
-  };
-
-  const handleRevokeInvite = async (id: string) => {
-    try {
-      await api.delete(`/invites/${id}`);
-      flash('Invite revoked');
-      loadCoOwnersAndInvites();
-    } catch (err: any) {
-      flash(err?.message || 'Failed to revoke invite');
-    }
-  };
-
-  const handleDirectAddCoOwner = async () => {
-    if (!directName.trim() || !directUsername.trim() || !directPassword.trim()) {
-      flash('Name, username, and password are required');
-      return;
-    }
-    if (directPassword.length < 8) {
-      flash('Password must be at least 8 characters long');
-      return;
-    }
-    try {
-      await api.post('/users', {
-        id: `usr_${Date.now()}`,
-        username: directUsername.trim().toLowerCase(),
-        name: directName.trim(),
-        password: directPassword.trim(),
-        phone: directPhone.trim() || null,
-        email: directEmail.trim() || null,
-        role: 'co-owner'
-      });
-      flash(`Co-owner account created for ${directName}`);
-      setDirectAddOpen(false);
-      setDirectName('');
-      setDirectUsername('');
-      setDirectPassword('');
-      setDirectPhone('');
-      setDirectEmail('');
-      loadCoOwnersAndInvites();
-    } catch (err: any) {
-      flash(err?.message || 'Failed to create co-owner');
-    }
-  };
-
-  const handleRevokeCoOwner = async (id: string, name: string) => {
-    if (!isPrimaryOwner()) {
-      flash('Only the primary store owner can revoke co-owners');
-      return;
-    }
-    try {
-      await api.delete(`/users/${id}`);
-      flash(`Revoked access for ${name}`);
-      loadCoOwnersAndInvites();
-    } catch (err: any) {
-      flash(err?.message || 'Failed to remove co-owner');
-    }
-  };
-
   // Save shop details to server
   const handleSaveShop = async () => {
     try {
-      const payload: any = {
+      await api.put('/settings', {
         shop_name: shopName,
         gst_number: gstin,
         counter_phone: shopPhone,
         shop_state: shopState,
         shop_address: shopAddr,
         receipt_footer: footer
-      };
-      if (isPrimaryOwner()) {
-        payload.owner_name = ownerName.trim();
-      }
-      await api.put('/settings', payload);
+      });
       saveStoredShopDetails({
         name: shopName,
         gstin,
@@ -598,6 +601,251 @@ export function POSSettings({ onClose, isModal = false, defaultPanel = 'shop' }:
       setConfPw('');
     } catch (e: any) {
       flash(e?.message || 'Failed to change password. Verify your current password.');
+    }
+  };
+
+  // WhatsApp configuration actions
+  const handleSaveWhatsApp = async () => {
+    try {
+      await api.put('/settings', {
+        whatsapp_enabled: String(waEnabled),
+        whatsapp_auto_prompt: String(waAutoPrompt),
+      });
+      flash('WhatsApp receipt settings saved');
+    } catch (e: any) {
+      flash('Failed to save WhatsApp settings: ' + (e?.message || 'Error'));
+    }
+  };
+
+  const handleConnectWhatsApp = async (forceNew = false) => {
+    try {
+      setWaLoadingAction(forceNew ? 'refreshing_qr' : 'connecting');
+      const res = await connectWhatsAppSession(forceNew);
+      if (res) {
+        setWaStatus(res.status);
+        setWaQrDataUrl(res.qrDataUrl);
+        setWaConnectedNumber(res.connectedNumber);
+        setWaConnectedName(res.connectedName);
+        setWaConnectedAt(res.connectedAt);
+        setWaLastError(res.lastError);
+      }
+      if (res.status === 'connected') {
+        flash('Shop WhatsApp is already connected and active!');
+      } else if (res.status === 'qr_ready') {
+        flash('Scan the QR code with WhatsApp on the shop phone');
+      }
+    } catch (err: any) {
+      flash('Connection error: ' + (err?.message || 'Failed to start WhatsApp Web'));
+    } finally {
+      setWaLoadingAction(null);
+    }
+  };
+
+  const handleDisconnectWhatsApp = async () => {
+    if (!window.confirm('Unlink the shop WhatsApp account? Automatic bill dispatch will be disabled until you scan the QR code again.')) {
+      return;
+    }
+    try {
+      setWaLoadingAction('disconnecting');
+      await disconnectWhatsAppSession();
+      setWaStatus('disconnected');
+      setWaQrDataUrl(null);
+      setWaConnectedNumber(null);
+      setWaConnectedName(null);
+      setWaConnectedAt(null);
+      flash('Shop WhatsApp unlinked successfully');
+    } catch (err: any) {
+      flash('Failed to disconnect: ' + (err?.message || 'Error'));
+    } finally {
+      setWaLoadingAction(null);
+    }
+  };
+
+  const handleTestWhatsApp = async () => {
+    const raw = waTestPhone.trim() || '9845012345';
+    const clean = sanitizeWhatsAppPhone(raw);
+    if (clean.length < 10) {
+      flash('Enter a valid 10-digit mobile number');
+      return;
+    }
+    setWaLoadingAction('testing');
+    setWaTestResult(null);
+    try {
+      if (waStatus === 'connected') {
+        const res = await testWhatsAppSending(clean);
+        if (res && res.success) {
+          setWaTestResult({
+            success: true,
+            message: `Automated test receipt successfully sent to +${res.targetPhone} from Shop WhatsApp (+${res.shopPhone || waConnectedNumber})!`,
+          });
+          flash('Test bill sent via Shop WhatsApp!');
+        } else {
+          setWaTestResult({
+            success: false,
+            message: res?.error || 'Failed to dispatch test bill.',
+            sampleLink: res?.fallbackUrl,
+          });
+          flash(res?.error || 'Test message failed');
+        }
+      } else {
+        const sampleMsg = formatWhatsAppReceipt({
+          shopDetails: {
+            name: shopName || 'J MART RETAIL',
+            address: shopAddr || '123 Main Street, Bangalore',
+            phone: shopPhone || '98450 12345',
+            gstin: gstin || '29AAAAA1111A1Z1',
+          },
+          billNumber: 'BILL-1042',
+          items: [
+            { name: 'Maggi Noodles 70g x4', quantity: 2, price: 58, uom: 'PCS' },
+            { name: 'Tata Salt 1kg', quantity: 1, price: 28, uom: 'PKT' },
+          ],
+          total: 144,
+          subtotal: 136.8,
+          gstAmount: 7.2,
+          customerName: 'Customer',
+          customerPhone: raw,
+          cashierName: 'Counter Till 1',
+          paymentMode: 'Cash',
+        });
+        const link = generateWhatsAppLink(clean, sampleMsg);
+        openWhatsAppLink(link);
+        setWaTestResult({
+          success: true,
+          message: `Shop WhatsApp not paired yet. Opened Click-to-Chat preview for +${clean}. Pair device with QR code above for 100% automatic sending!`,
+          sampleLink: link,
+        });
+        flash('Opened Click-to-Chat fallback preview');
+      }
+    } catch (err: any) {
+      setWaTestResult({
+        success: false,
+        message: err?.message || 'Error occurred while testing WhatsApp',
+      });
+      flash(err?.message || 'Test failed');
+    } finally {
+      setWaLoadingAction(null);
+    }
+  };
+
+  // Email & SMTP configuration actions
+  const applyEmailPreset = (preset: 'gmail' | 'outlook' | 'zoho' | 'custom') => {
+    setSelectedEmailPreset(preset);
+    if (preset === 'gmail') {
+      setEmailConfig(prev => ({
+        ...prev,
+        host: 'smtp.gmail.com',
+        port: 587,
+        secure: false,
+      }));
+    } else if (preset === 'outlook') {
+      setEmailConfig(prev => ({
+        ...prev,
+        host: 'smtp.office365.com',
+        port: 587,
+        secure: false,
+      }));
+    } else if (preset === 'zoho') {
+      setEmailConfig(prev => ({
+        ...prev,
+        host: 'smtp.zoho.com',
+        port: 465,
+        secure: true,
+      }));
+    }
+  };
+
+  const getPreparedEmailConfig = useCallback(() => {
+    if (!advancedSmtp) {
+      return {
+        ...emailConfig,
+        host: 'smtp.gmail.com',
+        port: 587,
+        secure: false,
+        pass: emailConfig.pass ? emailConfig.pass.replace(/\s+/g, '') : '',
+        senderEmail: emailConfig.senderEmail || emailConfig.user,
+      };
+    }
+    return {
+      ...emailConfig,
+      pass: (emailConfig.pass && (emailConfig.host || '').includes('gmail'))
+        ? emailConfig.pass.replace(/\s+/g, '')
+        : emailConfig.pass,
+    };
+  }, [advancedSmtp, emailConfig]);
+
+  const handleSaveEmail = async () => {
+    try {
+      setEmailLoading(true);
+      const toSave = getPreparedEmailConfig();
+      await saveEmailConfig(toSave);
+      setEmailConfig(prev => ({
+        ...prev,
+        ...toSave,
+        pass: toSave.pass ? '••••••••' : prev.pass,
+        hasPass: Boolean(toSave.pass || prev.hasPass),
+      }));
+      flash(!advancedSmtp ? 'Store Gmail settings saved' : 'Email & SMTP settings saved');
+    } catch (e: any) {
+      flash('Failed to save email settings: ' + (e?.message || 'Error'));
+    } finally {
+      setEmailLoading(false);
+    }
+  };
+
+  const handleVerifyEmail = async () => {
+    try {
+      setEmailVerifying(true);
+      setEmailVerifyResult(null);
+      const toSave = getPreparedEmailConfig();
+      await saveEmailConfig(toSave);
+      const res = await verifyEmailConnection();
+      setEmailVerifyResult(res);
+      if (res.success) {
+        flash(!advancedSmtp ? 'Gmail connection verified successfully!' : 'SMTP connection verified successfully!');
+      } else {
+        flash((!advancedSmtp ? 'Gmail' : 'SMTP') + ' verification failed: ' + res.message);
+      }
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || err?.message || 'Verification failed';
+      setEmailVerifyResult({ success: false, message: msg });
+      flash((!advancedSmtp ? 'Gmail' : 'SMTP') + ' verification error: ' + msg);
+    } finally {
+      setEmailVerifying(false);
+    }
+  };
+
+  const handleTestEmail = async () => {
+    const target = emailTestTarget.trim() || emailConfig.senderEmail || emailConfig.user;
+    if (!target || !target.includes('@')) {
+      flash('Enter a valid email address to send the test invoice');
+      return;
+    }
+    setEmailTesting(true);
+    setEmailTestResult(null);
+    try {
+      const toSave = getPreparedEmailConfig();
+      await saveEmailConfig(toSave);
+      const res = await testEmailSending(target);
+      if (res && res.success) {
+        setEmailTestResult({
+          success: true,
+          message: `Test email sent successfully to ${target}! (Message ID: ${res.messageId || 'OK'})`,
+        });
+        flash(`Test invoice sent to ${target}!`);
+      } else {
+        setEmailTestResult({
+          success: false,
+          message: res?.error || 'Failed to dispatch test email',
+        });
+        flash(res?.error || 'Test email failed');
+      }
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || err?.message || 'Failed to dispatch test email';
+      setEmailTestResult({ success: false, message: msg });
+      flash('Test email error: ' + msg);
+    } finally {
+      setEmailTesting(false);
     }
   };
 
@@ -737,7 +985,20 @@ export function POSSettings({ onClose, isModal = false, defaultPanel = 'shop' }:
   };
 
   const isDark = theme === 'dark' || (theme === 'system' && typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  const currentPanel = PANEL_META[panel];
+  const currentPanel = useMemo(() => {
+    const p = PANEL_META[panel] || PANEL_META.shop;
+    if (panel === 'email') {
+      return {
+        ...p,
+        title: advancedSmtp ? 'Store Email & SMTP Configuration' : 'Store Gmail Setup',
+        desc: advancedSmtp
+          ? 'Configure your shop\'s outgoing mail server (Gmail, Outlook 365, Zoho Mail, or custom SMTP) to automatically deliver branded digital GST tax invoices and receipts.'
+          : 'Connect your store\'s Gmail account to automatically deliver branded digital GST tax invoices and receipts to customers upon bill generation.',
+        label: advancedSmtp ? 'Email / SMTP' : 'Email (Gmail)',
+      };
+    }
+    return p;
+  }, [panel, advancedSmtp]);
 
 
   const renderToggleRow = (label: string, desc: string, key: keyof typeof flags) => {
@@ -768,10 +1029,23 @@ export function POSSettings({ onClose, isModal = false, defaultPanel = 'shop' }:
   };
 
 
-  const allPanelKeys = useMemo(() => GROUPS.flatMap(([, items]) => items), []);
+  const visibleGroups = useMemo(() => {
+    return GROUPS.map(([groupName, items]) => {
+      const filtered = items.filter(key => {
+        if (key === 'warehouses' && !warehousesEnabled) return false;
+        if (key === 'loyalty' && !loyaltyEnabled) return false;
+        return true;
+      });
+      return [groupName, filtered] as [string, SettingsPanelKey[]];
+    }).filter(([, items]) => items.length > 0);
+  }, [warehousesEnabled, loyaltyEnabled]);
+
+  const allPanelKeys = useMemo(() => visibleGroups.flatMap(([, items]) => items), [visibleGroups]);
 
   const handleTabKeyDown = (e: React.KeyboardEvent, currentKey: SettingsPanelKey) => {
+    if (allPanelKeys.length === 0) return;
     const currentIndex = allPanelKeys.indexOf(currentKey);
+    if (currentIndex === -1) return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       const nextKey = allPanelKeys[(currentIndex + 1) % allPanelKeys.length];
@@ -797,14 +1071,14 @@ export function POSSettings({ onClose, isModal = false, defaultPanel = 'shop' }:
 
   const mainBody = (
     <div className="flex-1 p-3 sm:p-4 md:p-5 flex flex-col md:flex-row gap-4 overflow-y-auto md:overflow-hidden min-h-0 w-full">
-      {/* Left Sidebar: 16 Tabs Grouped under Eyebrows */}
+      {/* Left Sidebar: Tabs Grouped under Eyebrows */}
       <aside
         role="tablist"
         aria-orientation="vertical"
         aria-label="Settings sections"
         className="w-full md:w-[258px] shrink-0 bg-[var(--panel)] border border-[var(--border)] rounded-[10px] p-2.5 md:h-full md:overflow-y-auto"
       >
-        {GROUPS.map(([groupName, items]) => (
+        {visibleGroups.map(([groupName, items]) => (
           <div key={groupName} className="mb-2.5 last:mb-0">
             <div
               className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--ink3)] px-2.5 py-1.5"
@@ -816,6 +1090,7 @@ export function POSSettings({ onClose, isModal = false, defaultPanel = 'shop' }:
             {items.map(itemKey => {
               const active = panel === itemKey;
               const meta = PANEL_META[itemKey];
+              const tabLabel = itemKey === 'email' ? (advancedSmtp ? 'Email / SMTP' : 'Email (Gmail)') : (meta?.label || itemKey);
               return (
                 <button
                   key={itemKey}
@@ -832,7 +1107,7 @@ export function POSSettings({ onClose, isModal = false, defaultPanel = 'shop' }:
                       : 'bg-transparent text-[var(--ink2)] hover:bg-[var(--sub)] hover:text-[var(--ink)] font-medium'
                   }`}
                 >
-                  <span className="flex-1 truncate">{meta.label}</span>
+                  <span className="flex-1 truncate">{tabLabel}</span>
                 </button>
               );
             })}
@@ -874,32 +1149,6 @@ export function POSSettings({ onClose, isModal = false, defaultPanel = 'shop' }:
                     onChange={e => setShopName(e.target.value)}
                     className="w-full h-[44px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
                   />
-                </div>
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-[12px] font-semibold text-[var(--ink2)]">Store owner name</label>
-                    {!isPrimaryOwner() && (
-                      <span className="flex items-center gap-1 text-[10px] font-bold text-[var(--ink3)] uppercase" style={{ fontFamily: MONO }}>
-                        <Lock className="w-3 h-3" /> Owner only
-                      </span>
-                    )}
-                  </div>
-                  <input
-                    value={ownerName}
-                    onChange={e => setOwnerName(e.target.value)}
-                    disabled={!isPrimaryOwner()}
-                    placeholder="Store Owner"
-                    className={`w-full h-[44px] px-3 text-[14px] border rounded-[7px] ${
-                      !isPrimaryOwner()
-                        ? 'bg-[var(--rule)] border-[var(--rule2)] text-[var(--ink3)] cursor-not-allowed opacity-80'
-                        : 'bg-[var(--sub)] border-[var(--border2)] text-[var(--ink)]'
-                    }`}
-                  />
-                  {!isPrimaryOwner() && (
-                    <span className="block text-[11px] text-[var(--ink3)] mt-1">
-                      Only the primary store owner can edit this name.
-                    </span>
-                  )}
                 </div>
                 <div>
                   <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">GSTIN</label>
@@ -1415,450 +1664,49 @@ export function POSSettings({ onClose, isModal = false, defaultPanel = 'shop' }:
 
           {/* TAB 10: CO-OWNER ACCOUNTS */}
           {panel === 'owners' && (
-            <div className="flex flex-col gap-4">
-              {/* Header Action Card */}
-              <div className="bg-[var(--panel)] border border-[var(--border)] rounded-[10px] p-5 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="text-[15px] font-extrabold text-[var(--ink)]">Store Ownership & Access Control</div>
-                  <p className="text-[13px] text-[var(--ink2)] mt-0.5">
-                    Co-owners have full administrative back-office and register access. The primary owner role cannot be transferred or deleted.
-                  </p>
-                </div>
-                {isPrimaryOwner() && (
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => {
-                        setDirectAddOpen(true);
-                      }}
-                      className="h-[38px] px-3.5 rounded-[7px] border border-[var(--border2)] bg-[var(--sub)] hover:bg-[var(--surface-hover)] text-[var(--ink)] text-[12px] font-bold cursor-pointer transition-colors flex items-center gap-1.5"
-                    >
-                      <UserPlus className="w-3.5 h-3.5" />
-                      Add directly
-                    </button>
-                    <button
-                      onClick={() => {
-                        setGeneratedInvite(null);
-                        setInviteModalOpen(true);
-                      }}
-                      className="h-[38px] px-4 rounded-[7px] bg-[var(--ink)] hover:opacity-95 text-[var(--panel)] text-[12px] font-bold cursor-pointer transition-opacity border-0 flex items-center gap-1.5"
-                    >
-                      <Mail className="w-3.5 h-3.5" />
-                      Invite co-owner
-                    </button>
+            <div className="bg-[var(--panel)] border border-[var(--border)] rounded-[10px] overflow-hidden">
+              {[
+                { name: user?.name || 'S. Iyer', meta: `@${user?.username || 's.iyer'} · full control`, role: 'Owner', action: 'You' },
+                { name: 'P. Rao', meta: '@p.rao · added 08 Jan 2026', role: 'Co-owner', action: 'Revoke' },
+                { name: 'M. Fernandes', meta: '@m.fernandes · added 14 Jul 2026', role: 'Co-owner', action: 'Revoke' }
+              ].map(o => (
+                <div
+                  key={o.name}
+                  className="flex items-center gap-3.5 px-5 py-3.5 border-b border-[var(--rule)] last:border-b-0"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[14px] font-semibold text-[var(--ink)]">{o.name}</div>
+                    <div className="text-[11px] text-[var(--ink3)] mt-0.5" style={{ fontFamily: MONO }}>
+                      {o.meta}
+                    </div>
                   </div>
-                )}
-              </div>
-
-              {/* Accounts List */}
-              <div className="bg-[var(--panel)] border border-[var(--border)] rounded-[10px] overflow-hidden">
-                <div className="px-5 py-3 border-b border-[var(--rule2)] flex items-center justify-between">
-                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--ink3)]" style={{ fontFamily: MONO }}>
-                    Active Owners & Co-Owners
+                  <span
+                    className={`text-[10px] font-bold uppercase tracking-[0.06em] px-2 py-1 rounded-[5px] ${
+                      o.role === 'Owner'
+                        ? 'bg-[var(--accent-soft2)] text-[var(--accent-hi)]'
+                        : 'bg-[var(--rule)] text-[var(--ink2)]'
+                    }`}
+                    style={{ fontFamily: MONO }}
+                  >
+                    {o.role}
                   </span>
                   <button
-                    onClick={() => loadCoOwnersAndInvites()}
-                    className="p-1 rounded text-[var(--ink3)] hover:text-[var(--ink)] hover:bg-[var(--sub)] border-0 cursor-pointer"
-                    title="Refresh"
+                    onClick={() => flash(o.action === 'You' ? 'Your primary credentials' : `Revoked access for ${o.name}`)}
+                    className="h-[34px] px-3 border border-[var(--border2)] bg-[var(--sub)] rounded-[7px] text-[12px] font-semibold text-[var(--ink)] cursor-pointer"
                   >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isOwnersLoading ? 'animate-spin' : ''}`} />
+                    {o.action}
                   </button>
                 </div>
+              ))}
 
-                {isOwnersLoading && ownersList.length === 0 ? (
-                  <div className="p-8 text-center text-[13px] text-[var(--ink3)]">Loading accounts...</div>
-                ) : (
-                  <div>
-                    {/* Primary Owner Row */}
-                    {ownersList.filter(u => u.role === 'owner').map(o => (
-                      <div
-                        key={o.id}
-                        className="flex items-center gap-3.5 px-5 py-4 border-b border-[var(--rule)] bg-[var(--panel)]"
-                      >
-                        <div className="w-9 h-9 rounded-full bg-[var(--accent-soft2)] border border-[var(--accent-line)] flex items-center justify-center shrink-0">
-                          <Shield className="w-4 h-4 text-[var(--accent-hi)]" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[14px] font-bold text-[var(--ink)]">{o.name}</span>
-                            <span
-                              className="text-[9px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 rounded-[4px] bg-[var(--accent-soft2)] text-[var(--accent-hi)] border border-[var(--accent-line)]"
-                              style={{ fontFamily: MONO }}
-                            >
-                              Primary Owner
-                            </span>
-                          </div>
-                          <div className="text-[11px] text-[var(--ink3)] mt-0.5" style={{ fontFamily: MONO }}>
-                            @{o.username} {o.phone ? `· ${o.phone}` : ''} {o.email ? `· ${o.email}` : ''}
-                          </div>
-                        </div>
-
-                        {user?.id === o.id ? (
-                          <span className="text-[11px] font-semibold text-[var(--ink3)] px-3 py-1 bg-[var(--sub)] rounded-[6px]" style={{ fontFamily: MONO }}>
-                            You
-                          </span>
-                        ) : (
-                          <span className="text-[11px] text-[var(--ink4)] flex items-center gap-1" style={{ fontFamily: MONO }}>
-                            <Lock className="w-3 h-3" /> Protected
-                          </span>
-                        )}
-                      </div>
-                    ))}
-
-                    {/* Co-Owners Rows */}
-                    {ownersList.filter(u => u.role === 'co-owner').map(co => (
-                      <div
-                        key={co.id}
-                        className="flex items-center gap-3.5 px-5 py-3.5 border-b border-[var(--rule)] last:border-b-0 hover:bg-[var(--sub)] transition-colors"
-                      >
-                        <div className="w-9 h-9 rounded-full bg-[var(--rule)] flex items-center justify-center shrink-0">
-                          <UserCheck className="w-4 h-4 text-[var(--ink2)]" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[14px] font-semibold text-[var(--ink)]">{co.name}</span>
-                            <span
-                              className="text-[9px] font-bold uppercase tracking-[0.08em] px-1.5 py-0.5 rounded-[4px] bg-[var(--rule)] text-[var(--ink2)]"
-                              style={{ fontFamily: MONO }}
-                            >
-                              Co-Owner
-                            </span>
-                          </div>
-                          <div className="text-[11px] text-[var(--ink3)] mt-0.5" style={{ fontFamily: MONO }}>
-                            @{co.username} {co.phone ? `· ${co.phone}` : ''} {co.email ? `· ${co.email}` : ''}
-                          </div>
-                        </div>
-
-                        {user?.id === co.id ? (
-                          <span className="text-[11px] font-semibold text-[var(--ink3)] px-3 py-1 bg-[var(--sub)] rounded-[6px]" style={{ fontFamily: MONO }}>
-                            You
-                          </span>
-                        ) : isPrimaryOwner() ? (
-                          <button
-                            onClick={() => handleRevokeCoOwner(co.id, co.name)}
-                            className="h-[32px] px-2.5 border border-[var(--danger-line)] bg-[var(--danger-soft)] hover:bg-[var(--danger-soft2)] text-[var(--danger)] rounded-[6px] text-[11px] font-bold cursor-pointer transition-colors"
-                          >
-                            Revoke access
-                          </button>
-                        ) : (
-                          <span className="text-[11px] text-[var(--ink3)]" style={{ fontFamily: MONO }}>
-                            Co-Owner
-                          </span>
-                        )}
-                      </div>
-                    ))}
-
-                    {ownersList.filter(u => u.role === 'co-owner').length === 0 && (
-                      <div className="px-5 py-6 text-center text-[13px] text-[var(--ink3)]">
-                        No co-owners assigned. You can invite a partner or add one directly above.
-                      </div>
-                    )}
-                  </div>
-                )}
+              <div className="p-4 border-t border-[var(--rule2)] bg-[var(--sub)]">
+                <button
+                  onClick={() => flash('Invite link generated')}
+                  className="h-[44px] px-4 rounded-[8px] bg-[var(--ink)] text-[var(--panel)] text-[13px] font-bold cursor-pointer hover:opacity-95 transition-opacity border-0"
+                >
+                  Invite co-owner
+                </button>
               </div>
-
-              {/* Pending Invites Section (visible to Primary Owner) */}
-              {isPrimaryOwner() && (
-                <div className="bg-[var(--panel)] border border-[var(--border)] rounded-[10px] overflow-hidden">
-                  <div className="px-5 py-3 border-b border-[var(--rule2)] flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--ink3)]" style={{ fontFamily: MONO }}>
-                        Pending Invitations
-                      </span>
-                      <span className="text-[11px] px-1.5 py-0.2 rounded bg-[var(--sub)] font-mono text-[var(--ink2)]">
-                        {invitesList.filter(i => i.status === 'pending').length}
-                      </span>
-                    </div>
-                  </div>
-
-                  {invitesList.filter(i => i.status === 'pending').length === 0 ? (
-                    <div className="p-5 text-center text-[12px] text-[var(--ink3)]">
-                      No active pending invitations. Generate an invite link to invite a partner.
-                    </div>
-                  ) : (
-                    <div>
-                      {invitesList.filter(i => i.status === 'pending').map(inv => {
-                        const origin = typeof window !== 'undefined' ? window.location.origin : '';
-                        const fullLink = `${origin}/invite?token=${inv.token}`;
-                        return (
-                          <div
-                            key={inv.id}
-                            className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b border-[var(--rule)] last:border-b-0"
-                          >
-                            <div className="flex-1 min-w-[200px]">
-                              <div className="flex items-center gap-2">
-                                <span className="text-[13px] font-bold text-[var(--ink)]">
-                                  {inv.name || inv.email || 'Co-Owner Invite'}
-                                </span>
-                                <span className="font-mono text-[11px] px-2 py-0.5 bg-[var(--sub)] border border-[var(--border2)] rounded font-semibold text-[var(--ink)]">
-                                  {inv.token}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-2 text-[11px] text-[var(--ink3)] mt-1" style={{ fontFamily: MONO }}>
-                                <Clock className="w-3 h-3" />
-                                <span>Expires {new Date(inv.expires_at).toLocaleDateString()}</span>
-                                {inv.email && <span>· Sent to {inv.email}</span>}
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-2">
-                              <button
-                                onClick={() => {
-                                  navigator.clipboard.writeText(fullLink);
-                                  flash('Invite link copied to clipboard');
-                                }}
-                                className="h-[32px] px-3 border border-[var(--border2)] bg-[var(--sub)] hover:bg-[var(--surface-hover)] rounded-[6px] text-[11px] font-bold text-[var(--ink)] cursor-pointer flex items-center gap-1.5 transition-colors"
-                              >
-                                <Copy className="w-3 h-3" />
-                                Copy Link
-                              </button>
-                              <button
-                                onClick={() => handleRevokeInvite(inv.id)}
-                                className="h-[32px] px-2.5 border border-[var(--rule2)] bg-transparent hover:bg-[var(--danger-soft)] text-[var(--danger)] rounded-[6px] text-[11px] font-semibold cursor-pointer transition-colors"
-                                title="Revoke invite"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* MODAL: INVITE CO-OWNER */}
-              {inviteModalOpen && (
-                <div
-                  className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[rgba(0,0,0,0.55)] backdrop-blur-sm"
-                  onClick={() => setInviteModalOpen(false)}
-                >
-                  <div
-                    className="w-full max-w-[480px] bg-[var(--panel)] border border-[var(--border)] rounded-[12px] shadow-2xl overflow-hidden"
-                    onClick={e => e.stopPropagation()}
-                  >
-                    <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--rule2)] bg-[var(--sub)]">
-                      <div className="flex items-center gap-2">
-                        <Mail className="w-4 h-4 text-[var(--ink)]" />
-                        <h2 className="text-[15px] font-black text-[var(--ink)]">Invite Co-Owner</h2>
-                      </div>
-                      <button
-                        onClick={() => setInviteModalOpen(false)}
-                        className="p-1 rounded text-[var(--ink3)] hover:text-[var(--ink)] hover:bg-[var(--rule)] cursor-pointer border-0"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-
-                    <div className="p-6 flex flex-col gap-4">
-                      {!generatedInvite ? (
-                        <>
-                          <p className="text-[13px] leading-relaxed text-[var(--ink2)]">
-                            Generate a secure invitation code and link. Your co-owner can use it to register their account with administrative back-office privileges.
-                          </p>
-
-                          <div>
-                            <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Invitee Name (Optional)</label>
-                            <input
-                              value={inviteName}
-                              onChange={e => setInviteName(e.target.value)}
-                              placeholder="e.g. Priya Sharma"
-                              className="w-full h-[42px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
-                            />
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-3">
-                            <div>
-                              <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Email (Optional)</label>
-                              <input
-                                type="email"
-                                value={inviteEmail}
-                                onChange={e => setInviteEmail(e.target.value)}
-                                placeholder="priya@store.com"
-                                className="w-full h-[42px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Expires in</label>
-                              <select
-                                value={inviteDays}
-                                onChange={e => setInviteDays(Number(e.target.value))}
-                                className="w-full h-[42px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)] cursor-pointer"
-                              >
-                                <option value={3}>3 Days</option>
-                                <option value={7}>7 Days</option>
-                                <option value={14}>14 Days</option>
-                                <option value={30}>30 Days</option>
-                              </select>
-                            </div>
-                          </div>
-
-                          <div className="pt-2">
-                            <button
-                              onClick={handleCreateInvite}
-                              className="w-full h-[44px] rounded-[8px] bg-[var(--ink)] text-[var(--panel)] text-[13px] font-bold cursor-pointer hover:opacity-95 transition-opacity border-0"
-                            >
-                              Generate Invite Link & Code
-                            </button>
-                          </div>
-                        </>
-                      ) : (
-                        <div className="flex flex-col gap-4">
-                          <div className="p-4 bg-[var(--ok-soft2)] border border-[var(--ok-line)] rounded-[8px] text-center">
-                            <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--ok)]" style={{ fontFamily: MONO }}>
-                              Invite Ready
-                            </div>
-                            <div className="text-[26px] font-black tracking-widest text-[var(--ink)] my-2" style={{ fontFamily: MONO }}>
-                              {generatedInvite.token}
-                            </div>
-                            <div className="text-[12px] text-[var(--ink2)]">
-                              Give this code or the full registration link to your co-owner.
-                            </div>
-                          </div>
-
-                          <div>
-                            <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Direct Registration Link</label>
-                            <div className="flex gap-2">
-                              <input
-                                readOnly
-                                value={generatedInvite.url}
-                                className="flex-1 h-[42px] px-3 text-[13px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)] select-all"
-                                style={{ fontFamily: MONO }}
-                              />
-                              <button
-                                onClick={() => {
-                                  navigator.clipboard.writeText(generatedInvite.url);
-                                  setCopiedUrl(true);
-                                  setTimeout(() => setCopiedUrl(false), 2000);
-                                  flash('Invite link copied');
-                                }}
-                                className="h-[42px] px-4 rounded-[7px] bg-[var(--ink)] text-[var(--panel)] text-[12px] font-bold cursor-pointer flex items-center gap-1.5 border-0"
-                              >
-                                {copiedUrl ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                                {copiedUrl ? 'Copied' : 'Copy'}
-                              </button>
-                            </div>
-                          </div>
-
-                          <div className="flex justify-end pt-2">
-                            <button
-                              onClick={() => {
-                                setInviteModalOpen(false);
-                                setGeneratedInvite(null);
-                                setInviteName('');
-                                setInviteEmail('');
-                              }}
-                              className="h-[40px] px-5 rounded-[8px] bg-[var(--sub)] border border-[var(--border2)] text-[var(--ink)] text-[13px] font-bold cursor-pointer"
-                            >
-                              Done
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* MODAL: DIRECT ADD CO-OWNER */}
-              {directAddOpen && (
-                <div
-                  className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[rgba(0,0,0,0.55)] backdrop-blur-sm"
-                  onClick={() => setDirectAddOpen(false)}
-                >
-                  <div
-                    className="w-full max-w-[480px] bg-[var(--panel)] border border-[var(--border)] rounded-[12px] shadow-2xl overflow-hidden"
-                    onClick={e => e.stopPropagation()}
-                  >
-                    <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--rule2)] bg-[var(--sub)]">
-                      <div className="flex items-center gap-2">
-                        <UserPlus className="w-4 h-4 text-[var(--ink)]" />
-                        <h2 className="text-[15px] font-black text-[var(--ink)]">Add Co-Owner Directly</h2>
-                      </div>
-                      <button
-                        onClick={() => setDirectAddOpen(false)}
-                        className="p-1 rounded text-[var(--ink3)] hover:text-[var(--ink)] hover:bg-[var(--rule)] cursor-pointer border-0"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-
-                    <div className="p-6 flex flex-col gap-4">
-                      <div>
-                        <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Full Name</label>
-                        <input
-                          value={directName}
-                          onChange={e => setDirectName(e.target.value)}
-                          placeholder="e.g. Ramesh Patel"
-                          className="w-full h-[42px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Username</label>
-                          <input
-                            value={directUsername}
-                            onChange={e => setDirectUsername(e.target.value)}
-                            placeholder="ramesh"
-                            className="w-full h-[42px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
-                            style={{ fontFamily: MONO }}
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Password</label>
-                          <input
-                            type="password"
-                            value={directPassword}
-                            onChange={e => setDirectPassword(e.target.value)}
-                            placeholder="Min. 8 characters"
-                            className="w-full h-[42px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
-                            style={{ fontFamily: MONO }}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Phone (Optional)</label>
-                          <input
-                            value={directPhone}
-                            onChange={e => setDirectPhone(e.target.value)}
-                            placeholder="+91 98450 12345"
-                            className="w-full h-[42px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
-                            style={{ fontFamily: MONO }}
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Email (Optional)</label>
-                          <input
-                            type="email"
-                            value={directEmail}
-                            onChange={e => setDirectEmail(e.target.value)}
-                            placeholder="ramesh@store.com"
-                            className="w-full h-[42px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)]"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-end gap-3 pt-2">
-                        <button
-                          onClick={() => setDirectAddOpen(false)}
-                          className="h-[42px] px-4 rounded-[8px] border border-[var(--border2)] bg-[var(--panel)] text-[var(--ink)] text-[13px] font-semibold cursor-pointer"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          onClick={handleDirectAddCoOwner}
-                          className="h-[42px] px-5 rounded-[8px] bg-[var(--ink)] text-[var(--panel)] text-[13px] font-bold cursor-pointer hover:opacity-95 transition-opacity border-0"
-                        >
-                          Create Co-Owner
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
@@ -2264,6 +2112,1164 @@ export function POSSettings({ onClose, isModal = false, defaultPanel = 'shop' }:
                   >
                     Run tests again
                   </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 14: BETA FEATURES */}
+          {panel === 'beta' && (
+            <div className="bg-[var(--panel)] border border-[var(--border)] rounded-[10px] p-5 flex flex-col">
+              <div className="mb-2 pb-3 border-b border-[var(--rule2)]">
+                <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--accent)]" style={{ fontFamily: MONO }}>
+                  Modular Features &amp; Experiments
+                </span>
+                <p className="text-[13px] text-[var(--ink2)] mt-1">
+                  Enable or disable modular features across your terminal. Settings take effect immediately.
+                </p>
+              </div>
+
+              {/* Toggle 1: GST Ledger */}
+              <div className="flex items-center gap-4 py-4 border-b border-[var(--rule)]">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <label className="text-[14px] font-semibold text-[var(--ink)] cursor-pointer">
+                      GST ledger
+                    </label>
+                    <span
+                      className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-[4px] ${
+                        gstLedger
+                          ? 'bg-[var(--ok-soft2)] text-[var(--ok)]'
+                          : 'bg-[var(--rule)] text-[var(--ink3)]'
+                      }`}
+                      style={{ fontFamily: MONO }}
+                    >
+                      {gstLedger ? 'Enabled' : 'Disabled'}
+                    </span>
+                  </div>
+                  <div className="text-[12.5px] leading-relaxed text-[var(--ink3)] mt-0.5">
+                    Controls whether the B2B GST ledger screen is accessible from the top navigation bar.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={gstLedger}
+                  aria-label="Toggle GST ledger"
+                  onClick={() => {
+                    const next = !gstLedger;
+                    setFeature('gstLedger', next);
+                    flash(`GST ledger ${next ? 'enabled' : 'disabled'}`);
+                  }}
+                  className={`w-[50px] h-[28px] shrink-0 rounded-full p-[3px] flex items-center transition-colors cursor-pointer border-0 ${
+                    gstLedger ? 'bg-[var(--accent)] justify-end' : 'bg-[var(--border2)] justify-start'
+                  }`}
+                >
+                  <span className="w-[22px] h-[22px] rounded-full bg-[var(--panel)] shadow-sm" />
+                </button>
+              </div>
+
+              {/* Toggle 2: Warehouses & Ledgers */}
+              <div className="flex items-center gap-4 py-4 border-b border-[var(--rule)]">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <label className="text-[14px] font-semibold text-[var(--ink)] cursor-pointer">
+                      Warehouses &amp; ledgers (in Settings)
+                    </label>
+                    <span
+                      className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-[4px] ${
+                        warehousesEnabled
+                          ? 'bg-[var(--ok-soft2)] text-[var(--ok)]'
+                          : 'bg-[var(--rule)] text-[var(--ink3)]'
+                      }`}
+                      style={{ fontFamily: MONO }}
+                    >
+                      {warehousesEnabled ? 'Enabled' : 'Disabled'}
+                    </span>
+                  </div>
+                  <div className="text-[12.5px] leading-relaxed text-[var(--ink3)] mt-0.5">
+                    Controls whether the Warehouses &amp; ledgers section is shown in Settings under the Store group.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={warehousesEnabled}
+                  aria-label="Toggle Warehouses & ledgers"
+                  onClick={() => {
+                    const next = !warehousesEnabled;
+                    setFeature('warehouses', next);
+                    flash(`Warehouses & ledgers ${next ? 'enabled' : 'disabled'}`);
+                  }}
+                  className={`w-[50px] h-[28px] shrink-0 rounded-full p-[3px] flex items-center transition-colors cursor-pointer border-0 ${
+                    warehousesEnabled ? 'bg-[var(--accent)] justify-end' : 'bg-[var(--border2)] justify-start'
+                  }`}
+                >
+                  <span className="w-[22px] h-[22px] rounded-full bg-[var(--panel)] shadow-sm" />
+                </button>
+              </div>
+
+              {/* Toggle 3: Loyalty Program */}
+              <div className="flex items-center gap-4 py-4 border-b border-[var(--rule)]">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <label className="text-[14px] font-semibold text-[var(--ink)] cursor-pointer">
+                      Loyalty program
+                    </label>
+                    <span
+                      className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-[4px] ${
+                        loyaltyEnabled
+                          ? 'bg-[var(--ok-soft2)] text-[var(--ok)]'
+                          : 'bg-[var(--rule)] text-[var(--ink3)]'
+                      }`}
+                      style={{ fontFamily: MONO }}
+                    >
+                      {loyaltyEnabled ? 'Enabled' : 'Disabled'}
+                    </span>
+                  </div>
+                  <div className="text-[12.5px] leading-relaxed text-[var(--ink3)] mt-0.5">
+                    Controls whether the Loyalty program settings panel and customer reward tiers are enabled.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={loyaltyEnabled}
+                  aria-label="Toggle Loyalty program"
+                  onClick={() => {
+                    const next = !loyaltyEnabled;
+                    setFeature('loyalty', next);
+                    flash(`Loyalty program ${next ? 'enabled' : 'disabled'}`);
+                  }}
+                  className={`w-[50px] h-[28px] shrink-0 rounded-full p-[3px] flex items-center transition-colors cursor-pointer border-0 ${
+                    loyaltyEnabled ? 'bg-[var(--accent)] justify-end' : 'bg-[var(--border2)] justify-start'
+                  }`}
+                >
+                  <span className="w-[22px] h-[22px] rounded-full bg-[var(--panel)] shadow-sm" />
+                </button>
+              </div>
+
+              {/* Toggle 4: Advanced & Custom SMTP Providers */}
+              <div className="flex items-center gap-4 py-4 border-b border-[var(--rule)]">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <label className="text-[14px] font-semibold text-[var(--ink)] cursor-pointer">
+                      Advanced &amp; custom SMTP providers
+                    </label>
+                    <span
+                      className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-[4px] ${
+                        advancedSmtp
+                          ? 'bg-[var(--ok-soft2)] text-[var(--ok)]'
+                          : 'bg-[var(--rule)] text-[var(--ink3)]'
+                      }`}
+                      style={{ fontFamily: MONO }}
+                    >
+                      {advancedSmtp ? 'Enabled' : 'Disabled (Gmail Only)'}
+                    </span>
+                  </div>
+                  <div className="text-[12.5px] leading-relaxed text-[var(--ink3)] mt-0.5">
+                    Controls whether non-Gmail presets (Outlook 365, Zoho Mail, Custom SMTP hosts, port, and SSL parameters) are unlocked in the Email settings panel.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={advancedSmtp}
+                  aria-label="Toggle Advanced SMTP"
+                  onClick={() => {
+                    const next = !advancedSmtp;
+                    setFeature('advancedSmtp', next);
+                    flash(`Advanced SMTP providers ${next ? 'enabled' : 'disabled (Gmail only)'}`);
+                  }}
+                  className={`w-[50px] h-[28px] shrink-0 rounded-full p-[3px] flex items-center transition-colors cursor-pointer border-0 ${
+                    advancedSmtp ? 'bg-[var(--accent)] justify-end' : 'bg-[var(--border2)] justify-start'
+                  }`}
+                >
+                  <span className="w-[22px] h-[22px] rounded-full bg-[var(--panel)] shadow-sm" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 15: WHATSAPP WEB LOGIN & AUTOMATED DISPATCH */}
+          {panel === 'whatsapp' && (
+            <div className="flex flex-col gap-5">
+              <div className="bg-[var(--panel)] border border-[var(--border)] rounded-[10px] p-5">
+                <div className="mb-4 pb-3 border-b border-[var(--rule2)] flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--accent)]" style={{ fontFamily: MONO }}>
+                      Customer Channels · Shop Linked Device
+                    </span>
+                    <h2 className="text-[18px] font-extrabold text-[var(--ink)] mt-0.5">
+                      Shop WhatsApp Web QR Connection
+                    </h2>
+                    <p className="text-[12.5px] text-[var(--ink2)] mt-1">
+                      Link your shop phone via WhatsApp Web QR code to automatically send digital tax invoices &amp; receipts to customers upon bill generation.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {waStatus === 'connected' ? (
+                      <span
+                        className="text-[11px] font-bold uppercase px-3 py-1 rounded-[5px] bg-[var(--ok-soft2)] text-[var(--ok)] border border-[var(--ok-line)] flex items-center gap-1.5"
+                        style={{ fontFamily: MONO }}
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Connected · {waConnectedNumber ? `+${waConnectedNumber}` : 'Shop Phone'}</span>
+                      </span>
+                    ) : (waStatus === 'qr_ready' || waQrDataUrl) ? (
+                      <span
+                        className="text-[11px] font-bold uppercase px-3 py-1 rounded-[5px] bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center gap-1.5"
+                        style={{ fontFamily: MONO }}
+                      >
+                        <QrCode className="w-3.5 h-3.5" />
+                        <span>Scan QR Code to Link</span>
+                      </span>
+                    ) : waStatus === 'connecting' ? (
+                      <span
+                        className="text-[11px] font-bold uppercase px-3 py-1 rounded-[5px] bg-sky-500/15 text-sky-600 dark:text-sky-400 border border-sky-500/30 flex items-center gap-1.5"
+                        style={{ fontFamily: MONO }}
+                      >
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Connecting...</span>
+                      </span>
+                    ) : (
+                      <span
+                        className="text-[11px] font-bold uppercase px-3 py-1 rounded-[5px] bg-[var(--rule)] text-[var(--ink3)] border border-[var(--border2)] flex items-center gap-1.5"
+                        style={{ fontFamily: MONO }}
+                      >
+                        <Smartphone className="w-3.5 h-3.5" />
+                        <span>Offline / Not Paired</span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* PAIRING / CONNECTION STATUS CARD */}
+                <div className="mb-6">
+                  {waStatus === 'connected' ? (
+                    <div className="p-5 rounded-[10px] bg-[var(--ok-soft2)] border border-[var(--ok-line)] flex flex-col md:flex-row md:items-center justify-between gap-5 shadow-sm">
+                      <div className="flex items-start gap-4">
+                        <div className="w-12 h-12 rounded-full bg-[var(--ok)] text-white flex items-center justify-center shrink-0 shadow-sm">
+                          <CheckCircle2 className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="text-[16.5px] font-bold text-[var(--ink)]">
+                              Shop WhatsApp Connected &amp; Active
+                            </h3>
+                            <span
+                              className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-[var(--ok)] text-white"
+                              style={{ fontFamily: MONO }}
+                            >
+                              100% Automated Dispatch
+                            </span>
+                          </div>
+                          <p className="text-[13px] text-[var(--ink2)] mt-1">
+                            Linked Account: <strong className="font-mono text-[var(--ink)]">+{waConnectedNumber}</strong>
+                            {waConnectedName && <span> ({waConnectedName})</span>}
+                          </p>
+                          <p className="text-[12px] text-[var(--ink3)] mt-1 max-w-xl">
+                            Every bill generated in the billing terminal is automatically sent from this phone in the background to the customer&apos;s WhatsApp. No browser popups or manual clicks required.
+                          </p>
+                          {waConnectedAt && (
+                            <p className="text-[11px] text-[var(--ink3)] mt-1 font-mono">
+                              Session connected: {new Date(waConnectedAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={handleDisconnectWhatsApp}
+                          disabled={waLoadingAction === 'disconnecting'}
+                          className="h-[40px] px-4 rounded-[7px] border border-[var(--danger-line2)] bg-[var(--danger-soft)] text-[var(--danger)] hover:bg-[var(--danger)] hover:text-white transition-colors text-[13px] font-bold flex items-center gap-2 cursor-pointer"
+                        >
+                          <LogOut className="w-4 h-4" />
+                          <span>{waLoadingAction === 'disconnecting' ? 'Unlinking...' : 'Unlink Device'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : waQrDataUrl ? (
+                    <div className="p-6 rounded-[10px] bg-[var(--sub)] border border-[var(--border2)] flex flex-col md:flex-row items-center gap-8 shadow-sm">
+                      {/* QR Code Container */}
+                      <div className="flex flex-col items-center gap-3 shrink-0">
+                        <div className="p-3.5 bg-white rounded-xl border border-[var(--border)] shadow-md">
+                          <img
+                            src={waQrDataUrl}
+                            alt="WhatsApp Web Login QR Code"
+                            className="w-56 h-56 object-contain block"
+                          />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                          <span className="text-[11.5px] font-medium text-[var(--ink2)]">
+                            Waiting for phone scan...
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleConnectWhatsApp(true)}
+                          disabled={waLoadingAction === 'refreshing_qr'}
+                          className="text-xs font-bold text-[var(--accent)] hover:underline flex items-center gap-1.5 cursor-pointer bg-transparent border-0"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${waLoadingAction === 'refreshing_qr' ? 'animate-spin' : ''}`} />
+                          <span>Refresh QR Code</span>
+                        </button>
+                      </div>
+
+                      {/* Instructions */}
+                      <div className="flex-1 space-y-3.5">
+                        <div className="flex items-center gap-2">
+                          <Smartphone className="w-5 h-5 text-[var(--accent)]" />
+                          <h3 className="text-[16px] font-bold text-[var(--ink)]">
+                            Pair Shop Phone in 3 Simple Steps:
+                          </h3>
+                        </div>
+                        <ol className="space-y-2.5 text-[13px] text-[var(--ink2)] list-decimal list-inside pl-1 leading-relaxed">
+                          <li>
+                            Open <strong>WhatsApp</strong> on your shop&apos;s mobile phone.
+                          </li>
+                          <li>
+                            Tap <strong>Settings</strong> (iOS) or <strong>⋮ More options</strong> (Android) &rarr; <strong>Linked devices</strong>.
+                          </li>
+                          <li>
+                            Tap <strong>Link a device</strong> and scan the QR code on the left.
+                          </li>
+                        </ol>
+                        <div className="mt-4 p-3 rounded-[7px] bg-[var(--panel)] border border-[var(--border)] text-[12px] text-[var(--ink3)] flex items-center gap-2">
+                          <ShieldCheck className="w-4 h-4 text-[var(--ok)] shrink-0" />
+                          <span>
+                            Credentials are stored locally and encrypted. You only need to pair once; the terminal auto-reconnects on reboot.
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : waStatus === 'connecting' ? (
+                    <div className="p-8 rounded-[10px] bg-[var(--sub)] border border-[var(--border2)] text-center flex flex-col items-center justify-center gap-3">
+                      <RefreshCw className="w-8 h-8 text-[var(--accent)] animate-spin" />
+                      <h3 className="text-[16px] font-bold text-[var(--ink)]">Starting WhatsApp Web Session...</h3>
+                      <p className="text-[13px] text-[var(--ink2)] max-w-md">
+                        Connecting to WhatsApp Multi-Device server and generating pairing QR code. Please wait a moment.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="p-6 rounded-[10px] bg-[var(--sub)] border border-[var(--border2)] flex flex-col md:flex-row items-center justify-between gap-6">
+                      <div className="flex items-start gap-4">
+                        <div className="w-12 h-12 rounded-full bg-[var(--rule)] text-[var(--ink2)] flex items-center justify-center shrink-0">
+                          <QrCode className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <h3 className="text-[16px] font-bold text-[var(--ink)]">
+                            Connect Shop WhatsApp Account
+                          </h3>
+                          <p className="text-[13px] text-[var(--ink2)] mt-1">
+                            Link your store phone via WhatsApp Web QR code.
+                            Once linked, generated bills and receipts are sent automatically from your store&apos;s number.
+                          </p>
+                          <div className="mt-2.5 flex flex-wrap gap-4 text-[11.5px] text-[var(--ink3)]" style={{ fontFamily: MONO }}>
+                            <span className="flex items-center gap-1">
+                              <span className="text-[var(--ok)] font-bold">✓</span> Auto-sends on Bill Creation
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <span className="text-[var(--ok)] font-bold">✓</span> No Meta API Charges
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <span className="text-[var(--ok)] font-bold">✓</span> Zero Configuration
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleConnectWhatsApp(true)}
+                        disabled={waLoadingAction === 'connecting'}
+                        className="h-[44px] px-6 rounded-[8px] bg-[#25d366] hover:bg-[#20ba59] text-white text-[13.5px] font-bold flex items-center gap-2 cursor-pointer shadow-sm transition-colors shrink-0 border-0"
+                      >
+                        <QrCode className="w-4 h-4" />
+                        <span>{waLoadingAction === 'connecting' ? 'Generating QR...' : 'Show Pairing QR Code'}</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Main Enable Toggle */}
+                <div className="flex items-center gap-4 py-3.5 border-b border-[var(--rule)]">
+                  <div className="flex-1 min-w-0">
+                    <label className="text-[14px] font-semibold text-[var(--ink)] cursor-pointer">
+                      Enable WhatsApp Features
+                    </label>
+                    <div className="text-[12px] text-[var(--ink3)] mt-0.5">
+                      Allows billing counter to send bills and reminders to customer phone numbers.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={waEnabled}
+                    onClick={() => setWaEnabled(!waEnabled)}
+                    className={`w-[50px] h-[28px] shrink-0 rounded-full p-[3px] flex items-center transition-colors cursor-pointer border-0 ${
+                      waEnabled ? 'bg-[var(--accent)] justify-end' : 'bg-[var(--border2)] justify-start'
+                    }`}
+                  >
+                    <span className="w-[22px] h-[22px] rounded-full bg-[var(--panel)] shadow-sm" />
+                  </button>
+                </div>
+
+                {/* Auto Prompt Toggle */}
+                <div className="flex items-center gap-4 py-3.5 border-b border-[var(--rule)]">
+                  <div className="flex-1 min-w-0">
+                    <label className="text-[14px] font-semibold text-[var(--ink)] cursor-pointer">
+                      Auto-Prompt WhatsApp Receipt at Checkout
+                    </label>
+                    <div className="text-[12px] text-[var(--ink3)] mt-0.5">
+                      When a sale completes, automatically show the WhatsApp send confirmation on the settlement card.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={waAutoPrompt}
+                    onClick={() => setWaAutoPrompt(!waAutoPrompt)}
+                    className={`w-[50px] h-[28px] shrink-0 rounded-full p-[3px] flex items-center transition-colors cursor-pointer border-0 ${
+                      waAutoPrompt ? 'bg-[var(--accent)] justify-end' : 'bg-[var(--border2)] justify-start'
+                    }`}
+                  >
+                    <span className="w-[22px] h-[22px] rounded-full bg-[var(--panel)] shadow-sm" />
+                  </button>
+                </div>
+
+                {/* Test Customer Mobile Number */}
+                <div className="mt-5 pt-4 border-t border-[var(--rule)] flex flex-wrap items-end gap-3">
+                  <div className="flex-1 min-w-[200px]">
+                    <label className="block text-[11px] font-semibold text-[var(--ink2)] mb-1">
+                      Test Customer Mobile Number (10 digits)
+                    </label>
+                    <input
+                      type="text"
+                      value={waTestPhone}
+                      onChange={e => setWaTestPhone(e.target.value)}
+                      placeholder="e.g. 98450 12345"
+                      className="w-full h-[42px] px-3 bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[13px] text-[var(--ink)]"
+                      style={{ fontFamily: MONO }}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleTestWhatsApp}
+                    disabled={waLoadingAction === 'testing'}
+                    className="h-[42px] px-4 border border-[#25d366]/40 bg-[#25d366]/15 hover:bg-[#25d366]/25 text-[#128c7e] dark:text-[#25d366] rounded-[7px] text-[13px] font-bold cursor-pointer transition-colors flex items-center gap-1.5"
+                  >
+                    <span>💬</span>
+                    <span>{waLoadingAction === 'testing' ? 'Testing...' : waStatus === 'connected' ? 'Send Real Test Bill' : 'Test WhatsApp Link'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveWhatsApp}
+                    className="h-[42px] px-5 rounded-[7px] bg-[var(--ink)] text-[var(--panel)] text-[13px] font-bold cursor-pointer hover:opacity-95 border-0"
+                  >
+                    Save settings
+                  </button>
+                </div>
+
+                {waTestResult && (
+                  <div
+                    className={`mt-4 p-3.5 rounded-[8px] border text-[12.5px] leading-relaxed ${
+                      waTestResult.success
+                        ? 'bg-[var(--ok-soft2)] border-[var(--ok-line)] text-[var(--ok)]'
+                        : 'bg-[var(--danger-soft)] border-[var(--danger-line2)] text-[var(--danger)]'
+                    }`}
+                  >
+                    <div className="font-bold flex items-center gap-1.5">
+                      <span>{waTestResult.success ? '✓ Diagnostic Passed:' : '✕ Diagnostic Warning:'}</span>
+                      <span>{waTestResult.message}</span>
+                    </div>
+                    {waTestResult.sampleLink && (
+                      <div className="mt-2">
+                        <a
+                          href={waTestResult.sampleLink}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline font-semibold text-xs"
+                        >
+                          Click to test generated WhatsApp link →
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Receipt Template Preview Card */}
+              <div className="bg-[var(--panel)] border border-[var(--border)] rounded-[10px] p-5">
+                <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--ink3)] mb-2" style={{ fontFamily: MONO }}>
+                  Customer WhatsApp Receipt Preview
+                </div>
+                <div className="p-4 rounded-[10px] bg-[#e7ffdb] dark:bg-[#122818] border border-[#b2e5a4] dark:border-[#1d4d29] text-[#123819] dark:text-[#c4f2cc] max-w-lg shadow-sm">
+                  <div className="text-[12.5px] whitespace-pre-line leading-relaxed" style={{ fontFamily: MONO }}>
+                    {`🧾 *${(shopName || 'J MART RETAIL').toUpperCase()}*
+📍 ${shopAddr || '123 Main Street, Bangalore'}
+📞 ${shopPhone || '98450 12345'} | GSTIN: ${gstin || '29AAAAA1111A1Z1'}
+━━━━━━━━━━━━━━━━━━━━
+*TAX INVOICE #BILL-1042*
+📅 08 Oct 2026, 14:50
+👤 Customer: Walk-in Customer (98450 12345)
+Cashier: Counter Till 1
+━━━━━━━━━━━━━━━━━━━━
+*ITEMS PURCHASED:*
+1. *Maggi Noodles 70g x4*
+   2 PCS × ₹58.00 = ₹116.00
+2. *Tata Salt 1kg*
+   1 PKT × ₹28.00 = ₹28.00
+━━━━━━━━━━━━━━━━━━━━
+Subtotal: ₹144.00
+Tax (GST Included): ₹7.20
+*TOTAL AMOUNT: ₹144.00*
+Payment Mode: *UPI*
+━━━━━━━━━━━━━━━━━━━━
+🙏 *Thank you for your visit!*
+🌿 Save paper, protect nature. Your digital e-bill.`}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 16: EMAIL & SMTP INVOICES */}
+          {panel === 'email' && (
+            <div className="flex flex-col gap-5">
+              <div className="bg-[var(--panel)] border border-[var(--border)] rounded-[10px] p-5">
+                <div className="mb-4 pb-3 border-b border-[var(--rule2)] flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--accent)]" style={{ fontFamily: MONO }}>
+                      {advancedSmtp ? 'Customer Channels · Outgoing Mail Server' : 'Customer Channels · Gmail Invoicing'}
+                    </span>
+                    <h2 className="text-[18px] font-extrabold text-[var(--ink)] mt-0.5">
+                      {advancedSmtp ? 'Store Email &amp; SMTP Configuration' : 'Store Gmail Setup'}
+                    </h2>
+                    <p className="text-[12.5px] text-[var(--ink2)] mt-1">
+                      {advancedSmtp
+                        ? 'Configure your shop’s outgoing mail server to automatically deliver branded digital GST tax invoices and receipts to customers upon bill generation.'
+                        : 'Connect your shop’s Gmail account to automatically deliver branded digital GST tax invoices and receipts to customers upon bill generation.'}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {advancedSmtp && (
+                      <span
+                        className="text-[10px] font-bold uppercase px-2.5 py-1 rounded-[5px] bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent)] flex items-center gap-1"
+                        style={{ fontFamily: MONO }}
+                      >
+                        <Sparkles className="w-3 h-3" />
+                        <span>Beta: Advanced SMTP</span>
+                      </span>
+                    )}
+                    {emailConfig.enabled ? (
+                      <span
+                        className="text-[11px] font-bold uppercase px-3 py-1 rounded-[5px] bg-[var(--ok-soft2)] text-[var(--ok)] border border-[var(--ok-line)] flex items-center gap-1.5"
+                        style={{ fontFamily: MONO }}
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Email Active · {emailConfig.senderEmail || emailConfig.user || (!advancedSmtp ? 'Gmail' : 'SMTP')}</span>
+                      </span>
+                    ) : (
+                      <span
+                        className="text-[11px] font-bold uppercase px-3 py-1 rounded-[5px] bg-[var(--rule)] text-[var(--ink3)] border border-[var(--border2)] flex items-center gap-1.5"
+                        style={{ fontFamily: MONO }}
+                      >
+                        <Mail className="w-3.5 h-3.5" />
+                        <span>Email Invoices Disabled</span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {!advancedSmtp ? (
+                  /* GMAIL-ONLY CLEAN INTERFACE */
+                  <div className="space-y-4 mb-5">
+                    {/* 1-Minute Setup Guide Card */}
+                    <div className="p-4 rounded-[9px] bg-[var(--sub)] border border-[var(--border2)] space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[16px]">📮</span>
+                          <span className="text-[13px] font-bold text-[var(--ink)]">
+                            1-Minute Gmail Setup via Google App Password
+                          </span>
+                        </div>
+                        <a
+                          href="https://myaccount.google.com/apppasswords"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[11.5px] font-bold text-[var(--accent)] hover:underline inline-flex items-center gap-1"
+                        >
+                          <span>Open Google App Passwords</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-[12px] text-[var(--ink2)]">
+                        <div className="p-3 rounded-[7px] bg-[var(--panel)] border border-[var(--border2)]">
+                          <div className="font-bold text-[var(--ink)] mb-0.5" style={{ fontFamily: MONO }}>
+                            Step 1 · 2-Step Verification
+                          </div>
+                          <p className="text-[11.5px] text-[var(--ink3)] leading-relaxed">
+                            Turn on 2-Step Verification in your store Google Account (<span className="font-mono text-[11px]">myaccount.google.com/security</span>).
+                          </p>
+                        </div>
+                        <div className="p-3 rounded-[7px] bg-[var(--panel)] border border-[var(--border2)]">
+                          <div className="font-bold text-[var(--ink)] mb-0.5" style={{ fontFamily: MONO }}>
+                            Step 2 · Generate App Password
+                          </div>
+                          <p className="text-[11.5px] text-[var(--ink3)] leading-relaxed">
+                            Open <strong className="text-[var(--ink)]">App Passwords</strong>, name it <strong className="text-[var(--ink)]">NexusFlow POS</strong>, and click Create.
+                          </p>
+                        </div>
+                        <div className="p-3 rounded-[7px] bg-[var(--panel)] border border-[var(--border2)]">
+                          <div className="font-bold text-[var(--ink)] mb-0.5" style={{ fontFamily: MONO }}>
+                            Step 3 · Enter Below
+                          </div>
+                          <p className="text-[11.5px] text-[var(--ink3)] leading-relaxed">
+                            Paste the 16-character code below and click Verify. Do <em>not</em> enter your personal Google login password.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Gmail Form Fields */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Store Gmail Address */}
+                      <div>
+                        <label className="block text-[11px] font-semibold text-[var(--ink2)] mb-1">
+                          Store Gmail Address
+                        </label>
+                        <input
+                          type="email"
+                          value={emailConfig.user}
+                          onChange={e => {
+                            const val = e.target.value.trim();
+                            setEmailConfig(c => ({
+                              ...c,
+                              host: 'smtp.gmail.com',
+                              port: 587,
+                              secure: false,
+                              user: val,
+                              senderEmail: (!c.senderEmail || c.senderEmail === c.user) ? val : c.senderEmail,
+                            }));
+                          }}
+                          placeholder="e.g. yourstore@gmail.com"
+                          className="w-full h-[40px] px-3 bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[13px] text-[var(--ink)]"
+                          style={{ fontFamily: MONO }}
+                        />
+                        <span className="text-[11px] text-[var(--ink3)] mt-1 block">
+                          Digital GST invoices and receipts will be dispatched from this Gmail address.
+                        </span>
+                      </div>
+
+                      {/* Google App Password */}
+                      <div>
+                        <label className="block text-[11px] font-semibold text-[var(--ink2)] mb-1">
+                          Google App Password (16 Letters)
+                        </label>
+                        <input
+                          type="password"
+                          value={emailConfig.pass}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setEmailConfig(c => ({ ...c, pass: val }));
+                          }}
+                          placeholder={emailConfig.hasPass ? '•••••••• (Saved - type new code to change)' : 'e.g. abcd efgh ijkl mnop'}
+                          className="w-full h-[40px] px-3 bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[13px] text-[var(--ink)]"
+                          style={{ fontFamily: MONO }}
+                        />
+                        <span className="text-[11px] text-[var(--ink3)] mt-1 block">
+                          Spaces are automatically removed. Generated securely from Google Account security settings.
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Sender Name */}
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[var(--ink2)] mb-1">
+                        Store Sender Name (Appears in Customer Inbox)
+                      </label>
+                      <input
+                        type="text"
+                        value={emailConfig.senderName}
+                        onChange={e => setEmailConfig(c => ({ ...c, senderName: e.target.value }))}
+                        placeholder={shopName || 'e.g. J Mart Retail'}
+                        className="w-full h-[40px] px-3 bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[13px] text-[var(--ink)]"
+                      />
+                      <span className="text-[11px] text-[var(--ink3)] mt-1 block">
+                        Customers will see this name as the sender (e.g. &quot;{emailConfig.senderName || shopName || 'J Mart Retail'}&quot; &lt;{emailConfig.user || 'yourstore@gmail.com'}&gt;).
+                      </span>
+                    </div>
+
+                    {/* Beta Callout Card */}
+                    <div className="p-3.5 rounded-[8px] bg-[var(--sub)] border border-[var(--border2)] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-[12px]">
+                      <div className="flex items-center gap-2.5 text-[var(--ink2)]">
+                        <span className="text-[15px]">💼</span>
+                        <span>
+                          Need <strong>Microsoft 365 / Outlook</strong>, <strong>Zoho Mail</strong>, or custom SMTP servers?
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setPanel('beta')}
+                        className="text-[12px] font-bold text-[var(--accent)] hover:underline inline-flex items-center gap-1 cursor-pointer bg-transparent border-0 shrink-0 self-start sm:self-auto"
+                      >
+                        <span>Unlock in Beta Features &rarr;</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* ADVANCED SMTP (BETA ENABLED) INTERFACE */
+                  <div className="space-y-4 mb-5">
+                    {/* Beta Active Banner */}
+                    <div className="p-3 rounded-[8px] bg-[var(--accent-soft)] border border-[var(--accent)] text-[12px] text-[var(--ink)] flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-[var(--accent)] shrink-0" />
+                        <span>
+                          <strong>Beta Mode Active:</strong> Multi-provider presets (Outlook, Zoho, Custom) and manual SMTP port/SSL controls are unlocked.
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setPanel('beta')}
+                        className="text-[11px] font-bold text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0 shrink-0"
+                      >
+                        Manage Beta Features &rarr;
+                      </button>
+                    </div>
+
+                    {/* Presets Selector */}
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--ink3)] mb-2" style={{ fontFamily: MONO }}>
+                        Quick SMTP Provider Presets:
+                      </label>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => applyEmailPreset('gmail')}
+                          className={`px-3 py-2.5 rounded-[8px] text-[12.5px] font-bold border transition-colors flex items-center justify-center gap-2 cursor-pointer ${
+                            selectedEmailPreset === 'gmail'
+                              ? 'bg-[var(--accent-soft)] border-[var(--accent)] text-[var(--accent)] shadow-sm'
+                              : 'bg-[var(--sub)] border-[var(--border2)] text-[var(--ink2)] hover:border-[var(--border)] hover:text-[var(--ink)]'
+                          }`}
+                        >
+                          <span>📮 Gmail</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => applyEmailPreset('outlook')}
+                          className={`px-3 py-2.5 rounded-[8px] text-[12.5px] font-bold border transition-colors flex items-center justify-center gap-2 cursor-pointer ${
+                            selectedEmailPreset === 'outlook'
+                              ? 'bg-[var(--accent-soft)] border-[var(--accent)] text-[var(--accent)] shadow-sm'
+                              : 'bg-[var(--sub)] border-[var(--border2)] text-[var(--ink2)] hover:border-[var(--border)] hover:text-[var(--ink)]'
+                          }`}
+                        >
+                          <span>💼 Outlook / M365</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => applyEmailPreset('zoho')}
+                          className={`px-3 py-2.5 rounded-[8px] text-[12.5px] font-bold border transition-colors flex items-center justify-center gap-2 cursor-pointer ${
+                            selectedEmailPreset === 'zoho'
+                              ? 'bg-[var(--accent-soft)] border-[var(--accent)] text-[var(--accent)] shadow-sm'
+                              : 'bg-[var(--sub)] border-[var(--border2)] text-[var(--ink2)] hover:border-[var(--border)] hover:text-[var(--ink)]'
+                          }`}
+                        >
+                          <span>📬 Zoho Mail</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => applyEmailPreset('custom')}
+                          className={`px-3 py-2.5 rounded-[8px] text-[12.5px] font-bold border transition-colors flex items-center justify-center gap-2 cursor-pointer ${
+                            selectedEmailPreset === 'custom'
+                              ? 'bg-[var(--accent-soft)] border-[var(--accent)] text-[var(--accent)] shadow-sm'
+                              : 'bg-[var(--sub)] border-[var(--border2)] text-[var(--ink2)] hover:border-[var(--border)] hover:text-[var(--ink)]'
+                          }`}
+                        >
+                          <span>⚙️ Custom SMTP</span>
+                        </button>
+                      </div>
+
+                      {/* Preset Guidance Box */}
+                      <div className="mt-3 p-3 rounded-[8px] bg-[var(--sub)] border border-[var(--border2)] text-[12px] text-[var(--ink2)] flex items-start gap-2.5">
+                        <ShieldCheck className="w-4 h-4 text-[var(--accent)] shrink-0 mt-0.5" />
+                        <div>
+                          {selectedEmailPreset === 'gmail' && (
+                            <span>
+                              <strong>Gmail Setup:</strong> Uses <span className="font-mono">smtp.gmail.com:587</span> with STARTTLS. Enter your Gmail address and 16-character <strong>Google App Password</strong>.
+                            </span>
+                          )}
+                          {selectedEmailPreset === 'outlook' && (
+                            <span>
+                              <strong>Outlook 365 Setup:</strong> Uses <span className="font-mono">smtp.office365.com:587</span> with STARTTLS. Enter your Microsoft 365 or Outlook email and password.
+                            </span>
+                          )}
+                          {selectedEmailPreset === 'zoho' && (
+                            <span>
+                              <strong>Zoho Mail Setup:</strong> Uses <span className="font-mono">smtp.zoho.com:465</span> with SSL. Enter your Zoho email and Zoho Application-Specific Password.
+                            </span>
+                          )}
+                          {selectedEmailPreset === 'custom' && (
+                            <span>
+                              <strong>Custom Server Setup:</strong> Enter the outgoing SMTP server host and port provided by your transactional mail provider (e.g. Amazon SES, SendGrid, Mailgun) or cPanel.
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Server Fields: Host & Port */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="md:col-span-2">
+                        <label className="block text-[11px] font-semibold text-[var(--ink2)] mb-1">
+                          SMTP Host Server
+                        </label>
+                        <input
+                          type="text"
+                          value={emailConfig.host}
+                          onChange={e => setEmailConfig(c => ({ ...c, host: e.target.value }))}
+                          placeholder="e.g. smtp.gmail.com"
+                          className="w-full h-[40px] px-3 bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[13px] text-[var(--ink)]"
+                          style={{ fontFamily: MONO }}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-[var(--ink2)] mb-1">
+                          SMTP Port
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            value={emailConfig.port}
+                            onChange={e => setEmailConfig(c => ({ ...c, port: Number(e.target.value) || 587 }))}
+                            placeholder="587"
+                            className="w-full h-[40px] px-3 bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[13px] text-[var(--ink)]"
+                            style={{ fontFamily: MONO }}
+                          />
+                          <label className="flex items-center gap-1.5 text-xs text-[var(--ink2)] shrink-0 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={emailConfig.secure}
+                              onChange={e => setEmailConfig(c => ({ ...c, secure: e.target.checked }))}
+                              className="accent-[var(--accent)]"
+                            />
+                            <span>SSL (465)</span>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Username & Password */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-[var(--ink2)] mb-1">
+                          SMTP Username / Email
+                        </label>
+                        <input
+                          type="text"
+                          value={emailConfig.user}
+                          onChange={e => setEmailConfig(c => ({ ...c, user: e.target.value }))}
+                          placeholder="e.g. billing@yourdomain.com"
+                          className="w-full h-[40px] px-3 bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[13px] text-[var(--ink)]"
+                          style={{ fontFamily: MONO }}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-[var(--ink2)] mb-1">
+                          SMTP Password / App Secret
+                        </label>
+                        <input
+                          type="password"
+                          value={emailConfig.pass}
+                          onChange={e => setEmailConfig(c => ({ ...c, pass: e.target.value }))}
+                          placeholder={emailConfig.hasPass ? '•••••••• (Saved - type to change)' : 'Enter password or app secret'}
+                          className="w-full h-[40px] px-3 bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[13px] text-[var(--ink)]"
+                          style={{ fontFamily: MONO }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Sender Name & Sender Email */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-[var(--ink2)] mb-1">
+                          Sender Name (Appears in Customer Inbox)
+                        </label>
+                        <input
+                          type="text"
+                          value={emailConfig.senderName}
+                          onChange={e => setEmailConfig(c => ({ ...c, senderName: e.target.value }))}
+                          placeholder={shopName || 'e.g. J Mart Retail'}
+                          className="w-full h-[40px] px-3 bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[13px] text-[var(--ink)]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-[var(--ink2)] mb-1">
+                          Sender Email (From Header)
+                        </label>
+                        <input
+                          type="email"
+                          value={emailConfig.senderEmail}
+                          onChange={e => setEmailConfig(c => ({ ...c, senderEmail: e.target.value }))}
+                          placeholder={emailConfig.user || 'e.g. invoices@yourdomain.com'}
+                          className="w-full h-[40px] px-3 bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[13px] text-[var(--ink)]"
+                          style={{ fontFamily: MONO }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Subject Line Template */}
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[var(--ink2)] mb-1">
+                        Email Subject Line Template
+                      </label>
+                      <input
+                        type="text"
+                        value={emailConfig.subjectTemplate}
+                        onChange={e => setEmailConfig(c => ({ ...c, subjectTemplate: e.target.value }))}
+                        placeholder="Tax Invoice #{billNumber} - {shopName}"
+                        className="w-full h-[40px] px-3 bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[13px] text-[var(--ink)]"
+                      />
+                      <span className="text-[11px] text-[var(--ink3)] mt-1 block">
+                        Supported tags: <code className="font-mono text-xs">{'{billNumber}'}</code>, <code className="font-mono text-xs">{'{shopName}'}</code>, <code className="font-mono text-xs">{'{customerName}'}</code>
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* TOGGLES */}
+                <div className="space-y-1 pt-2 border-t border-[var(--rule)]">
+                  {/* Main Enable Toggle */}
+                  <div className="flex items-center gap-4 py-3 border-b border-[var(--rule)]">
+                    <div className="flex-1 min-w-0">
+                      <label className="text-[14px] font-semibold text-[var(--ink)] cursor-pointer">
+                        Enable Customer Email Invoicing
+                      </label>
+                      <div className="text-[12px] text-[var(--ink3)] mt-0.5">
+                        Permits registers to send digital invoices and receipts to customer email addresses.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={emailConfig.enabled}
+                      onClick={() => setEmailConfig(c => ({ ...c, enabled: !c.enabled }))}
+                      className={`w-[50px] h-[28px] shrink-0 rounded-full p-[3px] flex items-center transition-colors cursor-pointer border-0 ${
+                        emailConfig.enabled ? 'bg-[var(--accent)] justify-end' : 'bg-[var(--border2)] justify-start'
+                      }`}
+                    >
+                      <span className="w-[22px] h-[22px] rounded-full bg-[var(--panel)] shadow-sm" />
+                    </button>
+                  </div>
+
+                  {/* Auto-Dispatch Toggle */}
+                  <div className="flex items-center gap-4 py-3 border-b border-[var(--rule)]">
+                    <div className="flex-1 min-w-0">
+                      <label className="text-[14px] font-semibold text-[var(--ink)] cursor-pointer">
+                        Auto-Dispatch Invoice on Bill Creation
+                      </label>
+                      <div className="text-[12px] text-[var(--ink3)] mt-0.5">
+                        When cashier finalizes a bill with a customer email, automatically deliver the tax invoice in the background without delay.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={emailConfig.autoSend}
+                      onClick={() => setEmailConfig(c => ({ ...c, autoSend: !c.autoSend }))}
+                      className={`w-[50px] h-[28px] shrink-0 rounded-full p-[3px] flex items-center transition-colors cursor-pointer border-0 ${
+                        emailConfig.autoSend ? 'bg-[var(--accent)] justify-end' : 'bg-[var(--border2)] justify-start'
+                      }`}
+                    >
+                      <span className="w-[22px] h-[22px] rounded-full bg-[var(--panel)] shadow-sm" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* ACTION BAR: VERIFY & SAVE */}
+                <div className="mt-5 flex flex-wrap items-center justify-between gap-3 pt-2">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleVerifyEmail}
+                      disabled={emailVerifying || !emailConfig.user}
+                      className="h-[42px] px-4 rounded-[7px] border border-[var(--border2)] bg-[var(--sub)] hover:bg-[var(--surface-hover)] text-[var(--ink)] text-[13px] font-bold cursor-pointer transition-colors flex items-center gap-2 disabled:opacity-50"
+                    >
+                      <Server className={`w-4 h-4 ${emailVerifying ? 'animate-spin' : ''}`} />
+                      <span>
+                        {emailVerifying
+                          ? (!advancedSmtp ? 'Testing Gmail...' : 'Testing SMTP...')
+                          : (!advancedSmtp ? 'Verify Gmail Connection' : 'Verify SMTP Connection')}
+                      </span>
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleSaveEmail}
+                    disabled={emailLoading}
+                    className="h-[42px] px-6 rounded-[7px] bg-[var(--ink)] text-[var(--panel)] text-[13px] font-bold cursor-pointer hover:opacity-95 border-0 transition-opacity"
+                  >
+                    {emailLoading ? 'Saving...' : (!advancedSmtp ? 'Save Gmail Settings' : 'Save Email Settings')}
+                  </button>
+                </div>
+
+                {/* SMTP / Gmail Verify Result Alert */}
+                {emailVerifyResult && (
+                  <div
+                    className={`mt-4 p-3.5 rounded-[8px] border text-[12.5px] leading-relaxed ${
+                      emailVerifyResult.success
+                        ? 'bg-[var(--ok-soft2)] border-[var(--ok-line)] text-[var(--ok)]'
+                        : 'bg-[var(--danger-soft)] border-[var(--danger-line2)] text-[var(--danger)]'
+                    }`}
+                  >
+                    <div className="font-bold flex items-center gap-1.5">
+                      <span>
+                        {emailVerifyResult.success
+                          ? (!advancedSmtp ? '✓ Gmail Connection Verified:' : '✓ SMTP Handshake Passed:')
+                          : (!advancedSmtp ? '✕ Gmail Connection Failed:' : '✕ SMTP Handshake Failed:')}
+                      </span>
+                      <span>{emailVerifyResult.message}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* TEST EMAIL SENDER BOX */}
+                <div className="mt-6 pt-5 border-t border-[var(--rule)]">
+                  <label className="block text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--ink3)] mb-1" style={{ fontFamily: MONO }}>
+                    Send Live Test Invoice to Your Inbox
+                  </label>
+                  <div className="flex flex-wrap items-end gap-3 mt-2">
+                    <div className="flex-1 min-w-[240px]">
+                      <input
+                        type="email"
+                        value={emailTestTarget}
+                        onChange={e => setEmailTestTarget(e.target.value)}
+                        placeholder="e.g. your-email@gmail.com"
+                        className="w-full h-[42px] px-3 bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[13px] text-[var(--ink)]"
+                        style={{ fontFamily: MONO }}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleTestEmail}
+                      disabled={emailTesting}
+                      className="h-[42px] px-5 rounded-[7px] bg-[var(--accent)] hover:opacity-95 text-white text-[13px] font-bold cursor-pointer transition-opacity flex items-center gap-2 border-0 disabled:opacity-50"
+                    >
+                      <Send className={`w-4 h-4 ${emailTesting ? 'animate-pulse' : ''}`} />
+                      <span>{emailTesting ? 'Delivering...' : 'Send Test Invoice'}</span>
+                    </button>
+                  </div>
+
+                  {emailTestResult && (
+                    <div
+                      className={`mt-3 p-3.5 rounded-[8px] border text-[12.5px] leading-relaxed ${
+                        emailTestResult.success
+                          ? 'bg-[var(--ok-soft2)] border-[var(--ok-line)] text-[var(--ok)]'
+                          : 'bg-[var(--danger-soft)] border-[var(--danger-line2)] text-[var(--danger)]'
+                      }`}
+                    >
+                      <div className="font-bold flex items-center gap-1.5">
+                        <span>{emailTestResult.success ? '✓ Dispatch Succeeded:' : '✕ Dispatch Failed:'}</span>
+                        <span>{emailTestResult.message}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* EMAIL TEMPLATE PREVIEW CARD */}
+              <div className="bg-[var(--panel)] border border-[var(--border)] rounded-[10px] p-5">
+                <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--ink3)] mb-3" style={{ fontFamily: MONO }}>
+                  Customer HTML Invoice Preview
+                </div>
+                <div className="max-w-xl mx-auto rounded-xl border border-[var(--border)] overflow-hidden shadow-sm bg-white text-slate-800 text-[13px]">
+                  {/* Invoice Header */}
+                  <div className="p-5 bg-slate-900 text-white flex justify-between items-start">
+                    <div>
+                      <h4 className="text-[18px] font-black tracking-tight">{shopName || 'J MART RETAIL'}</h4>
+                      <p className="text-[11.5px] text-slate-300 mt-0.5">{shopAddr || 'Rayala Nagar Extension, Ramapuram, Chennai 600089'}</p>
+                      <p className="text-[11px] text-slate-400 font-mono mt-0.5">Ph: {shopPhone || '+91 77088 00220'} | GSTIN: {gstin || '33AAAAA0000A1Z5'}</p>
+                    </div>
+                    <div className="text-right">
+                      <span className="inline-block px-2.5 py-1 rounded bg-teal-500/20 text-teal-300 font-bold text-[10px] uppercase font-mono tracking-wider">
+                        Tax Invoice
+                      </span>
+                      <p className="text-[13px] font-bold font-mono mt-1 text-white">#BILL-1042</p>
+                    </div>
+                  </div>
+
+                  {/* Customer & Bill meta */}
+                  <div className="p-4 bg-slate-50 border-b border-slate-200 grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="text-slate-500 block text-[10.5px] uppercase font-mono">Billed To</span>
+                      <span className="font-semibold text-slate-900">Walk-in Customer</span>
+                      <span className="text-slate-500 block text-[11px] font-mono">+91 98450 12345</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-slate-500 block text-[10.5px] uppercase font-mono">Date &amp; Tender</span>
+                      <span className="font-semibold text-slate-900">08 Oct 2026, 14:50</span>
+                      <span className="text-slate-500 block text-[11px] font-mono">Paid via UPI</span>
+                    </div>
+                  </div>
+
+                  {/* Item table */}
+                  <div className="p-4">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="border-b border-slate-200 text-slate-500 uppercase text-[10px] font-mono">
+                          <th className="py-1.5 font-bold">Item</th>
+                          <th className="py-1.5 font-bold text-center">Qty</th>
+                          <th className="py-1.5 font-bold text-right">Rate</th>
+                          <th className="py-1.5 font-bold text-right">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-sans">
+                        <tr>
+                          <td className="py-2 font-medium">Maggi Noodles 70g x4</td>
+                          <td className="py-2 text-center font-mono">2 PCS</td>
+                          <td className="py-2 text-right font-mono">₹58.00</td>
+                          <td className="py-2 text-right font-mono font-semibold">₹116.00</td>
+                        </tr>
+                        <tr>
+                          <td className="py-2 font-medium">Tata Salt 1kg</td>
+                          <td className="py-2 text-center font-mono">1 PKT</td>
+                          <td className="py-2 text-right font-mono">₹28.00</td>
+                          <td className="py-2 text-right font-mono font-semibold">₹28.00</td>
+                        </tr>
+                      </tbody>
+                    </table>
+
+                    {/* Totals */}
+                    <div className="mt-4 pt-3 border-t border-slate-200 space-y-1 text-xs">
+                      <div className="flex justify-between text-slate-600">
+                        <span>Subtotal</span>
+                        <span className="font-mono">₹137.14</span>
+                      </div>
+                      <div className="flex justify-between text-slate-600">
+                        <span>GST (5% Included)</span>
+                        <span className="font-mono">₹6.86</span>
+                      </div>
+                      <div className="flex justify-between items-baseline pt-2 border-t border-slate-300 text-sm font-bold text-slate-900">
+                        <span>Total Paid</span>
+                        <span className="font-mono text-[16px] text-teal-700">₹144.00</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Eco Footer */}
+                  <div className="p-3 bg-emerald-50 border-t border-emerald-100 text-center text-[11px] text-emerald-800">
+                    🌿 Save paper, protect nature. Your official digital GST invoice.
+                  </div>
                 </div>
               </div>
             </div>

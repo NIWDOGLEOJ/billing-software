@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/Express-5-000000?logo=express" alt="Express 5"/>
   <img src="https://img.shields.io/badge/SQLite-WAL-003B57?logo=sqlite" alt="SQLite"/>
   <img src="https://img.shields.io/badge/Tailwind-4-06B6D4?logo=tailwindcss" alt="Tailwind CSS 4"/>
-  <img src="https://img.shields.io/badge/tests-259%20passed-brightgreen" alt="259 tests"/>
+  <img src="https://img.shields.io/badge/tests-356%20passed-brightgreen" alt="356 tests"/>
 </p>
 
 ---
@@ -22,19 +22,22 @@
 2. [Architecture](#️-architecture)
 3. [Tech Stack](#-tech-stack)
 4. [Feature Reference](#-feature-reference)
-5. [Directory Structure](#-directory-structure)
-6. [Setup & Installation Guide](#️-setup--installation-guide)
-7. [Available Scripts](#-available-scripts)
-8. [Environment Variables](#-environment-variables)
-9. [Keyboard Shortcuts](#️-keyboard-shortcuts)
-10. [Barcode Scanner Support (Live Mobile & Hardware)](#-barcode-scanner-support)
-11. [Mobile Usage & Android App](#-mobile-usage--android-app)
-12. [Product Photo & Enhancement Pipeline](#-product-photo--enhancement-pipeline)
-13. [Database Schema](#️-database-schema)
-14. [WebSocket Real-Time Events](#-websocket-real-time-events)
-15. [Deployment Notes](#-deployment-notes)
-16. [Test Suite](#-test-suite)
-17. [License & Attributions](#-license--attributions)
+5. [WhatsApp Web QR Linked Device Integration](#-whatsapp-web-qr-linked-device-integration)
+6. [Store Email & Digital GST Tax Invoices](#-store-email--digital-gst-tax-invoices)
+7. [Thermal Printer Discovery & ESC/POS Direct Print](#-thermal-printer-discovery--escpos-direct-print)
+8. [Directory Structure](#-directory-structure)
+9. [Setup & Installation Guide](#️-setup--installation-guide)
+10. [Available Scripts](#-available-scripts)
+11. [Environment Variables](#-environment-variables)
+12. [Keyboard Shortcuts](#️-keyboard-shortcuts)
+13. [Barcode Scanner Support (Live Mobile & Hardware)](#-barcode-scanner-support)
+14. [Mobile Usage & Android App](#-mobile-usage--android-app)
+15. [Product Photo & Enhancement Pipeline](#-product-photo--enhancement-pipeline)
+16. [Database Schema](#️-database-schema)
+17. [WebSocket Real-Time Events](#-websocket-real-time-events)
+18. [Deployment Notes](#-deployment-notes)
+19. [Test Suite](#-test-suite)
+20. [License & Attributions](#-license--attributions)
 
 ---
 
@@ -44,6 +47,9 @@ NexusFlow is a production-grade, self-hosted Point-of-Sale (POS) platform design
 
 ### Core Strengths
 - ⚡ **Instant Checkout**: Real-time barcode scan → cart auto-addition → receipt generation in milliseconds.
+- 📱 **Shop WhatsApp Web Linked Device**: Scan QR once in POS Settings to connect the store's WhatsApp phone. Automatic background invoice dispatch to customer phones upon bill generation with zero monthly API fees.
+- 📧 **Automated Digital GST Tax Invoices**: 1-minute Gmail onboarding with Google App Passwords; instant responsive HTML receipts delivered to customer inbox.
+- 🖨️ **Thermal Printer Auto-Discovery**: Automatic detection of 58mm & 80mm ESC/POS network and USB thermal receipt printers with zero-delay printing.
 - 📷 **Live Hardware-Style Mobile Scanner**: Point phone/tablet camera at any barcode for instant continuous decoding with audio beep and haptic feedback — no photo taking needed.
 - 🖼️ **Studio Product Photo Pipeline**: Built-in camera capture with 90° rotation correction, adaptive de-blurring, automated background isolation, and WebP compression.
 - ✏️ **Full Product Editing**: In-place catalog updating for product names, barcodes, prices, stock levels, categories, and photos with real-time multi-terminal broadcast.
@@ -56,35 +62,46 @@ NexusFlow is a production-grade, self-hosted Point-of-Sale (POS) platform design
 ## 🏗️ Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                        Local Area Network (LAN)                  │
-│                                                                  │
-│  ┌───────────────────────┐             ┌───────────────────────┐ │
-│  │   Desktop Cashier     │  REST + WS  │   Express.js Server   │ │
-│  │   Browser / POS PC    │◄───────────►│   (Node.js + TS)      │ │
-│  │   (Port 5173 / 3000)  │             │   Port 3000           │ │
-│  └───────────────────────┘             │                       │ │
-│                                        │  ┌──────────────────┐ │ │
-│  ┌───────────────────────┐             │  │ SQLite (WAL mode)│ │ │
-│  │   Mobile / Tablet     │  HTTPS / WS │  │ better-sqlite3   │ │ │
-│  │   Continuous Scanner  │◄───────────►│  └──────────────────┘ │ │
-│  │   (Rear Camera View)  │             │                       │ │
-│  └───────────────────────┘             │  ┌──────────────────┐ │ │
-│                                        │  │ WebSocket Server │ │ │
-│  ┌───────────────────────┐             │  │ (ws library)     │ │ │
-│  │   Android POS Device  │  Native Web │  └──────────────────┘ │ │
-│  │   (Kotlin App)        │◄───────────►│                       │ │
-│  └───────────────────────┘             │  ┌──────────────────┐ │ │
-│                                        │  │ Sharp Image Eng. │ │ │
-│                                        │  └──────────────────┘ │ │
-│                                        └───────────────────────┘ │
-└──────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│                        Local Area Network (LAN)                        │
+│                                                                        │
+│  ┌───────────────────────┐             ┌─────────────────────────────┐ │
+│  │   Desktop Cashier     │  REST + WS  │      Express.js Server      │ │
+│  │   Browser / POS PC    │◄───────────►│      (Node.js + TS)         │ │
+│  │   (Port 5173 / 3000)  │             │      Port 3000              │ │
+│  └───────────────────────┘             │                             │ │
+│                                        │  ┌────────────────────────┐ │ │
+│  ┌───────────────────────┐             │  │ SQLite (WAL mode)      │ │ │
+│  │   Mobile / Tablet     │  HTTPS / WS │  │ better-sqlite3         │ │ │
+│  │   Continuous Scanner  │◄───────────►│  └────────────────────────┘ │ │
+│  │   (Rear Camera View)  │             │                             │ │
+│  └───────────────────────┘             │  ┌────────────────────────┐ │ │
+│                                        │  │ WebSocket Server (ws)  │ │ │
+│  ┌───────────────────────┐             │  └────────────────────────┘ │ │
+│  │   Android POS Device  │  Native Web │                             │ │
+│  │   (Kotlin App)        │◄───────────►│  ┌────────────────────────┐ │ │
+│  └───────────────────────┘             │  │ WhatsApp Web Gateway   │ │ │
+│                                        │  │ (@whiskeysockets/baileys│ │
+│  ┌───────────────────────┐             │  └────────────────────────┘ │ │
+│  │   ESC/POS Thermal     │   Direct    │                             │ │
+│  │   Receipt Printers    │◄──Network───│  ┌────────────────────────┐ │ │
+│  │   (58mm / 80mm)       │    / USB    │  │ Store Email / Nodemailer││
+│  └───────────────────────┘             │  └────────────────────────┘ │ │
+│                                        │                             │ │
+│                                        │  ┌────────────────────────┐ │ │
+│                                        │  │ Sharp Image Engine     │ │ │
+│                                        │  └────────────────────────┘ │ │
+│                                        └─────────────────────────────┘ │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
 The server binary handles:
 - Serving the compiled React Vite SPA.
 - Routing all REST APIs under `/api/*`.
-- Broadcasting real-time state mutations via WebSocket to all connected terminals.
+- Broadcasting real-time state mutations via WebSocket (`STOCK_UPDATED`, `SALES_CHANGED`, `WHATSAPP_STATUS_CHANGED`).
+- Managing the persistent WhatsApp Web multi-device session for zero-fee customer messaging.
+- Dispatching digital GST tax invoices and HTML receipts through store Gmail / SMTP.
+- Autodiscovering and communicating directly with LAN and USB thermal receipt printers.
 - Executing server-side image processing, adaptive deblurring, and background extraction.
 
 ---
@@ -113,6 +130,9 @@ The server binary handles:
 | Database Engine | SQLite via `better-sqlite3` with Write-Ahead Logging (`WAL`) mode |
 | Authentication | JSON Web Tokens (`jsonwebtoken`) + `bcryptjs` password hashing |
 | Real-Time Engine | `ws` WebSocket Server |
+| WhatsApp Gateway | `@whiskeysockets/baileys` (Native WhatsApp Web Multi-Device protocol & QR session engine) |
+| Email Service | `nodemailer` (Store Gmail / SMTP background delivery) |
+| Thermal Printing | Direct ESC/POS socket streaming with UDP auto-discovery |
 | Image Processing | `sharp` (adaptive unsharp masking, Sobel edge classification, BFS flood-fill, WebP export) |
 | Cryptography | Client-side AES-256-GCM for End-to-End Encrypted terminal chat |
 
@@ -167,11 +187,78 @@ The server binary handles:
 - **E2EE Communication**: AES-256-GCM encrypted messaging between cashier terminals where the server only acts as a blind relay.
 - **OTP Order Pickup**: Customer-facing pickup tokens for pre-packed orders, auto-claimed upon receipt.
 
-### 8. Store Owner Authority & Co-Owner Invitations
-- **Strict Owner-Only Editing**: Store owner name and master profile settings are strictly editable by the primary store owner only; co-owners receive `403 Forbidden` on backend and disabled lock state on UI.
-- **Co-Owner Invitation System**: Primary owner can generate cryptographically secure 16-hex alphanumeric invite codes and shareable onboarding links (`/invite?token=...`).
-- **Direct Provisioning**: Seamless co-owner registration page with auto-validation, custom username, password hashing, full administrative permission presets, and immediate session generation.
-- **Access Revocation & Protection**: Co-owners can never delete or demote the store owner, modify the owner's password, or revoke other co-owners.
+### 8. Shop WhatsApp Web QR Linked Device Integration
+- **Zero Third-Party Fees**: Directly connects store's existing WhatsApp phone using `@whiskeysockets/baileys` — no Twilio or Cloud API fees.
+- **Automated Bill Dispatch**: Sends itemized digital bills, tax breakdowns, and payment confirmation automatically on checkout.
+- **Khata Ledger Alerts**: 1-click ledger reminder dispatch to customers with pending balances.
+
+### 9. Store Email & Digital GST Tax Invoices
+- **1-Minute Gmail Setup**: Onboard in seconds with standard Google App Passwords.
+- **Automatic Background E-Invoices**: Responsive HTML tax receipts delivered automatically to customer inboxes.
+- **Modular Beta Features**: Configurable toggle in Settings unlocking Outlook, Zoho, and Custom SMTP servers.
+
+### 10. Thermal Printer Auto-Discovery & ESC/POS Direct Print
+- **Hardware Discovery**: Scans LAN and USB for 58mm and 80mm thermal receipt printers.
+- **Direct ESC/POS Output**: Instant receipt dispensing with cash drawer kick and paper cut support.
+
+---
+
+## 📱 WhatsApp Web QR Linked Device Integration
+
+NexusFlow connects directly to your store's WhatsApp account as a linked device using the multi-device protocol:
+
+```
+POS Checkout Counter                       Store Server (Node.js)                  Customer Phone
+         │                                          │                                     │
+         ├───► "Generate Bill" (Phone provided) ───►│                                     │
+         │                                          ├───► Formats Itemized Receipt        │
+         │                                          │     with GST Breakdown              │
+         │                                          │                                     │
+         │                                          ├───► Baileys Linked Device Socket ──►│ Customer Receives
+         │                                          │     (server/data/whatsapp-auth/)    │ WhatsApp Message
+         │◄─── Broadcasts WHATSAPP_STATUS_CHANGED ──┤                                     │ in < 1 Second!
+```
+
+### Key Capabilities:
+- **Zero Cloud API Fees**: Bypasses costly enterprise messaging brokers (Twilio, Gupshup, Meta Cloud API). Runs 100% locally from the store's physical smartphone.
+- **1-Click QR Pairing in POS Settings**:
+  1. Open **Settings → WhatsApp** in the POS navigation.
+  2. Click **Connect Shop WhatsApp** to generate a dynamic pairing QR code.
+  3. Open WhatsApp on your shop phone → tap **Linked Devices** → **Link a Device** and scan the screen.
+  4. The POS updates to `CONNECTED` status immediately with live WebSocket sync.
+- **Automated Background Dispatch**: When the cashier enters a customer phone number during checkout, the itemized bill (products, quantities, discounts, CGST/SGST/IGST breakdown, and total) is dispatched instantly upon clicking **Generate Bill**.
+- **Khata Customer Reminders**: Send pending balance reminders and statement summaries directly to customer WhatsApp chats from the Khata page.
+- **Encrypted Local Credentials**: Session keys are stored locally in `server/data/whatsapp-auth/` and strictly protected in `.gitignore`.
+
+---
+
+## 📧 Store Email & Digital GST Tax Invoices
+
+Provide customers with instant digital receipts and compliant tax invoices delivered directly to their email inbox:
+
+### 1-Minute Gmail Setup (Production Default)
+- Standard Gmail integration using Google App Passwords (`myaccount.google.com/apppasswords`).
+- Built-in **Test Connection** button in **Settings → Email** verifies SMTP connectivity before saving.
+
+### Automated Background Dispatch
+- If a customer email is captured at checkout, NexusFlow formats a clean, responsive HTML invoice and delivers it in the background via Nodemailer without delaying counter checkout.
+- Includes store branding, GSTIN, invoice date, itemized table, tax breakdown, and payment mode.
+
+### Modular Beta Features System (`src/app/lib/beta-features.ts`)
+- To maintain maximum counter stability, NexusFlow defaults to Gmail for standard retail deployments.
+- Store administrators can enable **Beta Features** in Settings with 1 click to unlock advanced email providers:
+  - **Microsoft Outlook / Office 365** (`smtp.office365.com:587`)
+  - **Zoho Mail** (`smtp.zoho.com:465`)
+  - **Custom SMTP Servers** (arbitrary host, ports 25 / 465 / 587, SSL/TLS toggles, custom sender name)
+
+---
+
+## 🖨️ Thermal Printer Discovery & ESC/POS Direct Print
+
+- **Universal Auto-Discovery**: Automatically probes local network (raw socket port 9100) and system USB ports for attached receipt printers.
+- **ESC/POS Engine**: Generates direct binary ESC/POS command streams for both **58mm** and **80mm** roll printers.
+- **Zero Dialog Delay**: Dispenses receipts immediately on payment without triggering OS print preview dialogs.
+- **Cash Drawer & Cutter**: Sends hardware kick pulse (`ESC p`) and full/partial paper cut (`GS V`) codes upon bill completion.
 
 ---
 
@@ -182,7 +269,7 @@ billing-software/
 ├── index.html                        # Main SPA HTML entry point
 ├── package.json                      # Dependencies and automation scripts
 ├── pnpm-workspace.yaml               # Workspace configuration
-├── vite.config.ts                    # Vite config (Basic SSL, proxy, allowedHosts)
+├── vite.config.ts                    # Vite config (Basic SSL, 127.0.0.1 proxy, allowedHosts)
 ├── tsconfig.json                     # Frontend TypeScript config
 ├── tsconfig.server.json              # Server TypeScript config
 ├── .env.example                      # Environment variable template
@@ -197,14 +284,20 @@ billing-software/
 │   │   ├── bills.ts                  # Billing, sales & receipt retrieval
 │   │   ├── chats.ts                  # E2EE terminal messaging endpoints
 │   │   ├── coupons.ts                # Atomic coupon generation & redemption
+│   │   ├── email.ts                  # Store SMTP settings, test & dispatch
+│   │   ├── email.test.ts             # Email suite test cases
 │   │   ├── products.ts               # Inventory CRUD, editing & CSV bulk import
-│   │   ├── print.ts                  # Receipt layout generator
+│   │   ├── print.ts                  # Receipt layout generator & direct print
 │   │   ├── reservations.ts           # OTP pickup queue
 │   │   ├── settings.ts               # Store configuration & tax settings
 │   │   ├── shifts.ts                 # Shift opening, closing & Z-report
-│   │   └── users.ts                  # User accounts & attendance
+│   │   ├── users.ts                  # User accounts & attendance
+│   │   ├── whatsapp.ts               # WhatsApp QR pairing, status & message APIs
+│   │   └── whatsapp.test.ts          # WhatsApp suite test cases
 │   └── services/
-│       └── imageProcessor.ts         # Sharp image enhancement & background cut
+│       ├── emailManager.ts           # Nodemailer transport & HTML invoice builder
+│       ├── imageProcessor.ts         # Sharp image enhancement & background cut
+│       └── whatsappManager.ts        # Baileys WhatsApp Web socket manager
 │
 ├── src/                              # React frontend application
 │   ├── main.tsx                      # Frontend entry point
@@ -227,13 +320,24 @@ billing-software/
 │   │   │   ├── login-page.tsx                # Cashier authentication screen
 │   │   │   ├── layout.tsx                    # Top navigation & system shell
 │   │   │   └── ui/                           # Radix UI + Tailwind design primitives
+│   │   ├── lib/
+│   │   │   └── beta-features.ts              # Modular feature-flagging utility
 │   │   └── utils/
 │   │       ├── api.ts                        # Typed REST API client
 │   │       ├── barcodeDecoder.ts             # Continuous camera stream decoder
-│   │       └── imageCompressor.ts            # Client-side canvas compression
+│   │       ├── email.ts                      # Frontend email helper client
+│   │       ├── imageCompressor.ts            # Client-side canvas compression
+│   │       └── whatsapp.ts                   # Frontend WhatsApp helper client
 │   └── styles/
 │       ├── globals.css                       # Base layout & font definitions
 │       └── design-tokens.css                 # Color tokens & theme parameters
+│
+├── print software/                           # Thermal printer discovery & profiles
+│   ├── src/
+│   │   ├── printerDiscovery.ts               # UDP/Network & USB printer scanner
+│   │   └── profiles/                         # ESC/POS printer profile definitions
+│   └── tests/
+│       └── printerDiscovery.test.ts          # Hardware discovery test suite
 │
 ├── android app/                              # Native Kotlin Android wrapper
 │   └── app/src/main/
@@ -368,7 +472,7 @@ On the first launch:
 | `pnpm build:client` | Builds Vite frontend only |
 | `pnpm build:server` | Compiles server TypeScript with `tsc` only |
 | `pnpm start` | Launches compiled production server (`node dist-server/index.js`) |
-| `pnpm test` | Runs the full Vitest automated test suite (**243 passing tests**) |
+| `pnpm test` | Runs the full Vitest automated test suite (**356 passing tests**) |
 | `pnpm test:watch` | Runs Vitest in interactive watch mode |
 
 ---
@@ -486,12 +590,12 @@ users               — Cashier and manager accounts, roles, password hashes
 shift_records       — Cashier shifts, start/end timestamps, cash totals
 break_records       — Staff break tracking
 bills               — Finalized sale transactions with JSON line items
-customers           — Customer phone numbers, names, loyalty points, credit ledger
+customers           — Customer phone numbers, names, email, loyalty points, credit ledger
 chats               — AES-256-GCM encrypted terminal messages
 coupons             — Single-use promo codes with atomic redemption tracking
 reservations        — OTP bill pickup queue
 products            — Product SKU, barcode, price tiers, stock, category & image
-settings            — Store profile, tax rates, GST configuration, theme
+settings            — Store profile, tax rates, GST configuration, theme, Gmail/SMTP credentials, WhatsApp toggles, thermal printer hardware profiles
 attendance          — Daily staff attendance logs
 ```
 
@@ -512,6 +616,7 @@ NexusFlow maintains a persistent WebSocket connection between the server and all
 | `SESSION_INVALIDATED` | Concurrent login detected | Logs out old terminal session |
 | `COUPON_REDEEMED` | Coupon used at any register | Immediately removes coupon across all terminals |
 | `RESERVATION_CLAIMED`| OTP order collected | Removes reservation from pickup queue |
+| `WHATSAPP_STATUS_CHANGED`| Shop WhatsApp QR/connection state changes | Live updates WhatsApp pairing status pill across all screens |
 
 ---
 
@@ -553,12 +658,15 @@ pnpm test:watch
 ```
 
 ### Coverage Overview:
-- **Total Tests**: **243 passing tests** across 13 test suites.
+- **Total Tests**: **356 passing tests** across 27 test suites (100% pass rate).
 - **Backend Tests**:
   - `server/routes/products.test.ts`: Product CRUD, update endpoints, validation.
   - `server/routes/coupons.test.ts`: Atomic single-use coupon redemption.
   - `server/routes/bills.test.ts`: Bill calculation, multi-slab GST calculation.
-  - `server/services/imageProcessor.test.ts`: Sharp de-blurring, edge detection, background cut.
+  - `server/routes/whatsapp.test.ts`: WhatsApp connection status, QR code polling, session lifecycle, and message dispatch.
+  - `server/routes/email.test.ts`: SMTP settings, Gmail verification, test email transmission, and automated bill receipt delivery.
+  - `server/services/imageProcessor.test.ts`: Sharp de-blurring, Sobel edge classification, background cut, white/dark product preservation.
+  - `print software/tests/printerDiscovery.test.ts`: Thermal printer discovery, profile mapping, and network/USB detection.
 - **Frontend & Integration Tests**:
   - `src/app/lib/product-editing.test.ts`: In-place catalog updating and price changes.
   - `src/app/lib/mobile-live-scanner.test.ts`: Continuous live video scanning loop and feedback.

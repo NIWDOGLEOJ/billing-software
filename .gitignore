@@ -49,6 +49,8 @@ pnpm-debug.log*
 
 # --- Runtime state ---
 server/active_sector.txt
+server/data/whatsapp-auth/
+whatsapp-session/
 
 # --- Agent/AI work dirs ---
 .agents/
@@ -78,3 +80,6 @@ website/sync/
 
 # --- Test coverage ---
 coverage/
+
+# --- Standalone print software repo ---
+print software/

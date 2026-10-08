@@ -259,19 +259,6 @@ export function initDb(sector?: string) {
       redeemed_bill_id TEXT,
       created_at       TEXT NOT NULL
     );
-
-    CREATE TABLE IF NOT EXISTS invites (
-      id          TEXT PRIMARY KEY,
-      token       TEXT UNIQUE NOT NULL,
-      role        TEXT NOT NULL DEFAULT 'co-owner',
-      name        TEXT,
-      email       TEXT,
-      phone       TEXT,
-      created_by  TEXT NOT NULL,
-      created_at  TEXT NOT NULL,
-      expires_at  TEXT NOT NULL,
-      status      TEXT DEFAULT 'pending'
-    );
   `);
 
   // Safe migrations for existing databases
@@ -336,6 +323,16 @@ export function initDb(sector?: string) {
   try {
     db.prepare("ALTER TABLE bills ADD COLUMN pricing_tier TEXT DEFAULT 'retail'").run();
     console.log('✅ Added pricing_tier column to bills table');
+  } catch (e) {}
+
+  try {
+    db.prepare("ALTER TABLE bills ADD COLUMN customer_email TEXT").run();
+    console.log('✅ Added customer_email column to bills table');
+  } catch (e) {}
+
+  try {
+    db.prepare("ALTER TABLE customers ADD COLUMN email TEXT").run();
+    console.log('✅ Added email column to customers table');
   } catch (e) {}
 
   try {
@@ -572,7 +569,6 @@ export function initDb(sector?: string) {
     ['autoOpenDrawer',       'true'],
     ['chatEnabled',          'true'],
     ['active_sector',        'retail'],
-    ['owner_name',           'Store Owner'],
   ];
 
   for (const [k, v] of defaultSettings) insSettings.run(k, v);

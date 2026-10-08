@@ -15,6 +15,7 @@ import { ShiftClosingModal } from './shift-closing-modal';
 import { ShiftStartModal } from './shift-start-modal';
 import { KeyboardShortcutsModal } from './keyboard-shortcuts-modal';
 import { useShopDetails } from '../lib/shop-details';
+import { useBetaFeatures } from '../lib/beta-features';
 import jmartLogo from '../../assets/logos/jmart_logo_transparent.png';
 
 /**
@@ -103,10 +104,19 @@ export function SectorNav({
     }
   }, []);
 
+  const { gstLedger } = useBetaFeatures();
+
   const sector = useMemo(
     () => SECTORS.find(s => s.id === sectorId) ?? SECTORS[0],
     [sectorId],
   );
+
+  const sectorLinks = useMemo(() => {
+    return sector.links.filter(l => {
+      if (l.to === '/gst' && !gstLedger) return false;
+      return true;
+    });
+  }, [sector.links, gstLedger]);
 
   const isDark = theme === 'dark';
   const dot = `oklch(${isDark ? '0.74 0.13' : '0.58 0.14'} ${sector.hue})`;
@@ -226,11 +236,11 @@ export function SectorNav({
             );
           })}
 
-          {sector.links.length > 0 && (
+          {sectorLinks.length > 0 && (
             <span className="w-px h-5 mx-2 bg-[var(--border)] flex-shrink-0" />
           )}
 
-          {sector.links.map(link => {
+          {sectorLinks.map(link => {
             const active = location.pathname === link.to;
             return (
               <Link

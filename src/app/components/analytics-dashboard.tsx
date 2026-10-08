@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Camera, Edit2 } from 'lucide-react';
+import { Camera, Edit2, Trash2 } from 'lucide-react';
 import { api } from '../utils/api';
 import { useAuth } from '../contexts/auth-context';
 import { useTheme } from '../contexts/theme-context';
@@ -274,6 +274,8 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
   const [editCapturedImage, setEditCapturedImage] = useState<string | null>(null);
   const [editTouched, setEditTouched] = useState(false);
   const [isUpdatingProduct, setIsUpdatingProduct] = useState(false);
+  const [productToDelete, setProductToDelete] = useState<ProductItem | null>(null);
+  const [isDeletingProduct, setIsDeletingProduct] = useState(false);
   const editCameraInputRef = useRef<HTMLInputElement>(null);
   const editGalleryInputRef = useRef<HTMLInputElement>(null);
 
@@ -897,6 +899,32 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
     }
   };
 
+  // Delete product handler
+  const handleDeleteProduct = async () => {
+    if (!productToDelete) return;
+    const targetId = productToDelete.id || productToDelete.code;
+    try {
+      setIsDeletingProduct(true);
+      await api.delete(`/products/${targetId}`);
+      setApiProducts(prev => prev.filter(p => p.id !== productToDelete.id && p.code !== productToDelete.code));
+      flash(`Product "${productToDelete.name}" deleted from catalogue`);
+      toast.success(`Product "${productToDelete.name}" deleted successfully`);
+      if (editOpen && (editingProduct?.id === productToDelete.id || editingProduct?.code === productToDelete.code)) {
+        setEditOpen(false);
+        setEditingProduct(null);
+        setEditCapturedImage(null);
+      }
+      setProductToDelete(null);
+    } catch (err: any) {
+      console.error('Failed to delete product:', err);
+      const errMsg = err?.message || 'Failed to delete product';
+      toast.error(`Delete failed: ${errMsg}`);
+      flash(`Delete failed: ${errMsg}`);
+    } finally {
+      setIsDeletingProduct(false);
+    }
+  };
+
   // RFC-4180 Compliant CSV Parser
   const parseCsv = (text: string): string[][] => {
     const rows: string[][] = [];
@@ -1077,7 +1105,7 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
   const isDark = theme === 'dark' || (theme === 'system' && typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches);
 
   return (
-    <div className="min-h-screen flex flex-col bg-[var(--bg)] text-[var(--ink)] antialiased select-none">
+    <div className="h-full flex flex-col bg-[var(--bg)] text-[var(--ink)] antialiased select-none overflow-hidden">
       {/* Sub-Header Toolbar */}
       <div className="min-h-[52px] px-5 py-2 bg-[var(--panel)] border-b border-[var(--border)] flex flex-wrap items-center gap-4 shrink-0 z-10">
         <div className="flex items-baseline gap-2.5">
@@ -1177,7 +1205,7 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
 
       {/* TAB 1: INVENTORY */}
       {tab === 'inventory' && (
-        <div className="flex-1 p-[14px] flex flex-wrap gap-[14px] items-start overflow-y-auto">
+        <div className="flex-1 min-h-0 p-[14px] flex flex-wrap gap-[14px] items-start overflow-y-auto">
           {/* Main Table Card */}
           <div className="flex-1 min-w-[560px] bg-[var(--panel)] border border-[var(--border)] rounded-[10px] overflow-hidden flex flex-col">
             {/* Filter Bar */}
@@ -1222,7 +1250,7 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
             {/* Table */}
             <div className="overflow-x-auto">
               <div
-                className="grid grid-cols-[minmax(180px,1fr)_108px_88px_70px_80px_90px_64px] min-w-[700px] gap-2.5 px-3.5 py-2.5 bg-[var(--sub)] border-b border-[var(--rule2)] text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--ink3)]"
+                className="grid grid-cols-[minmax(180px,1fr)_108px_88px_70px_80px_90px_104px] min-w-[740px] gap-2.5 px-3.5 py-2.5 bg-[var(--sub)] border-b border-[var(--rule2)] text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--ink3)]"
                 style={{ fontFamily: MONO }}
               >
                 <div>Item</div>
@@ -1245,7 +1273,7 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
                         handleOpenEdit(p);
                       }
                     }}
-                    className={`grid grid-cols-[minmax(180px,1fr)_108px_88px_70px_80px_90px_64px] min-w-[700px] gap-2.5 items-center px-3.5 py-2.5 border-b border-[var(--rule)] transition-colors group ${
+                    className={`grid grid-cols-[minmax(180px,1fr)_108px_88px_70px_80px_90px_104px] min-w-[740px] gap-2.5 items-center px-3.5 py-2.5 border-b border-[var(--rule)] transition-colors group ${
                       canEditInventory ? 'hover:bg-[var(--sub)]/40 cursor-pointer' : ''
                     }`}
                   >
@@ -1281,18 +1309,29 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
                         {isOut ? 'Out' : isLow ? 'Reorder' : 'In stock'}
                       </span>
                     </div>
-                    <div className="text-right" onClick={e => e.stopPropagation()}>
+                    <div className="text-right flex items-center justify-end gap-1.5" onClick={e => e.stopPropagation()}>
                       {canEditInventory ? (
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEdit(p)}
-                          className="inline-flex items-center justify-center gap-1 h-[28px] px-2 rounded-[5px] border border-[var(--border2)] bg-[var(--panel)] hover:bg-[var(--accent-soft)] hover:border-[var(--accent)] hover:text-[var(--accent)] text-[11px] font-bold cursor-pointer transition-colors text-[var(--ink)]"
-                          title={`Edit ${p.name}`}
-                          aria-label={`Edit ${p.name}`}
-                        >
-                          <Edit2 className="w-3 h-3" />
-                          <span>Edit</span>
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEdit(p)}
+                            className="inline-flex items-center justify-center gap-1 h-[28px] px-2 rounded-[5px] border border-[var(--border2)] bg-[var(--panel)] hover:bg-[var(--accent-soft)] hover:border-[var(--accent)] hover:text-[var(--accent)] text-[11px] font-bold cursor-pointer transition-colors text-[var(--ink)]"
+                            title={`Edit ${p.name}`}
+                            aria-label={`Edit ${p.name}`}
+                          >
+                            <Edit2 className="w-3 h-3" />
+                            <span>Edit</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setProductToDelete(p)}
+                            className="inline-flex items-center justify-center h-[28px] w-[28px] rounded-[5px] border border-[var(--border2)] bg-[var(--panel)] hover:bg-[var(--danger-soft)] hover:border-[var(--danger)] text-[var(--ink3)] hover:text-[var(--danger)] cursor-pointer transition-colors"
+                            title={`Delete ${p.name}`}
+                            aria-label={`Delete ${p.name}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </>
                       ) : (
                         <span className="text-[11px] text-[var(--ink4)]" style={{ fontFamily: MONO }}>—</span>
                       )}
@@ -1398,7 +1437,7 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
 
       {/* TAB 2: SALES */}
       {tab === 'sales' && (
-        <div className="flex-1 p-[14px] flex flex-col gap-[14px] overflow-y-auto">
+        <div className="flex-1 min-h-0 p-[14px] flex flex-col gap-[14px] overflow-y-auto">
           {/* Range Selector */}
           <div className="flex items-center gap-2.5">
             <div className="flex border border-[var(--border)] rounded-[8px] overflow-hidden bg-[var(--panel)]">
@@ -1585,7 +1624,7 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
 
       {/* TAB 3: GST RETURNS */}
       {tab === 'gst' && (
-        <div className="flex-1 p-[14px] flex flex-col gap-[14px] overflow-y-auto">
+        <div className="flex-1 min-h-0 p-[14px] flex flex-col gap-[14px] overflow-y-auto">
           {/* Summary Cards */}
           <div className="grid grid-cols-[repeat(auto-fit,minmax(190px,1fr))] gap-[14px]">
             {gstData.cards.map(c => (
@@ -2443,6 +2482,21 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
               <div className="flex-1 text-[12.5px] text-[var(--ink3)]">
                 Updates are saved to the SQLite database and pushed to all LAN terminals via WebSockets.
               </div>
+              {editingProduct && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const toDel = editingProduct;
+                    setEditOpen(false);
+                    setEditingProduct(null);
+                    setProductToDelete(toDel);
+                  }}
+                  className="h-[46px] px-3.5 border border-[var(--danger)]/30 bg-[var(--danger-soft)] text-[var(--danger)] hover:bg-[var(--danger)] hover:text-white rounded-[8px] text-[13px] font-semibold cursor-pointer transition-colors flex items-center gap-1.5"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>Delete Product</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -2847,6 +2901,65 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
                 className="h-[46px] px-5 rounded-[8px] bg-[var(--ink)] text-[var(--panel)] text-[13px] font-bold cursor-pointer hover:opacity-95 transition-opacity border-0"
               >
                 Export
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Product Confirmation Modal */}
+      {productToDelete && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 bg-black/55 backdrop-blur-[2px] flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => {
+            if (!isDeletingProduct) setProductToDelete(null);
+          }}
+        >
+          <div
+            className="w-full max-w-[420px] bg-[var(--panel)] border border-[var(--border2)] rounded-[12px] shadow-2xl p-5"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-full bg-[var(--danger-soft)] text-[var(--danger)] flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-[16px] font-bold text-[var(--ink)]">Delete Product</h3>
+                <p className="text-[12px] text-[var(--ink3)]" style={{ fontFamily: MONO }}>
+                  SKU: {productToDelete.code}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-[13px] text-[var(--ink2)] leading-relaxed mb-4">
+              Are you sure you want to delete <span className="font-semibold text-[var(--ink)]">{productToDelete.name}</span>? This action removes the product from the catalogue, POS terminals, and barcode scanners.
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                disabled={isDeletingProduct}
+                onClick={() => setProductToDelete(null)}
+                className="h-[38px] px-3.5 rounded-[7px] border border-[var(--border2)] bg-[var(--panel)] text-[var(--ink2)] hover:text-[var(--ink)] text-[12.5px] font-semibold cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingProduct}
+                onClick={handleDeleteProduct}
+                className="h-[38px] px-4 rounded-[7px] bg-[var(--danger)] text-white hover:bg-[var(--danger)]/90 text-[12.5px] font-bold cursor-pointer disabled:opacity-50 flex items-center gap-2"
+              >
+                {isDeletingProduct ? (
+                  <>
+                    <span className="w-3.5 h-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <span>Delete Product</span>
+                )}
               </button>
             </div>
           </div>
