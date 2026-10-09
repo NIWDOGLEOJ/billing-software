@@ -529,6 +529,7 @@ export function EmployeeManagement() {
     setIsClosingShift(true);
     try {
       await api.post('/shifts/end', {
+        shiftId: activeShift?.id,
         actualCash: cashNum,
         actualUpi: upiNum,
         actualCard: cardNum,

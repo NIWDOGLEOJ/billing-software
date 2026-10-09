@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { db } from '../db';
-import { AuthRequest, authenticateToken, requireOwner } from '../middleware/auth';
+import { AuthRequest, authenticateToken, requireOwner, requirePermission } from '../middleware/auth';
 
 const router = Router();
 
@@ -56,21 +56,34 @@ router.post('/start', authenticateToken, (req: AuthRequest, res: Response) => {
 // POST /api/shifts/end — End shift and compute daily Z-Report
 router.post('/end', authenticateToken, (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Authentication required' });
-  const { actualCash, actualUpi, actualCard, notes } = req.body;
+  const { actualCash, actualUpi, actualCard, notes, shiftId } = req.body;
 
   if (actualCash === undefined || actualUpi === undefined || actualCard === undefined) {
     return res.status(400).json({ error: 'Actual counts are required' });
   }
 
   try {
-    // 1. Find active shift
-    const activeShift = db.prepare("SELECT * FROM shift_records WHERE user_id = ? AND status = 'active'").get(req.user.id) as any;
+    // 1. Find active shift by shiftId, user_id, or latest store active shift for managers/owners
+    let activeShift: any = null;
+    if (shiftId) {
+      activeShift = db.prepare("SELECT * FROM shift_records WHERE id = ? AND status = 'active'").get(shiftId);
+    }
+    if (!activeShift) {
+      activeShift = db.prepare("SELECT * FROM shift_records WHERE user_id = ? AND status = 'active'").get(req.user.id);
+    }
+    if (!activeShift) {
+      const isManagerOrOwner = req.user.role === 'owner' || req.user.role === 'co-owner' || req.user.role === 'manager';
+      if (isManagerOrOwner) {
+        activeShift = db.prepare("SELECT * FROM shift_records WHERE status = 'active' ORDER BY start_time DESC LIMIT 1").get();
+      }
+    }
+
     if (!activeShift) {
       return res.status(404).json({ error: 'No active shift found to end' });
     }
 
-    // 2. Fetch and compile system sales totals completed by this cashier during this shift
-    const bills = db.prepare('SELECT total, payment_mode FROM bills WHERE cashier_id = ? AND date >= ?').all(req.user.id, activeShift.start_time) as any[];
+    // 2. Fetch and compile system sales totals completed during this shift
+    const bills = db.prepare('SELECT total, payment_mode FROM bills WHERE (cashier_id = ? OR cashier_id IS NULL) AND date >= ?').all(activeShift.user_id, activeShift.start_time) as any[];
 
     let systemCash = 0;
     let systemUpi = 0;
@@ -120,8 +133,8 @@ router.post('/end', authenticateToken, (req: AuthRequest, res: Response) => {
   }
 });
 
-// GET /api/shifts — List all closed Z-Reports for owner auditing (requires owner)
-router.get('/', authenticateToken, requireOwner, (req, res) => {
+// GET /api/shifts — List all closed Z-Reports for auditing
+router.get('/', authenticateToken, requirePermission(['view_analytics', 'generate_reports', 'manage_employees']), (req, res) => {
   try {
     const reports = db.prepare(`
       SELECT s.*, 

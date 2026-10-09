@@ -259,33 +259,6 @@ export function POSSettings({ onClose, isModal = false, defaultPanel = 'shop' }:
   const [panel, setPanel] = useState<SettingsPanelKey>(defaultPanel);
   const [toastMessage, setToastMessage] = useState('');
 
-  if (!canAccessSettings) {
-    const restrictedContent = (
-      <div className="flex-1 flex items-center justify-center p-6 bg-[var(--bg)] min-h-[60vh]">
-        <div className="w-full max-w-[480px] bg-[var(--panel)] border border-[var(--border)] rounded-[12px] p-6 text-center shadow-xl">
-          <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-[var(--danger-soft)] text-[var(--danger)] border border-[var(--danger-line)] flex items-center justify-center">
-            <Lock size={22} />
-          </div>
-          <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--danger)] mb-1" style={{ fontFamily: MONO }}>
-            403 · Access Restricted
-          </div>
-          <h2 className="text-[18px] font-bold text-[var(--ink)] mb-2">Settings Access Denied</h2>
-          <p className="text-[13px] text-[var(--ink2)] mb-5">
-            Your account ({user?.name || 'Staff'} · <span className="capitalize">{user?.role || 'Staff'}</span>) does not have permission to access system settings (<strong className="text-[var(--ink)]">access_settings</strong> required).
-          </p>
-          <button
-            type="button"
-            onClick={() => (onClose ? onClose() : navigate('/'))}
-            className="h-10 px-5 rounded-[8px] bg-[var(--accent)] text-[var(--panel)] text-[13px] font-bold cursor-pointer hover:opacity-95 transition-opacity border-0"
-          >
-            {onClose ? 'Close Settings' : 'Return to Register'}
-          </button>
-        </div>
-      </div>
-    );
-    return isModal ? <SettingsModalWrapper onClose={onClose}>{restrictedContent}</SettingsModalWrapper> : restrictedContent;
-  }
-
   // Fallback if current panel gets disabled
   useEffect(() => {
     if (panel === 'warehouses' && !warehousesEnabled) {
@@ -3352,6 +3325,33 @@ Payment Mode: *UPI*
         </main>
     </div>
   );
+
+  if (!canAccessSettings) {
+    const restrictedContent = (
+      <div className="flex-1 flex items-center justify-center p-6 bg-[var(--bg)] min-h-[60vh]">
+        <div className="w-full max-w-[480px] bg-[var(--panel)] border border-[var(--border)] rounded-[12px] p-6 text-center shadow-xl">
+          <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-[var(--danger-soft)] text-[var(--danger)] border border-[var(--danger-line)] flex items-center justify-center">
+            <Lock size={22} />
+          </div>
+          <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--danger)] mb-1" style={{ fontFamily: MONO }}>
+            403 · Access Restricted
+          </div>
+          <h2 className="text-[18px] font-bold text-[var(--ink)] mb-2">Settings Access Denied</h2>
+          <p className="text-[13px] text-[var(--ink2)] mb-5">
+            Your account ({user?.name || 'Staff'} · <span className="capitalize">{user?.role || 'Staff'}</span>) does not have permission to access system settings (<strong className="text-[var(--ink)]">access_settings</strong> required).
+          </p>
+          <button
+            type="button"
+            onClick={() => (onClose ? onClose() : navigate('/'))}
+            className="h-10 px-5 rounded-[8px] bg-[var(--accent)] text-[var(--panel)] text-[13px] font-bold cursor-pointer hover:opacity-95 transition-opacity border-0"
+          >
+            {onClose ? 'Close Settings' : 'Return to Register'}
+          </button>
+        </div>
+      </div>
+    );
+    return isModal ? <SettingsModalWrapper onClose={onClose}>{restrictedContent}</SettingsModalWrapper> : restrictedContent;
+  }
 
   if (isModal) {
     return (

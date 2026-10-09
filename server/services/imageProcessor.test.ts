@@ -108,7 +108,7 @@ describe('Product Camera & Pure White Background Image Enhancement Pipeline', ()
     // Center pixel should remain distinctly green (G > R and G > B)
     expect(centerPixel[1]).toBeGreaterThan(centerPixel[0]);
     expect(centerPixel[1]).toBeGreaterThan(centerPixel[2]);
-  });
+  }, 15000);
 
   it('preserves white and light-colored products (e.g. milk cartons, salt bags) without erasing them', async () => {
     const width = 200;

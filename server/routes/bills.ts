@@ -5,8 +5,8 @@ import { emailManager } from '../services/emailManager';
 
 const router = Router();
 
-// GET /api/bills (query history)
-router.get('/', authenticateToken, requirePermission(['access_billing', 'view_transaction_history', 'view_analytics', 'generate_reports']), (req, res) => {
+// GET /api/bills (query history and drawer shift tallies)
+router.get('/', authenticateToken, requirePermission(['access_billing', 'view_transaction_history', 'view_analytics', 'generate_reports', 'manage_employees']), (req, res) => {
   try {
     const bills = db.prepare("SELECT * FROM bills WHERE cashier_id != 'dev_1' ORDER BY date DESC").all();
     // Parse items JSON in each bill

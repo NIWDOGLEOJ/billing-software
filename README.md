@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/Express-5-000000?logo=express" alt="Express 5"/>
   <img src="https://img.shields.io/badge/SQLite-WAL-003B57?logo=sqlite" alt="SQLite"/>
   <img src="https://img.shields.io/badge/Tailwind-4-06B6D4?logo=tailwindcss" alt="Tailwind CSS 4"/>
-  <img src="https://img.shields.io/badge/tests-382%20passed-brightgreen" alt="382 tests"/>
+  <img src="https://img.shields.io/badge/tests-385%20passed-brightgreen" alt="385 tests"/>
 </p>
 
 ---
