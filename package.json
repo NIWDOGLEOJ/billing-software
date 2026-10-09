@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.0.1",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev:client": "vite",
     "dev:server": "tsx watch server/index.ts",
@@ -15,7 +16,11 @@
     "build": "vite build && tsc -p tsconfig.server.json",
     "start": "node dist-server/index.js",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "desktop": "electron .",
+    "dist:mac": "electron-builder --mac dmg",
+    "dist:win": "electron-builder --win nsis portable",
+    "dist:desktop": "electron-builder -mw"
   },
   "dependencies": {
     "@imgly/background-removal-node": "^1.4.5",
@@ -138,6 +143,8 @@
     "@vitejs/plugin-basic-ssl": "^2.3.0",
     "@vitejs/plugin-react": "4.7.0",
     "concurrently": "^9.2.1",
+    "electron": "44.7.0",
+    "electron-builder": "26.15.3",
     "tailwindcss": "4.1.12",
     "tsx": "^4.22.3",
     "typescript": "^6.0.3",

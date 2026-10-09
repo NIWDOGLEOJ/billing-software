@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NexusFlow POS — Server Connection</title>
+  <link rel="stylesheet" href="pairing.css">
+</head>
+<body>
+  <div class="window-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="logo-badge">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+            <line x1="8" y1="21" x2="16" y2="21"></line>
+            <line x1="12" y1="17" x2="12" y2="21"></line>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1>NexusFlow <span>POS</span></h1>
+          <p class="subtitle">Workstation LAN Terminal Manager</p>
+        </div>
+      </div>
+      <div class="network-badge" id="clientIpBadge">
+        <span class="status-dot"></span>
+        <span id="clientIpText">Detecting LAN...</span>
+      </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- Radar / Scanner Section -->
+      <section class="scanner-section">
+        <div class="scanner-status">
+          <div class="radar-container" id="radar">
+            <div class="radar-wave"></div>
+            <div class="radar-wave delay-1"></div>
+            <div class="radar-wave delay-2"></div>
+            <div class="radar-core">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 12.55a11 11 0 0 1 14.08 0"></path>
+                <path d="M1.42 9a16 16 0 0 1 21.16 0"></path>
+                <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+                <line x1="12" y1="20" x2="12.01" y2="20"></line>
+              </svg>
+            </div>
+          </div>
+          <div class="scanner-text">
+            <h2 id="scanHeading">Searching for POS Server on Local Network...</h2>
+            <p id="scanSubtext">Broadcasting discovery beacons and checking active subnet addresses</p>
+          </div>
+          <button class="btn btn-secondary btn-sm" id="btnRescan" onclick="startScan()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="23 4 23 10 17 10"></polyline>
+              <polyline points="1 20 1 14 7 14"></polyline>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+            </svg>
+            <span>Scan Again</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- Discovered Servers List -->
+      <section class="servers-section">
+        <div class="section-title-row">
+          <h3>Discovered Servers</h3>
+          <span class="count-badge" id="serversCount">0 found</span>
+        </div>
+
+        <div class="servers-list" id="serversList">
+          <div class="empty-state" id="emptyState">
+            <div class="empty-spinner"></div>
+            <p>Scanning local Wi-Fi and Ethernet network...</p>
+            <span class="hint">Make sure the primary POS server laptop/PC is running NexusFlow Server.</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Quick Connect or Manual Override Divider -->
+      <div class="section-divider">
+        <span>OR CONNECT MANUALLY</span>
+      </div>
+
+      <!-- Manual Connection Form -->
+      <section class="manual-section">
+        <form id="manualForm" onsubmit="handleManualConnect(event)">
+          <div class="form-row">
+            <div class="form-group flex-2">
+              <label for="manualHost">Server IP or Hostname</label>
+              <div class="input-wrapper">
+                <span class="input-prefix">http://</span>
+                <input type="text" id="manualHost" placeholder="192.168.1.100 or localhost" required autocomplete="off" />
+              </div>
+            </div>
+            <div class="form-group flex-1">
+              <label for="manualPort">Port</label>
+              <input type="number" id="manualPort" value="3000" min="1" max="65535" required />
+            </div>
+            <div class="form-group btn-col">
+              <button type="submit" class="btn btn-primary" id="btnManualConnect">
+                <span>Connect</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="form-footer">
+            <label class="checkbox-label">
+              <input type="checkbox" id="rememberServer" checked />
+              <span>Remember and auto-connect to this server next time</span>
+            </label>
+            <button type="button" class="btn-link" onclick="connectLocalhost()">
+              🖥️ Connect to Localhost (3000)
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Alert / Status Toast -->
+      <div class="toast hidden" id="statusToast">
+        <span class="toast-icon" id="toastIcon">ℹ️</span>
+        <span class="toast-message" id="toastMessage">Connecting...</span>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <span>NexusFlow POS Terminal Shell v1.0.0</span>
+      <span class="shortcut-tip">Press <kbd>Ctrl+Shift+S</kbd> anytime inside POS to switch server</span>
+    </footer>
+  </div>
+
+  <script src="pairing.js"></script>
+</body>
+</html>

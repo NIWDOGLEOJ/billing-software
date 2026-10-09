@@ -6,21 +6,41 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.Typeface
 import android.net.Uri
 import android.net.http.SslError
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
+import android.view.Gravity
 import android.view.View
 import android.webkit.*
-import android.widget.EditText
-import android.widget.LinearLayout
-import android.widget.Toast
+import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import org.json.JSONObject
+import java.io.BufferedReader
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStreamReader
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.HttpURLConnection
+import java.net.InetAddress
+import java.net.NetworkInterface
+import java.net.URL
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+
+data class DiscoveredServer(
+    val name: String,
+    val url: String,
+    val latency: Long
+)
 
 class MainActivity : AppCompatActivity() {
 
@@ -31,6 +51,8 @@ class MainActivity : AppCompatActivity() {
     private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
     private var cameraPhotoUri: Uri? = null
     private var cameraPhotoFile: File? = null
+    private val executor = Executors.newFixedThreadPool(20)
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,19 +67,12 @@ class MainActivity : AppCompatActivity() {
         webView = findViewById(R.id.webView)
         setupWebView()
 
-        // Get saved POS Server IP address or prompt on first launch
+        // Get saved POS Server IP address or prompt / auto-discover on first launch
         val sharedPref = getPreferences(Context.MODE_PRIVATE)
         val savedIp = sharedPref.getString("pos_server_ip", null)
 
         if (savedIp != null) {
-            val url = if (savedIp.startsWith("http://") || savedIp.startsWith("https://")) {
-                savedIp
-            } else if (savedIp.contains(":")) {
-                "https://$savedIp"
-            } else {
-                "https://$savedIp:5173"
-            }
-            webView.loadUrl(url)
+            loadServerUrl(savedIp)
         } else {
             promptForServerIp()
         }
@@ -81,6 +96,18 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun loadServerUrl(rawAddress: String) {
+        var target = rawAddress.trim()
+        if (!target.startsWith("http://") && !target.startsWith("https://")) {
+            target = if (target.contains(":")) {
+                "http://$target"
+            } else {
+                "http://$target:3000"
+            }
+        }
+        webView.loadUrl(target)
+    }
+
     private fun setupWebView() {
         val settings = webView.settings
         settings.javaScriptEnabled = true
@@ -96,13 +123,18 @@ class MainActivity : AppCompatActivity() {
         // Force hardware acceleration for modern glassmorphism graphics performance and camera video
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
 
-        // Mount JavaScript bridge for screen capture security flags
+        // Mount JavaScript bridge for screen capture security flags and server management
         webView.addJavascriptInterface(WebAppInterface(this), "Android")
 
         webView.webViewClient = object : WebViewClient() {
             override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
                 super.onReceivedError(view, request, error)
-                Toast.makeText(this@MainActivity, "Connection error. Please check server IP and LAN status.", Toast.LENGTH_LONG).show()
+                if (request?.isForMainFrame == true) {
+                    mainHandler.post {
+                        Toast.makeText(this@MainActivity, "Connection lost to POS server.", Toast.LENGTH_SHORT).show()
+                        promptForServerIp("POS Server unreachable. Please select or verify the server address:")
+                    }
+                }
             }
 
             override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
@@ -187,7 +219,6 @@ class MainActivity : AppCompatActivity() {
                 val canTakePhoto = takePictureIntent.resolveActivity(packageManager) != null && photoUri != null
                 val isDirectCapture = fileChooserParams?.isCaptureEnabled == true
 
-                // Direct native camera launch if capture attribute is requested
                 if (isDirectCapture && canTakePhoto) {
                     return try {
                         startActivityForResult(takePictureIntent, FILE_CHOOSER_REQUEST_CODE)
@@ -225,47 +256,281 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun promptForServerIp() {
+    /**
+     * Shows the Server Configuration dialog with active LAN Auto-Discovery
+     */
+    fun promptForServerIp(customMessage: String? = null) {
+        val sharedPref = getPreferences(Context.MODE_PRIVATE)
+        val lastIp = sharedPref.getString("pos_server_ip", "")
+
         val builder = AlertDialog.Builder(this)
-        builder.setTitle("Configure POS Server")
-        builder.setMessage("Please enter the local IP address or URL of your POS Server (e.g. 192.168.1.10 or 10.0.2.2 for local emulator loopback):")
+        builder.setTitle("Connect to POS Server")
 
-        val input = EditText(this)
-        input.hint = "192.168.1.x or https://192.168.1.x:5173"
-        
-        val lp = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.MATCH_PARENT
-        )
-        input.layoutParams = lp
-        builder.setView(input)
-
-        builder.setPositiveButton("Connect") { dialog, _ ->
-            val rawIp = input.text.toString().trim()
-            if (rawIp.isNotEmpty()) {
-                val targetUrl = if (rawIp.startsWith("http://") || rawIp.startsWith("https://")) {
-                    rawIp
-                } else if (rawIp.contains(":")) {
-                    "https://$rawIp"
-                } else {
-                    "https://$rawIp:5173"
-                }
-                val sharedPref = getPreferences(Context.MODE_PRIVATE)
-                with(sharedPref.edit()) {
-                    putString("pos_server_ip", rawIp)
-                    apply()
-                }
-                webView.loadUrl(targetUrl)
-                Toast.makeText(this, "Connecting to $targetUrl...", Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(this, "IP Address cannot be empty", Toast.LENGTH_SHORT).show()
-                promptForServerIp()
-            }
-            dialog.dismiss()
+        val rootLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 24, 48, 16)
         }
 
-        builder.setCancelable(false)
-        builder.show()
+        // Subtitle / message
+        val msgView = TextView(this).apply {
+            text = customMessage ?: "Searching for NexusFlow POS Servers on local network..."
+            setTextColor(Color.parseColor("#475569"))
+            textSize = 13f
+            setPadding(0, 0, 0, 16)
+        }
+        rootLayout.addView(msgView)
+
+        // Discovered servers section container
+        val discoveredContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 0, 0, 16)
+        }
+        rootLayout.addView(discoveredContainer)
+
+        // Progress bar indicator
+        val progressLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, 16)
+        }
+        val progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleSmall)
+        val progressText = TextView(this).apply {
+            text = " Scanning Wi-Fi subnet..."
+            textSize = 12f
+            setTextColor(Color.parseColor("#64748b"))
+        }
+        progressLayout.addView(progressBar)
+        progressLayout.addView(progressText)
+        rootLayout.addView(progressLayout)
+
+        // Manual Input Section Label
+        val manualLabel = TextView(this).apply {
+            text = "Or enter Server IP manually:"
+            textSize = 12f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#1e293b"))
+            setPadding(0, 8, 0, 8)
+        }
+        rootLayout.addView(manualLabel)
+
+        val input = EditText(this).apply {
+            hint = "192.168.1.100 or localhost:3000"
+            setText(lastIp)
+            setSingleLine(true)
+        }
+        rootLayout.addView(input)
+
+        // Helper quick connect buttons
+        val quickBtnLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 8, 0, 8)
+        }
+        val emulatorBtn = Button(this).apply {
+            text = "Emulator (10.0.2.2)"
+            textSize = 11f
+            setOnClickListener {
+                input.setText("10.0.2.2:3000")
+            }
+        }
+        val rescanBtn = Button(this).apply {
+            text = "Re-scan LAN"
+            textSize = 11f
+        }
+        quickBtnLayout.addView(emulatorBtn)
+        quickBtnLayout.addView(rescanBtn)
+        rootLayout.addView(quickBtnLayout)
+
+        builder.setView(rootLayout)
+
+        var dialogRef: AlertDialog? = null
+
+        fun connectToAddress(address: String) {
+            val trimmed = address.trim()
+            if (trimmed.isNotEmpty()) {
+                with(sharedPref.edit()) {
+                    putString("pos_server_ip", trimmed)
+                    apply()
+                }
+                loadServerUrl(trimmed)
+                Toast.makeText(this@MainActivity, "Connecting to $trimmed...", Toast.LENGTH_SHORT).show()
+                dialogRef?.dismiss()
+            } else {
+                Toast.makeText(this@MainActivity, "Server address cannot be empty", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        builder.setPositiveButton("Connect") { _, _ ->
+            connectToAddress(input.text.toString())
+        }
+
+        builder.setNegativeButton("Cancel") { d, _ ->
+            d.dismiss()
+        }
+
+        builder.setCancelable(true)
+        dialogRef = builder.create()
+        dialogRef.show()
+
+        // Background LAN Discovery scanner
+        fun startDiscovery() {
+            discoveredContainer.removeAllViews()
+            progressLayout.visibility = View.VISIBLE
+            progressText.text = " Scanning Wi-Fi subnet..."
+
+            val discoveredMap = ConcurrentHashMap<String, DiscoveredServer>()
+
+            fun onServerDiscovered(server: DiscoveredServer) {
+                if (discoveredMap.putIfAbsent(server.url, server) == null) {
+                    mainHandler.post {
+                        val card = Button(this@MainActivity).apply {
+                            text = "🟢 ${server.name}\n   ${server.url} (${server.latency}ms)"
+                            textSize = 12f
+                            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                            setBackgroundColor(Color.parseColor("#f0fdf4"))
+                            setTextColor(Color.parseColor("#166534"))
+                            setOnClickListener {
+                                connectToAddress(server.url)
+                            }
+                        }
+                        val lp = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT
+                        ).apply {
+                            setMargins(0, 4, 0, 4)
+                        }
+                        card.layoutParams = lp
+                        discoveredContainer.addView(card)
+                        progressText.text = " Found ${discoveredMap.size} active POS server(s)"
+                    }
+                }
+            }
+
+            // 1. UDP Broadcast discovery
+            executor.execute {
+                try {
+                    val socket = DatagramSocket()
+                    socket.broadcast = true
+                    socket.soTimeout = 2000
+
+                    val reqData = "NEXUSFLOW_DISCOVER".toByteArray()
+                    val packet = DatagramPacket(
+                        reqData,
+                        reqData.size,
+                        InetAddress.getByName("255.255.255.255"),
+                        41234
+                    )
+                    socket.send(packet)
+
+                    val buf = ByteArray(1024)
+                    val recvPacket = DatagramPacket(buf, buf.size)
+                    val startTime = System.currentTimeMillis()
+
+                    while (System.currentTimeMillis() - startTime < 2000) {
+                        try {
+                            socket.receive(recvPacket)
+                            val text = String(recvPacket.data, 0, recvPacket.length)
+                            val json = JSONObject(text)
+                            if (json.optString("app") == "nexusflow-pos") {
+                                val port = json.optInt("port", 3000)
+                                val serverIp = recvPacket.address.hostAddress ?: ""
+                                val targetUrl = "http://$serverIp:$port"
+                                val name = json.optString("name", "NexusFlow Retail POS")
+                                onServerDiscovered(DiscoveredServer(name, targetUrl, 5))
+                            }
+                        } catch (e: Exception) {
+                            break
+                        }
+                    }
+                    socket.close()
+                } catch (e: Exception) {
+                    // UDP broadcast error fallback
+                }
+            }
+
+            // 2. Localhost & Emulator probe
+            val localProbes = listOf("http://10.0.2.2:3000", "http://127.0.0.1:3000", "http://localhost:3000")
+            for (probe in localProbes) {
+                executor.execute {
+                    testPing(probe)?.let { onServerDiscovered(it) }
+                }
+            }
+
+            // 3. Subnet HTTP ping sweep
+            executor.execute {
+                val subnetBase = getLocalSubnetPrefix()
+                if (subnetBase != null) {
+                    for (i in 1..254) {
+                        val candidateUrl = "http://$subnetBase.$i:3000"
+                        executor.execute {
+                            testPing(candidateUrl)?.let { onServerDiscovered(it) }
+                        }
+                    }
+                }
+
+                // Stop progress spinner after 2.5s
+                mainHandler.postDelayed({
+                    progressLayout.visibility = View.GONE
+                }, 2500)
+            }
+        }
+
+        rescanBtn.setOnClickListener {
+            startDiscovery()
+        }
+
+        // Run initial scan
+        startDiscovery()
+    }
+
+    private fun testPing(baseUrl: String): DiscoveredServer? {
+        return try {
+            val start = System.currentTimeMillis()
+            val url = URL("$baseUrl/api/ping")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.connectTimeout = 400
+            conn.readTimeout = 400
+            conn.requestMethod = "GET"
+            conn.connect()
+
+            if (conn.responseCode in 200..299) {
+                val reader = BufferedReader(InputStreamReader(conn.inputStream))
+                val body = reader.readText()
+                reader.close()
+                val json = JSONObject(body)
+                if (json.optString("app") == "nexusflow-pos" || json.optString("status") == "ok") {
+                    val latency = System.currentTimeMillis() - start
+                    val name = json.optString("name", "NexusFlow POS Server")
+                    return DiscoveredServer(name, baseUrl, latency)
+                }
+            }
+            null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun getLocalSubnetPrefix(): String? {
+        try {
+            val interfaces = NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val iface = interfaces.nextElement()
+                if (iface.isLoopback || !iface.isUp) continue
+                val addresses = iface.inetAddresses
+                while (addresses.hasMoreElements()) {
+                    val addr = addresses.nextElement()
+                    if (!addr.isLoopbackAddress && addr.hostAddress?.contains(".") == true) {
+                        val ip = addr.hostAddress ?: continue
+                        val parts = ip.split(".")
+                        if (parts.size == 4) {
+                            return "${parts[0]}.${parts[1]}.${parts[2]}"
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return null
     }
 
     // Handles native camera permission result from Android OS
@@ -330,7 +595,6 @@ class MainActivity : AppCompatActivity() {
                     null
                 }
             } else {
-                // If user cancelled, clean up unused temp file
                 try {
                     cameraPhotoFile?.delete()
                 } catch (e: Exception) {
@@ -349,11 +613,11 @@ class MainActivity : AppCompatActivity() {
         if (webView.canGoBack()) {
             webView.goBack()
         } else {
-            super.onBackPressed()
+            promptForServerIp("Choose an action or switch POS server:")
         }
     }
 
-    // JavaScript interface bridge to control FLAG_SECURE dynamically
+    // JavaScript interface bridge to control FLAG_SECURE and switch servers dynamically
     inner class WebAppInterface(private val mContext: Context) {
         @JavascriptInterface
         fun setSecureFlags(enable: Boolean) {
@@ -366,6 +630,19 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(mContext, "🔓 Developer Screen capture allowed", Toast.LENGTH_SHORT).show()
                 }
             }
+        }
+
+        @JavascriptInterface
+        fun switchServer() {
+            runOnUiThread {
+                promptForServerIp()
+            }
+        }
+
+        @JavascriptInterface
+        fun getServerIp(): String {
+            val sharedPref = getPreferences(Context.MODE_PRIVATE)
+            return sharedPref.getString("pos_server_ip", "") ?: ""
         }
     }
 }

@@ -27,6 +27,8 @@ import whatsappRoutes from './routes/whatsapp';
 import emailRoutes from './routes/email';
 import { whatsappManager } from './services/whatsappManager';
 import fs from 'fs';
+import dgram from 'node:dgram';
+import os from 'node:os';
 import BonjourService from 'bonjour-service';
 const { Bonjour } = BonjourService;
 
@@ -135,6 +137,29 @@ app.use('/api/reservations', reservationRoutes);
 app.use('/api/coupons', couponRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/email', emailRoutes);
+
+// Unauthenticated health & discovery ping endpoint for LAN clients
+app.get('/api/ping', (req, res) => {
+  const nets = os.networkInterfaces();
+  const addresses: string[] = [];
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name] || []) {
+      if (net.family === 'IPv4' && !net.internal) {
+        addresses.push(net.address);
+      }
+    }
+  }
+
+  res.json({
+    status: 'ok',
+    app: 'nexusflow-pos',
+    name: 'NexusFlow Retail POS Server',
+    version: '0.0.1',
+    port: Number(process.env.PORT || 3000),
+    addresses,
+    timestamp: Date.now()
+  });
+});
 
 // Serves uploaded product images with CORS for customer website
 const uploadsDir = path.join(__dirname, '..', 'uploads');
@@ -387,14 +412,43 @@ server.listen(PORT, () => {
   try {
     const bonjour = new Bonjour();
     bonjour.publish({
-      name: 'Retail Grocery Server',
+      name: 'NexusFlow POS Server',
       type: 'http',
       port: Number(PORT),
-      txt: { path: '/' }
+      txt: { path: '/', app: 'nexusflow-pos' }
     });
-    console.log(`📡 Local LAN Auto-Discovery active: http://retail-grocery-server.local:${PORT}`);
+    console.log(`📡 Local LAN mDNS Auto-Discovery active: http://nexusflow-pos.local:${PORT}`);
   } catch (err: any) {
     console.warn(`⚠️ mDNS Auto-Discovery failed to initialize:`, err.message);
+  }
+
+  // Setup UDP Discovery Beacon on port 41234
+  try {
+    const udpSocket: any = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+    udpSocket.on('error', (err: any) => {
+      console.warn('⚠️ UDP Beacon socket warning:', err.message);
+    });
+    udpSocket.on('message', (msg: any, rinfo: any) => {
+      const text = msg.toString().trim();
+      if (text === 'NEXUSFLOW_DISCOVER' || text.startsWith('NEXUSFLOW_DISCOVER')) {
+        const reply = JSON.stringify({
+          app: 'nexusflow-pos',
+          name: 'NexusFlow Retail POS Server',
+          port: Number(PORT),
+          status: 'online',
+          timestamp: Date.now()
+        });
+        udpSocket.send(reply, rinfo.port, rinfo.address, () => {});
+      }
+    });
+    udpSocket.bind(41234, () => {
+      try {
+        udpSocket.setBroadcast(true);
+      } catch {}
+      console.log(`📡 UDP Discovery Beacon listening on port 41234`);
+    });
+  } catch (err: any) {
+    console.warn(`⚠️ UDP Discovery failed to bind:`, err.message);
   }
   
   console.log(`======================================================\n`);

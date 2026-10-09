@@ -31,13 +31,14 @@
 11. [Environment Variables](#-environment-variables)
 12. [Keyboard Shortcuts](#️-keyboard-shortcuts)
 13. [Barcode Scanner Support (Live Mobile & Hardware)](#-barcode-scanner-support)
-14. [Mobile Usage & Android App](#-mobile-usage--android-app)
-15. [Product Photo & Enhancement Pipeline](#-product-photo--enhancement-pipeline)
-16. [Database Schema](#️-database-schema)
-17. [WebSocket Real-Time Events](#-websocket-real-time-events)
-18. [Deployment Notes](#-deployment-notes)
-19. [Test Suite](#-test-suite)
-20. [License & Attributions](#-license--attributions)
+14. [Desktop Client (.dmg for Mac & .exe for Windows) & LAN Auto-Discovery](#-desktop-client-dmg--exe--lan-auto-discovery)
+15. [Mobile Usage & Android App](#-mobile-usage--android-app)
+16. [Product Photo & Enhancement Pipeline](#-product-photo--enhancement-pipeline)
+17. [Database Schema](#️-database-schema)
+18. [WebSocket Real-Time Events](#-websocket-real-time-events)
+19. [Deployment Notes](#-deployment-notes)
+20. [Test Suite](#-test-suite)
+21. [License & Attributions](#-license--attributions)
 
 ---
 
@@ -492,7 +493,11 @@ On the first launch:
 | `pnpm build:client` | Builds Vite frontend only |
 | `pnpm build:server` | Compiles server TypeScript with `tsc` only |
 | `pnpm start` | Launches compiled production server (`node dist-server/index.js`) |
-| `pnpm test` | Runs the full Vitest automated test suite (**359 passing tests**) |
+| `pnpm desktop` | Launches Electron workstation client with live LAN auto-discovery |
+| `pnpm dist:mac` | Builds macOS installer (`release/NexusFlow POS-1.0.0-arm64.dmg`) |
+| `pnpm dist:win` | Builds Windows NSIS installer & Portable executable (`release/NexusFlow POS Setup 1.0.0.exe` & `release/NexusFlow POS 1.0.0.exe`) |
+| `pnpm dist:desktop`| Cross-compiles both macOS and Windows packages into `release/` |
+| `pnpm test` | Runs the full Vitest automated test suite (**385 passing tests**) |
 | `pnpm test:watch` | Runs Vitest in interactive watch mode |
 
 ---
@@ -564,6 +569,47 @@ Live Camera Stream (WebRTC getUserMedia)
 
 ---
 
+## 🖥️ Desktop Client (.dmg for Mac & .exe for Windows) & LAN Auto-Discovery
+
+NexusFlow includes a dedicated, lightweight native desktop client (`electron/`) for cashier workstations, counter PCs, and back-office Macs. The desktop client packages as native **`.dmg`** for macOS and **`.exe`** (NSIS installer & portable standalone) for Windows.
+
+### 📡 Zero-Config LAN Auto-Discovery Protocol
+Cashiers and staff never need to look up or manually type IP addresses. On startup, the desktop application executes a **4-tier auto-discovery sweep**:
+1. **UDP Broadcast Beacon (Port 41234)**: The client broadcasts `NEXUSFLOW_DISCOVER` packets across all local network interfaces and subnet broadcast addresses (`255.255.255.255`, `192.168.x.255`). The primary POS server responds immediately (< 2ms) with server metadata.
+2. **mDNS / Bonjour Service**: Automatically discovers `_http._tcp` advertisements for `NexusFlow POS Server` / `http://nexusflow-pos.local:3000`.
+3. **Localhost Fast Check**: Instant fallback probe to `http://localhost:3000` for single-PC counter setups where the server and client run on the same computer.
+4. **Subnet Parallel HTTP Sweep**: In complex routers or Wi-Fi networks with AP isolation where UDP broadcast is restricted, the client runs a 50-worker parallel HTTP ping sweep (`/api/ping`) across the active `/24` subnet in under 2 seconds.
+
+### 🎨 Workstation Connection Manager (Pairing Screen)
+- **Live Animated Radar Scanner**: Visual scanning pulse showing real-time network detection status.
+- **Discovered Servers Cards**: Lists each detected server with Server Name, LAN URL, and live ping latency badge (e.g. `2ms - Ultra Fast`). Click **"Connect"** to launch instantly.
+- **Manual Host/IP Input**: Allows entering custom IP/hostname and port (e.g. `192.168.29.111:3000`) with instant connection testing.
+- **Remember Server Toggle**: Automatically saves the last paired server in `userData/nexusflow-desktop-config.json` and reconnects on subsequent launches.
+- **Seamless Server Switching**: Press <kbd>Ctrl+Shift+S</kbd> (Windows) or <kbd>Cmd+Shift+S</kbd> (Mac) at any time inside the POS to return to the Connection Manager and switch terminals.
+- **Resilient Connection Protection**: If the POS server restarts or the local Wi-Fi drops, the desktop app prevents blank error screens and offers instant 1-click retry or server reassignment.
+
+### 📦 Building Desktop Binaries
+
+```bash
+# Launch desktop client in development
+pnpm desktop
+
+# Build macOS Disk Image (.dmg) & .zip for Apple Silicon and Intel
+pnpm dist:mac
+# Output: release/NexusFlow POS-1.0.0-arm64.dmg (123 MB)
+
+# Build Windows NSIS Installer (.exe) & Portable Executable (.exe)
+pnpm dist:win
+# Output:
+#   release/NexusFlow POS Setup 1.0.0.exe  (NSIS Full Installer with Desktop & Start Menu shortcuts)
+#   release/NexusFlow POS 1.0.0.exe        (Zero-install portable standalone executable)
+
+# Cross-compile both macOS and Windows packages concurrently
+pnpm dist:desktop
+```
+
+---
+
 ## 📱 Mobile Usage & Android App
 
 ### Browser-Based Mobile POS
@@ -574,12 +620,22 @@ Live Camera Stream (WebRTC getUserMedia)
 5. The UI automatically adapts to a touch-optimized mobile interface.
 
 ### Native Android POS App (`android app/`)
-For dedicated Android POS handhelds or smartphones:
-- Built in Kotlin with full hardware acceleration.
-- Native `FileProvider` and `WebChromeClient` implementation ensuring zero camera permission issues.
-- Integrated Android 11+ `<queries>` declarations for camera hardware.
-- Immersive fullscreen sticky mode maximizing screen real estate for cashiers.
-- Remembers store server IP in `SharedPreferences`.
+For dedicated Android POS handhelds, tablets, or smartphones:
+- **Built-in LAN Auto-Discovery**:
+  - Broadcasts UDP discovery packets on port 41234 and sweeps the local Wi-Fi subnet.
+  - Displays discovered store servers with 1-tap connection buttons.
+  - Provides quick button for **Android Emulator Loopback (`10.0.2.2:3000`)**.
+  - Remembers chosen server in `SharedPreferences` for auto-connection on next launch.
+- **Hardware Acceleration & Immersive Mode**: Fullscreen sticky mode maximizing screen real estate for cashiers.
+- **Camera & Barcode Integration**: Native `FileProvider` and `WebChromeClient` implementation ensuring seamless camera barcode scanning with zero permission rejections.
+- **Fail-Safe Server Reconnection**: If the server drops or Wi-Fi changes, the app prompts with a clean discovery dialog instead of a broken webview.
+- **Switch Server Shortcut**: Long-press back button or invoke `Android.switchServer()` from POS Settings.
+- **Building the APK**:
+  ```bash
+  cd "android app"
+  ./gradlew assembleDebug    # Generates debug APK in app/build/outputs/apk/debug/
+  ./gradlew assembleRelease  # Generates optimized release APK
+  ```
 
 ---
 

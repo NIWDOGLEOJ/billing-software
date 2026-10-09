@@ -1,0 +1,10 @@
+{
+  "name": "nexusflow-pos",
+  "version": "1.0.0",
+  "description": "NexusFlow Retail POS Desktop Workstation Client",
+  "main": "main.cjs",
+  "author": "NexusFlow",
+  "devDependencies": {
+    "electron": "44.7.0"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  "appId": "com.nexusflow.pos",
+  "productName": "NexusFlow POS",
+  "copyright": "Copyright © 2026 NexusFlow",
+  "electronVersion": "44.7.0",
+  "directories": {
+    "output": "../release"
+  },
+  "asar": true,
+  "files": [
+    "**/*",
+    "!assets/*.iconset"
+  ],
+  "mac": {
+    "identity": null,
+    "target": ["dmg", "zip"],
+    "icon": "assets/icon.icns",
+    "category": "public.app-category.business"
+  },
+  "dmg": {
+    "title": "NexusFlow POS"
+  },
+  "win": {
+    "target": ["portable", "nsis"],
+    "icon": "assets/icon.ico"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "warningsAsErrors": false
+  }
+}

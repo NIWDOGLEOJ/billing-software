@@ -9,6 +9,11 @@ node_modules/
 # --- Build outputs ---
 dist/
 dist-server/
+release/
+dist-electron/
+android app/app/build/
+android app/build/
+.gradle/
 website/
 
 # --- SQLite databases ---
