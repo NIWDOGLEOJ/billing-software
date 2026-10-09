@@ -8,6 +8,7 @@ import { useWebSocket } from '../hooks/useWebSocket';
 import { toast } from 'sonner';
 import { compressImageFileToDataUrl } from '../utils/imageCompressor';
 import { ProductPhotoCaptureModal } from './product-photo-capture-modal';
+import { useBetaFeatures } from '../lib/beta-features';
 
 const MONO = "'IBM Plex Mono', ui-monospace, monospace";
 
@@ -109,8 +110,19 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
   const shopDetails = useShopDetails();
   const shopSlug = (shopDetails.name || 'store').toLowerCase().replace(/[^a-z0-9]+/g, '-');
 
+  // Beta features
+  const { gstReturns = true } = useBetaFeatures();
+
   // Screen state
   const [tab, setTab] = useState<'inventory' | 'sales' | 'gst'>(defaultTab);
+
+  // Fallback to inventory if GST returns beta is disabled while on gst tab
+  useEffect(() => {
+    if (!gstReturns && tab === 'gst') {
+      setTab('inventory');
+    }
+  }, [gstReturns, tab]);
+
   const [query, setQuery] = useState('');
   const [cat, setCat] = useState('All');
   const [lowOnly, setLowOnly] = useState(false);
@@ -1115,30 +1127,52 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
           >
             Back office
           </span>
-          <span className="text-[14px] font-bold text-[var(--ink)]">
-            {tab === 'inventory' ? 'Inventory Catalogue' : tab === 'sales' ? 'Sales Performance' : 'GSTR-1 Tax Summary'}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[14px] font-bold text-[var(--ink)]">
+              {tab === 'inventory' ? 'Inventory Catalogue' : tab === 'sales' ? 'Sales Performance' : 'GSTR-1 Tax Summary'}
+            </span>
+            {tab === 'gst' && (
+              <span
+                className="text-[9.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30"
+                style={{ fontFamily: MONO }}
+              >
+                Beta
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Tab Segmented Control */}
         <div className="flex items-center gap-1 p-1 border border-[var(--border)] rounded-[8px] bg-[var(--sub)]">
           {[
-            { id: 'inventory', label: 'Inventory' },
-            { id: 'sales', label: 'Sales' },
-            { id: 'gst', label: 'GST returns' }
+            { id: 'inventory', label: 'Inventory', isBeta: false },
+            { id: 'sales', label: 'Sales', isBeta: false },
+            ...(gstReturns ? [{ id: 'gst', label: 'GST returns', isBeta: true }] : []),
           ].map(t => {
             const active = tab === t.id;
             return (
               <button
                 key={t.id}
                 onClick={() => setTab(t.id as any)}
-                className={`px-3.5 py-1.5 rounded-[5px] text-[12px] font-semibold transition-colors cursor-pointer border-0 ${
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-[5px] text-[12px] font-semibold transition-colors cursor-pointer border-0 ${
                   active
                     ? 'bg-[var(--ink)] text-[var(--panel)] font-bold'
                     : 'bg-transparent text-[var(--ink2)] hover:text-[var(--ink)]'
                 }`}
               >
-                {t.label}
+                <span>{t.label}</span>
+                {t.isBeta && (
+                  <span
+                    className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded tracking-wide ${
+                      active
+                        ? 'bg-[var(--panel)]/20 text-[var(--panel)] border border-[var(--panel)]/30'
+                        : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30'
+                    }`}
+                    style={{ fontFamily: MONO }}
+                  >
+                    Beta
+                  </span>
+                )}
               </button>
             );
           })}
@@ -1625,6 +1659,24 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
       {/* TAB 3: GST RETURNS */}
       {tab === 'gst' && (
         <div className="flex-1 min-h-0 p-[14px] flex flex-col gap-[14px] overflow-y-auto">
+          {/* Beta Notice Banner */}
+          <div className="bg-amber-500/10 border border-amber-500/25 rounded-[10px] px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <span
+                className="text-[10px] font-bold uppercase tracking-[0.14em] px-2 py-0.5 rounded bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 shrink-0"
+                style={{ fontFamily: MONO }}
+              >
+                Beta Feature
+              </span>
+              <p className="text-[12.5px] text-[var(--ink2)] leading-normal">
+                GST returns &amp; GSTR-1 HSN outward supplies computation is currently in beta preview. Figures are calculated from registered counter sales for verification before tax filing.
+              </p>
+            </div>
+            <span className="text-[11px] text-[var(--ink3)] font-mono shrink-0 hidden sm:inline" style={{ fontFamily: MONO }}>
+              GSTR-1 Outward Supplies · Preview v0.9
+            </span>
+          </div>
+
           {/* Summary Cards */}
           <div className="grid grid-cols-[repeat(auto-fit,minmax(190px,1fr))] gap-[14px]">
             {gstData.cards.map(c => (
@@ -1642,9 +1694,17 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
           {/* HSN Summary Panel */}
           <div className="bg-[var(--panel)] border border-[var(--border)] rounded-[10px] overflow-hidden">
             <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--rule2)]">
-              <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--ink3)]" style={{ fontFamily: MONO }}>
-                GSTR-1 · HSN summary
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--ink3)]" style={{ fontFamily: MONO }}>
+                  GSTR-1 · HSN summary
+                </span>
+                <span
+                  className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30"
+                  style={{ fontFamily: MONO }}
+                >
+                  Beta
+                </span>
+              </div>
               <span className="text-[11px] text-[var(--ink3)]" style={{ fontFamily: MONO }}>
                 {gstData.period}
               </span>

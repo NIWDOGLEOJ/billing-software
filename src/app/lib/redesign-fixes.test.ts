@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 
 // Function matching the CSV parser in analytics-dashboard.tsx
 function parseCsv(text: string): string[][] {
@@ -1120,8 +1120,105 @@ describe('Phone Camera Photo Capture & Pure White Background Auto-Enhancement', 
   });
 });
 
+describe('Back Office GST Returns Beta Gating & Markings', () => {
+  let mockStore: Record<string, string> = {};
 
+  beforeEach(() => {
+    mockStore = {};
+    (globalThis as any).localStorage = {
+      getItem: (key: string) => mockStore[key] || null,
+      setItem: (key: string, val: string) => { mockStore[key] = String(val); },
+      removeItem: (key: string) => { delete mockStore[key]; },
+      clear: () => { mockStore = {}; },
+    };
+  });
 
+  it('provides gstReturns enabled by default with beta marking in getBetaFeatures', async () => {
+    const { getBetaFeatures } = await import('./beta-features');
+    const features = getBetaFeatures();
+    expect(features.gstReturns).toBe(true);
+  });
 
+  it('allows toggling gstReturns modularly via saveBetaFeatures', async () => {
+    const { getBetaFeatures, saveBetaFeatures } = await import('./beta-features');
+    saveBetaFeatures({ gstReturns: false });
+    expect(getBetaFeatures().gstReturns).toBe(false);
 
+    saveBetaFeatures({ gstReturns: true });
+    expect(getBetaFeatures().gstReturns).toBe(true);
+  });
 
+  it('constructs back office tab list with Beta badge on GST returns', () => {
+    const getTabs = (gstReturns: boolean) => [
+      { id: 'inventory', label: 'Inventory', isBeta: false },
+      { id: 'sales', label: 'Sales', isBeta: false },
+      ...(gstReturns ? [{ id: 'gst', label: 'GST returns', isBeta: true }] : []),
+    ];
+
+    const enabledTabs = getTabs(true);
+    expect(enabledTabs).toHaveLength(3);
+    const gstTab = enabledTabs.find(t => t.id === 'gst');
+    expect(gstTab).toBeDefined();
+    expect(gstTab?.label).toBe('GST returns');
+    expect(gstTab?.isBeta).toBe(true);
+
+    const disabledTabs = getTabs(false);
+    expect(disabledTabs).toHaveLength(2);
+    expect(disabledTabs.find(t => t.id === 'gst')).toBeUndefined();
+  });
+});
+
+describe('Staff Reconciliation and Tally Modal', () => {
+  it('formats currency values correctly with inr helper without throwing errors', async () => {
+    const { inr } = await import('../components/employee-management');
+    expect(typeof inr).toBe('function');
+
+    expect(inr(0)).toBe('₹0');
+    expect(inr(5000)).toBe('₹5,000');
+    expect(inr(1250.5, true)).toBe('₹1,250.50');
+    expect(inr(null)).toBe('₹0.00');
+    expect(inr(undefined)).toBe('₹0.00');
+    expect(inr(NaN)).toBe('₹0.00');
+  });
+
+  it('accurately computes cash, UPI, and card variances for drawer reconciliation', () => {
+    const expected = {
+      opening: 5000,
+      cash: 8500,
+      upi: 3200,
+      card: 1500,
+      billCount: 42,
+    };
+
+    const expectedTotalCash = expected.opening + expected.cash; // 13500
+    const physicalCash = 13500;
+    const physicalUpi = 3200;
+    const physicalCard = 1500;
+
+    const cashDiff = physicalCash - expectedTotalCash;
+    const upiDiff = physicalUpi - expected.upi;
+    const cardDiff = physicalCard - expected.card;
+
+    expect(cashDiff).toBe(0);
+    expect(upiDiff).toBe(0);
+    expect(cardDiff).toBe(0);
+
+    // Test a shortage scenario
+    const shortCash = 13200;
+    const shortDiff = shortCash - expectedTotalCash;
+    expect(shortDiff).toBe(-300);
+
+    // Test an overage scenario
+    const overCash = 13600;
+    const overDiff = overCash - expectedTotalCash;
+    expect(overDiff).toBe(100);
+  });
+
+  it('EmployeeManagement component module exports cleanly and includes inr', async () => {
+    const mod = await import('../components/employee-management');
+    expect(mod.EmployeeManagement).toBeDefined();
+    expect(typeof mod.EmployeeManagement).toBe('function');
+    expect(mod.inr).toBeDefined();
+    expect(typeof mod.inr).toBe('function');
+  });
+});

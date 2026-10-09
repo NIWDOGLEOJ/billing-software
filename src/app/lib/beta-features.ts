@@ -5,6 +5,7 @@ export interface BetaFeatures {
   warehouses: boolean;
   loyalty: boolean;
   advancedSmtp: boolean;
+  gstReturns: boolean;
 }
 
 const DEFAULT_BETA_FEATURES: BetaFeatures = {
@@ -12,15 +13,18 @@ const DEFAULT_BETA_FEATURES: BetaFeatures = {
   warehouses: true,
   loyalty: true,
   advancedSmtp: false,
+  gstReturns: true,
 };
 
 const STORAGE_KEY = 'nexusflow_beta_features';
 
 export function getBetaFeatures(): BetaFeatures {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      return { ...DEFAULT_BETA_FEATURES, ...JSON.parse(raw) };
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        return { ...DEFAULT_BETA_FEATURES, ...JSON.parse(raw) };
+      }
     }
   } catch (err) {
     console.warn('Failed to parse beta features from storage:', err);
@@ -32,8 +36,12 @@ export function saveBetaFeatures(features: Partial<BetaFeatures>): BetaFeatures 
   const current = getBetaFeatures();
   const updated = { ...current, ...features };
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    window.dispatchEvent(new CustomEvent('nexusflow-beta-features-updated', { detail: updated }));
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    }
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(new CustomEvent('nexusflow-beta-features-updated', { detail: updated }));
+    }
   } catch (err) {
     console.warn('Failed to save beta features to storage:', err);
   }

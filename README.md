@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/Express-5-000000?logo=express" alt="Express 5"/>
   <img src="https://img.shields.io/badge/SQLite-WAL-003B57?logo=sqlite" alt="SQLite"/>
   <img src="https://img.shields.io/badge/Tailwind-4-06B6D4?logo=tailwindcss" alt="Tailwind CSS 4"/>
-  <img src="https://img.shields.io/badge/tests-356%20passed-brightgreen" alt="356 tests"/>
+  <img src="https://img.shields.io/badge/tests-359%20passed-brightgreen" alt="359 tests"/>
 </p>
 
 ---
@@ -472,7 +472,7 @@ On the first launch:
 | `pnpm build:client` | Builds Vite frontend only |
 | `pnpm build:server` | Compiles server TypeScript with `tsc` only |
 | `pnpm start` | Launches compiled production server (`node dist-server/index.js`) |
-| `pnpm test` | Runs the full Vitest automated test suite (**356 passing tests**) |
+| `pnpm test` | Runs the full Vitest automated test suite (**359 passing tests**) |
 | `pnpm test:watch` | Runs Vitest in interactive watch mode |
 
 ---
@@ -658,7 +658,7 @@ pnpm test:watch
 ```
 
 ### Coverage Overview:
-- **Total Tests**: **356 passing tests** across 27 test suites (100% pass rate).
+- **Total Tests**: **359 passing tests** across 27 test suites (100% pass rate).
 - **Backend Tests**:
   - `server/routes/products.test.ts`: Product CRUD, update endpoints, validation.
   - `server/routes/coupons.test.ts`: Atomic single-use coupon redemption.

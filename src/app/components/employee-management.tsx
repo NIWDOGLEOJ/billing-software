@@ -7,6 +7,17 @@ import { toast } from 'sonner';
 
 const MONO = "'IBM Plex Mono', ui-monospace, monospace";
 
+export function inr(n: number | null | undefined, dec = false): string {
+  if (n == null || Number.isNaN(Number(n))) return '₹0.00';
+  return (
+    '₹' +
+    Number(n).toLocaleString('en-IN', {
+      minimumFractionDigits: dec ? 2 : 0,
+      maximumFractionDigits: dec ? 2 : 0,
+    })
+  );
+}
+
 export const ALL_PERMISSIONS: { value: Permission; label: string; description: string }[] = [
   { value: 'access_billing', label: 'Billing system', description: 'Can access the billing interface' },
   { value: 'edit_product_price', label: 'Edit price', description: 'Can modify product prices during checkout' },
@@ -75,18 +86,104 @@ export function EmployeeManagement() {
   // Shift Close / Tally State
   const [calcOn, setCalcOn] = useState(false);
   const [denomCounts, setDenomCounts] = useState<{ [denom: number]: string }>({});
-  const [physicalCash, setPhysicalCash] = useState('23420');
-  const [physicalUpi, setPhysicalUpi] = useState('16680');
-  const [physicalCard, setPhysicalCard] = useState('6140');
+  const [physicalCash, setPhysicalCash] = useState('0');
+  const [physicalUpi, setPhysicalUpi] = useState('0');
+  const [physicalCard, setPhysicalCard] = useState('0');
   const [tallyNotes, setTallyNotes] = useState('');
-
-  const expectedSales = {
+  const [activeShift, setActiveShift] = useState<any>(null);
+  const [isClosingShift, setIsClosingShift] = useState(false);
+  const [expectedSales, setExpectedSales] = useState({
     opening: 5000,
-    cash: 18420,
-    upi: 16680,
-    card: 6140
-  };
+    cash: 0,
+    upi: 0,
+    card: 0,
+    billCount: 0
+  });
+
   const expectedTotalCash = expectedSales.opening + expectedSales.cash;
+
+  // Fetch live shift/today sales when tally modal opens
+  useEffect(() => {
+    if (!tallyOpen) return;
+
+    let isMounted = true;
+    const fetchShiftSales = async () => {
+      try {
+        const [shiftRes, billsRes] = await Promise.allSettled([
+          api.get<any>('/shifts/active'),
+          api.get<any[]>('/bills')
+        ]);
+
+        const active = shiftRes.status === 'fulfilled' ? shiftRes.value : null;
+        if (!isMounted) return;
+        setActiveShift(active);
+
+        const billsList = billsRes.status === 'fulfilled' && Array.isArray(billsRes.value) ? billsRes.value : [];
+
+        let cash = 0;
+        let upi = 0;
+        let card = 0;
+        let count = 0;
+
+        if (active) {
+          const shiftStartTime = active.start_time;
+          const shiftBills = billsList.filter(
+            b => (!active.user_id || b.cashier_id === active.user_id) && b.date >= shiftStartTime
+          );
+          count = shiftBills.length;
+          for (const b of shiftBills) {
+            const mode = (b.payment_mode || 'cash').toLowerCase();
+            const total = Number(b.total) || 0;
+            if (mode === 'cash') cash += total;
+            else if (mode === 'upi') upi += total;
+            else if (mode === 'card') card += total;
+          }
+          const opening = Number(active.initial_cash) || 0;
+          setExpectedSales({
+            opening,
+            cash,
+            upi,
+            card,
+            billCount: count
+          });
+          setPhysicalCash(String(opening + cash));
+          setPhysicalUpi(String(upi));
+          setPhysicalCard(String(card));
+        } else {
+          // Fallback if no active shift: compile today's bills for reference
+          const todayStr = new Date().toISOString().slice(0, 10);
+          const todayBills = billsList.filter(b => (b.date || '').slice(0, 10) === todayStr);
+          count = todayBills.length;
+          for (const b of todayBills) {
+            const mode = (b.payment_mode || 'cash').toLowerCase();
+            const total = Number(b.total) || 0;
+            if (mode === 'cash') cash += total;
+            else if (mode === 'upi') upi += total;
+            else if (mode === 'card') card += total;
+          }
+          const opening = 5000;
+          setExpectedSales({
+            opening,
+            cash,
+            upi,
+            card,
+            billCount: count
+          });
+          setPhysicalCash(String(opening + cash));
+          setPhysicalUpi(String(upi));
+          setPhysicalCard(String(card));
+        }
+      } catch (err) {
+        console.warn('Failed to fetch shift sales for tally modal:', err);
+      }
+    };
+
+    fetchShiftSales();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [tallyOpen]);
 
   const flash = useCallback((msg: string) => {
     setToastMessage(msg);
@@ -279,6 +376,7 @@ export function EmployeeManagement() {
       phone: payload.phone || '',
       role: payload.role as any,
       permissions: payload.permissions,
+      createdAt: new Date().toISOString(),
       isActive: true,
       shiftState: 'Off',
       billsCount: 0,
@@ -400,6 +498,7 @@ export function EmployeeManagement() {
 
   // Shift close handler calling real backend endpoint
   const handleCloseShift = async () => {
+    setIsClosingShift(true);
     try {
       await api.post('/shifts/end', {
         actualCash: cashNum,
@@ -414,6 +513,9 @@ export function EmployeeManagement() {
       console.warn('Shift end notice:', e?.message);
       setTallyOpen(false);
       flash('Z-report generated · drawer closed');
+      await loadData();
+    } finally {
+      setIsClosingShift(false);
     }
   };
 
@@ -1123,7 +1225,7 @@ export function EmployeeManagement() {
             <div className="flex items-center gap-3 px-5 py-4 border-b border-[var(--rule2)]">
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--ink3)]" style={{ fontFamily: MONO }}>
-                  Shift close · {selectedEmployee?.till || 'Till 1'} · {selectedEmployee?.name}
+                  Shift close · {selectedEmployee?.till || 'Till 1'} · {selectedEmployee?.name || 'Staff'}
                 </div>
                 <div className="text-[18px] font-bold mt-1">Reconcile the drawer</div>
               </div>
@@ -1179,9 +1281,19 @@ export function EmployeeManagement() {
                     Shift log
                   </div>
                   <div className="text-[12px] text-[var(--ink2)] mt-2 leading-relaxed" style={{ fontFamily: MONO }}>
-                    Opened 09:04 · 8h 21m<br />
-                    2 breaks · 34m total<br />
-                    {selectedEmployee?.billsCount || 48} bills this shift
+                    {activeShift ? (
+                      <>
+                        Status: Active shift · Started {new Date(activeShift.start_time).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}<br />
+                        Cashier: {activeShift.user_name || selectedEmployee?.name || 'Staff'}<br />
+                        {expectedSales.billCount} bills completed this shift
+                      </>
+                    ) : (
+                      <>
+                        Status: Shift reference tally<br />
+                        Opening float: {inr(expectedSales.opening, true)}<br />
+                        {expectedSales.billCount} bills recorded today
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1314,9 +1426,10 @@ export function EmployeeManagement() {
 
                 <button
                   onClick={handleCloseShift}
-                  className="w-full h-[48px] mt-3.5 rounded-[8px] bg-[var(--accent)] text-[var(--panel)] text-[14px] font-bold cursor-pointer hover:opacity-95 transition-opacity border-0"
+                  disabled={isClosingShift}
+                  className="w-full h-[48px] mt-3.5 rounded-[8px] bg-[var(--accent)] text-[var(--panel)] text-[14px] font-bold cursor-pointer hover:opacity-95 transition-opacity border-0 disabled:opacity-50"
                 >
-                  Close shift &amp; print Z-report
+                  {isClosingShift ? 'Reconciling drawer…' : 'Close shift & print Z-report'}
                 </button>
               </div>
             </div>

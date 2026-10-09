@@ -251,6 +251,7 @@ export function POSSettings({ onClose, isModal = false, defaultPanel = 'shop' }:
     warehouses: warehousesEnabled,
     loyalty: loyaltyEnabled,
     advancedSmtp,
+    gstReturns,
     setFeature,
   } = useBetaFeatures();
 
@@ -2283,6 +2284,52 @@ export function POSSettings({ onClose, isModal = false, defaultPanel = 'shop' }:
                   }}
                   className={`w-[50px] h-[28px] shrink-0 rounded-full p-[3px] flex items-center transition-colors cursor-pointer border-0 ${
                     advancedSmtp ? 'bg-[var(--accent)] justify-end' : 'bg-[var(--border2)] justify-start'
+                  }`}
+                >
+                  <span className="w-[22px] h-[22px] rounded-full bg-[var(--panel)] shadow-sm" />
+                </button>
+              </div>
+
+              {/* Toggle 5: GST Returns in Back Office */}
+              <div className="flex items-center gap-4 py-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <label className="text-[14px] font-semibold text-[var(--ink)] cursor-pointer">
+                      GST returns (in Back office)
+                    </label>
+                    <span
+                      className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-[4px] ${
+                        gstReturns
+                          ? 'bg-[var(--ok-soft2)] text-[var(--ok)]'
+                          : 'bg-[var(--rule)] text-[var(--ink3)]'
+                      }`}
+                      style={{ fontFamily: MONO }}
+                    >
+                      {gstReturns ? 'Enabled' : 'Disabled'}
+                    </span>
+                    <span
+                      className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30"
+                      style={{ fontFamily: MONO }}
+                    >
+                      Beta
+                    </span>
+                  </div>
+                  <div className="text-[12.5px] leading-relaxed text-[var(--ink3)] mt-0.5">
+                    Controls whether the GSTR-1 outward supplies &amp; HSN tax summary tab is shown in the Back Office dashboard.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={gstReturns}
+                  aria-label="Toggle GST returns in Back office"
+                  onClick={() => {
+                    const next = !gstReturns;
+                    setFeature('gstReturns', next);
+                    flash(`GST returns in Back office ${next ? 'enabled' : 'disabled'}`);
+                  }}
+                  className={`w-[50px] h-[28px] shrink-0 rounded-full p-[3px] flex items-center transition-colors cursor-pointer border-0 ${
+                    gstReturns ? 'bg-[var(--accent)] justify-end' : 'bg-[var(--border2)] justify-start'
                   }`}
                 >
                   <span className="w-[22px] h-[22px] rounded-full bg-[var(--panel)] shadow-sm" />
