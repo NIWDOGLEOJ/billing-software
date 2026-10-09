@@ -105,7 +105,10 @@ const SAMPLE_CSV = [
 
 export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 'inventory' | 'sales' | 'gst' }) {
   const { user, hasPermission, isOwner } = useAuth();
-  const canEditInventory = Boolean(isOwner?.() || (hasPermission && hasPermission('access_inventory')));
+  const canViewAnalytics = Boolean(isOwner?.() || (hasPermission && hasPermission('view_analytics')));
+  const canAccessInventory = Boolean(isOwner?.() || (hasPermission && hasPermission('access_inventory')));
+  const canGenerateReports = Boolean(isOwner?.() || (hasPermission && hasPermission('generate_reports')));
+  const canEditInventory = canAccessInventory;
   const { theme, setTheme } = useTheme();
   const shopDetails = useShopDetails();
   const shopSlug = (shopDetails.name || 'store').toLowerCase().replace(/[^a-z0-9]+/g, '-');
@@ -114,14 +117,22 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
   const { gstReturns = true } = useBetaFeatures();
 
   // Screen state
-  const [tab, setTab] = useState<'inventory' | 'sales' | 'gst'>(defaultTab);
+  const initialTab = defaultTab === 'inventory' && !canAccessInventory && canViewAnalytics ? 'sales' : defaultTab;
+  const [tab, setTab] = useState<'inventory' | 'sales' | 'gst'>(initialTab);
 
-  // Fallback to inventory if GST returns beta is disabled while on gst tab
+  // Fallback to accessible tab if current tab is not permitted
   useEffect(() => {
-    if (!gstReturns && tab === 'gst') {
-      setTab('inventory');
+    if (tab === 'inventory' && !canAccessInventory) {
+      if (canViewAnalytics) setTab('sales');
+      else if (gstReturns && canGenerateReports) setTab('gst');
+    } else if (tab === 'sales' && !canViewAnalytics) {
+      if (canAccessInventory) setTab('inventory');
+      else if (gstReturns && canGenerateReports) setTab('gst');
+    } else if (!gstReturns && tab === 'gst') {
+      if (canAccessInventory) setTab('inventory');
+      else if (canViewAnalytics) setTab('sales');
     }
-  }, [gstReturns, tab]);
+  }, [gstReturns, tab, canAccessInventory, canViewAnalytics, canGenerateReports]);
 
   const [query, setQuery] = useState('');
   const [cat, setCat] = useState('All');
@@ -621,6 +632,13 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
 
   // Export Catalogue action
   const handleExport = () => {
+    if (!canGenerateReports) {
+      toast.error('Permission Denied', {
+        description: 'You do not have permission to export reports (generate_reports required).'
+      });
+      return;
+    }
+
     const itemsToExport =
       expScope === 'Whole catalogue'
         ? catalogue
@@ -1145,9 +1163,9 @@ export function AnalyticsDashboard({ defaultTab = 'inventory' }: { defaultTab?: 
         {/* Tab Segmented Control */}
         <div className="flex items-center gap-1 p-1 border border-[var(--border)] rounded-[8px] bg-[var(--sub)]">
           {[
-            { id: 'inventory', label: 'Inventory', isBeta: false },
-            { id: 'sales', label: 'Sales', isBeta: false },
-            ...(gstReturns ? [{ id: 'gst', label: 'GST returns', isBeta: true }] : []),
+            ...(canAccessInventory ? [{ id: 'inventory', label: 'Inventory', isBeta: false }] : []),
+            ...(canViewAnalytics ? [{ id: 'sales', label: 'Sales', isBeta: false }] : []),
+            ...(gstReturns && (canViewAnalytics || canGenerateReports) ? [{ id: 'gst', label: 'GST returns', isBeta: true }] : []),
           ].map(t => {
             const active = tab === t.id;
             return (

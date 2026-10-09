@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/Express-5-000000?logo=express" alt="Express 5"/>
   <img src="https://img.shields.io/badge/SQLite-WAL-003B57?logo=sqlite" alt="SQLite"/>
   <img src="https://img.shields.io/badge/Tailwind-4-06B6D4?logo=tailwindcss" alt="Tailwind CSS 4"/>
-  <img src="https://img.shields.io/badge/tests-359%20passed-brightgreen" alt="359 tests"/>
+  <img src="https://img.shields.io/badge/tests-382%20passed-brightgreen" alt="382 tests"/>
 </p>
 
 ---
@@ -200,6 +200,26 @@ The server binary handles:
 ### 10. Thermal Printer Auto-Discovery & ESC/POS Direct Print
 - **Hardware Discovery**: Scans LAN and USB for 58mm and 80mm thermal receipt printers.
 - **Direct ESC/POS Output**: Instant receipt dispensing with cash drawer kick and paper cut support.
+
+### 11. Role-Based Access Control (RBAC) & Granular Permissions
+- **Store Role Hierarchy**: Out-of-the-box operational presets for `Store Owner`, `Co-Owner`, `Store Manager`, `Cashier`, `Inventory Manager`, `Accountant`, and `General Staff`.
+- **10 Fine-Grained Permissions**:
+  - `access_billing`: Cashier register access and checkout processing.
+  - `edit_product_price`: Modifying item unit prices in the cart during checkout.
+  - `delete_bill_items`: Removing items from active cart and clearing orders.
+  - `apply_discounts`: Applying coupons, line discounts, and loyalty redemptions.
+  - `view_transaction_history`: Viewing past bills, transaction logs, and receipt reprints.
+  - `view_analytics`: Accessing sales analytics, revenue graphs, and forecasting.
+  - `access_inventory`: Modifying catalog, managing stock levels, batches, and warehouses.
+  - `generate_reports`: Exporting CSVs, GST tax reports, and performance sheets.
+  - `manage_employees`: Staff roster, shift drawer reconciliation, and attendance overrides.
+  - `access_settings`: POS hardware, printer configuration, store identity, and backups.
+- **Full-Stack Security Enforcement**:
+  - **Dynamic Navigation**: Filtered top-level navigation so staff only see tabs matching their permissions.
+  - **Route Guards**: URL-level `PermissionGuard` displaying an accessible 403 screen with missing permission details and a 1-click return to the register.
+  - **In-Page Action Gates**: Client-side action gates preventing unauthorized price tampering, item deletions/voids, coupon applications, and report exports.
+  - **Server-Side Protection**: Express `requirePermission` middleware on REST endpoints with automatic role default fallback and owner bypass.
+  - **Staff Administration**: Role selection auto-fills default permissions, includes 1-click "Reset to role defaults", and prevents non-owners from modifying owner or co-owner accounts.
 
 ---
 

@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { db } from '../db';
-import { JWT_SECRET, AuthRequest, authenticateToken } from '../middleware/auth';
+import { JWT_SECRET, AuthRequest, authenticateToken, getEffectivePermissions } from '../middleware/auth';
 
 const router = Router();
 
@@ -54,12 +54,15 @@ router.post('/login', (req, res) => {
       broadcast({ type: 'SESSION_CHANGED', data: { userId: user.id } });
     }
 
+    const rawPerms = JSON.parse(user.permissions || '[]');
+    const effectivePerms = getEffectivePermissions(user.role, rawPerms);
+
     const payload = {
       id: user.id,
       username: user.username,
       name: user.name,
       role: user.role,
-      permissions: JSON.parse(user.permissions || '[]'),
+      permissions: effectivePerms,
       sessionId
     };
 

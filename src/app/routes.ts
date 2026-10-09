@@ -31,7 +31,15 @@ export const router = createBrowserRouter([
         ErrorBoundary: RouteErrorBoundary,
         lazy: async () => {
           const { CashierBillingAdvanced } = await import("./components/cashier-billing-advanced");
-          return { Component: CashierBillingAdvanced };
+          const { PermissionGuard } = await import("./components/permission-guard");
+          return {
+            Component: () =>
+              React.createElement(
+                PermissionGuard,
+                { permission: "access_billing" },
+                React.createElement(CashierBillingAdvanced)
+              ),
+          };
         },
       },
       {
@@ -39,7 +47,15 @@ export const router = createBrowserRouter([
         ErrorBoundary: RouteErrorBoundary,
         lazy: async () => {
           const { AnalyticsDashboard } = await import("./components/analytics-dashboard");
-          return { Component: AnalyticsDashboard };
+          const { PermissionGuard } = await import("./components/permission-guard");
+          return {
+            Component: () =>
+              React.createElement(
+                PermissionGuard,
+                { permission: ["view_analytics", "access_inventory"] },
+                React.createElement(AnalyticsDashboard)
+              ),
+          };
         },
       },
       {
@@ -47,7 +63,15 @@ export const router = createBrowserRouter([
         ErrorBoundary: RouteErrorBoundary,
         lazy: async () => {
           const { EmployeeManagement } = await import("./components/employee-management");
-          return { Component: EmployeeManagement };
+          const { PermissionGuard } = await import("./components/permission-guard");
+          return {
+            Component: () =>
+              React.createElement(
+                PermissionGuard,
+                { permission: "manage_employees" },
+                React.createElement(EmployeeManagement)
+              ),
+          };
         },
       },
       {
@@ -55,7 +79,15 @@ export const router = createBrowserRouter([
         ErrorBoundary: RouteErrorBoundary,
         lazy: async () => {
           const { EmployeePerformance } = await import("./components/employee-performance");
-          return { Component: EmployeePerformance };
+          const { PermissionGuard } = await import("./components/permission-guard");
+          return {
+            Component: () =>
+              React.createElement(
+                PermissionGuard,
+                { permission: ["manage_employees", "view_analytics"] },
+                React.createElement(EmployeePerformance)
+              ),
+          };
         },
       },
       {
@@ -63,7 +95,15 @@ export const router = createBrowserRouter([
         ErrorBoundary: RouteErrorBoundary,
         lazy: async () => {
           const { POSSettings } = await import("./components/pos-settings");
-          return { Component: POSSettings };
+          const { PermissionGuard } = await import("./components/permission-guard");
+          return {
+            Component: () =>
+              React.createElement(
+                PermissionGuard,
+                { permission: "access_settings" },
+                React.createElement(POSSettings)
+              ),
+          };
         },
       },
       {
@@ -79,7 +119,15 @@ export const router = createBrowserRouter([
         ErrorBoundary: RouteErrorBoundary,
         lazy: async () => {
           const { GstLedgerPage } = await import("./sectors/gst-ledger-page");
-          return { Component: GstLedgerPage };
+          const { PermissionGuard } = await import("./components/permission-guard");
+          return {
+            Component: () =>
+              React.createElement(
+                PermissionGuard,
+                { permission: ["view_analytics", "generate_reports"] },
+                React.createElement(GstLedgerPage)
+              ),
+          };
         },
       },
       {
@@ -87,7 +135,15 @@ export const router = createBrowserRouter([
         ErrorBoundary: RouteErrorBoundary,
         lazy: async () => {
           const { KhataPage } = await import("./sectors/khata-page");
-          return { Component: KhataPage };
+          const { PermissionGuard } = await import("./components/permission-guard");
+          return {
+            Component: () =>
+              React.createElement(
+                PermissionGuard,
+                { permission: ["view_transaction_history", "access_billing"] },
+                React.createElement(KhataPage)
+              ),
+          };
         },
       },
       {

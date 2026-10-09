@@ -1,12 +1,12 @@
 import { Router, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { db, cleanupStaleSessions } from '../db';
-import { AuthRequest, authenticateToken, requireOwner } from '../middleware/auth';
+import { AuthRequest, authenticateToken, requireOwner, requirePermission } from '../middleware/auth';
 
 const router = Router();
 
-// GET /api/users (requires owner/co-owner)
-router.get('/', authenticateToken, requireOwner, (req, res) => {
+// GET /api/users (requires manage_employees or owner/co-owner)
+router.get('/', authenticateToken, requirePermission('manage_employees'), (req, res) => {
   try {
     const users = db.prepare("SELECT id, username, email, name, role, permissions, phone, is_active, created_at FROM users WHERE username != 'developer' AND id != 'dev_1'").all();
     const parsedUsers = users.map((u: any) => ({
@@ -20,12 +20,17 @@ router.get('/', authenticateToken, requireOwner, (req, res) => {
   }
 });
 
-// POST /api/users (requires owner/co-owner)
-router.post('/', authenticateToken, requireOwner, (req, res) => {
+// POST /api/users (requires manage_employees or owner/co-owner)
+router.post('/', authenticateToken, requirePermission('manage_employees'), (req: AuthRequest, res: Response) => {
   const { id, username, email, name, role, password, permissions, phone } = req.body;
 
   if (!id || !username || !name || !role || !password) {
     return res.status(400).json({ error: 'Missing required fields (id, username, name, role, password)' });
+  }
+
+  const isOwnerOrCo = req.user?.role === 'owner' || req.user?.role === 'co-owner';
+  if (!isOwnerOrCo && (role === 'owner' || role === 'co-owner')) {
+    return res.status(403).json({ error: 'Only owners can create owner or co-owner accounts' });
   }
 
   try {
@@ -62,8 +67,8 @@ router.post('/', authenticateToken, requireOwner, (req, res) => {
   }
 });
 
-// PUT /api/users/:id (requires owner/co-owner)
-router.put('/:id', authenticateToken, requireOwner, (req, res) => {
+// PUT /api/users/:id (requires manage_employees or owner/co-owner)
+router.put('/:id', authenticateToken, requirePermission('manage_employees'), (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const { email, name, role, permissions, phone, is_active } = req.body;
 
@@ -71,6 +76,14 @@ router.put('/:id', authenticateToken, requireOwner, (req, res) => {
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as any;
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
+    }
+
+    const isOwnerOrCo = req.user?.role === 'owner' || req.user?.role === 'co-owner';
+    if (!isOwnerOrCo && (user.role === 'owner' || user.role === 'co-owner')) {
+      return res.status(403).json({ error: 'Only owners can modify owner or co-owner accounts' });
+    }
+    if (!isOwnerOrCo && role !== undefined && (role === 'owner' || role === 'co-owner')) {
+      return res.status(403).json({ error: 'Only owners can promote accounts to owner or co-owner' });
     }
 
     db.prepare(`
@@ -126,8 +139,8 @@ router.put('/:id/password', authenticateToken, (req: AuthRequest, res: Response)
   }
 });
 
-// DELETE /api/users/:id (requires owner/co-owner)
-router.delete('/:id', authenticateToken, requireOwner, (req: AuthRequest, res: Response) => {
+// DELETE /api/users/:id (requires manage_employees or owner/co-owner)
+router.delete('/:id', authenticateToken, requirePermission('manage_employees'), (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   try {
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as any;
@@ -141,6 +154,11 @@ router.delete('/:id', authenticateToken, requireOwner, (req: AuthRequest, res: R
 
     if (req.user?.id === id) {
       return res.status(400).json({ error: 'You cannot delete your own active account' });
+    }
+
+    const isOwnerOrCo = req.user?.role === 'owner' || req.user?.role === 'co-owner';
+    if (!isOwnerOrCo && (user.role === 'owner' || user.role === 'co-owner')) {
+      return res.status(403).json({ error: 'Only owners can delete owner or co-owner accounts' });
     }
 
     db.prepare('DELETE FROM users WHERE id = ?').run(id);

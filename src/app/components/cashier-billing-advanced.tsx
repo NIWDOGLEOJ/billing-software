@@ -1143,14 +1143,22 @@ export function CashierBillingAdvanced() {
       // Ctrl/Cmd shortcuts
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault();
-        if (isOwner()) {
+        if (isOwner() || hasPermission('access_settings')) {
           setShowSettings(true);
-          } else {
-          toast.error('Access Denied: Only owners can access settings');
+        } else {
+          toast.error('Permission Denied', {
+            description: 'You do not have permission to access system settings (access_settings required).'
+          });
         }
       } else if ((e.ctrlKey || e.metaKey) && e.key === 'h') {
         e.preventDefault();
-        setShowHistory(true);
+        if (isOwner() || hasPermission('view_transaction_history')) {
+          setShowHistory(true);
+        } else {
+          toast.error('Permission Denied', {
+            description: 'You do not have permission to view transaction history (view_transaction_history required).'
+          });
+        }
       } else if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
         e.preventDefault();
         handleNewBill();
@@ -1209,7 +1217,15 @@ export function CashierBillingAdvanced() {
       }
     };
 
-    const handleOpenHistory = () => setShowHistory(true);
+    const handleOpenHistory = () => {
+      if (!isOwner() && !hasPermission('view_transaction_history')) {
+        toast.error('Permission Denied', {
+          description: 'You do not have permission to view transaction history (view_transaction_history required).'
+        });
+        return;
+      }
+      setShowHistory(true);
+    };
     const handleOpenShortcuts = () => setShowShortcuts(true);
 
     window.addEventListener('keydown', handleKeyDown);
@@ -1636,6 +1652,12 @@ export function CashierBillingAdvanced() {
       toast.error('Bill is locked. Cannot modify prices.');
       return;
     }
+    if (!isOwner() && !hasPermission('edit_product_price')) {
+      toast.error('Permission Denied', {
+        description: 'You do not have permission to modify item prices (edit_product_price required).'
+      });
+      return;
+    }
 
     const item = billItems.find(i => i.code === code && i.selectedBatch === selectedBatch);
     if (item) {
@@ -1673,6 +1695,12 @@ export function CashierBillingAdvanced() {
       toast.error('Bill is locked. Cannot modify discounts.');
       return;
     }
+    if (!isOwner() && !hasPermission('apply_discounts')) {
+      toast.error('Permission Denied', {
+        description: 'You do not have permission to apply discounts (apply_discounts required).'
+      });
+      return;
+    }
 
     const item = billItems.find(i => i.code === code && i.selectedBatch === selectedBatch);
     if (item) {
@@ -1694,11 +1722,23 @@ export function CashierBillingAdvanced() {
       toast.error('Bill is locked. Cannot remove items.');
       return;
     }
+    if (!isOwner() && !hasPermission('delete_bill_items')) {
+      toast.error('Permission Denied', {
+        description: 'You do not have permission to remove items from bills (delete_bill_items required).'
+      });
+      return;
+    }
     const item = billItems.find(i => i.code === code && i.selectedBatch === selectedBatch);
     setBillItems((prev) => prev.filter((item) => !(item.code === code && item.selectedBatch === selectedBatch)));
   };
 
   const clearBill = () => {
+    if (billItems.length > 0 && !isOwner() && !hasPermission('delete_bill_items')) {
+      toast.error('Permission Denied', {
+        description: 'You do not have permission to void or clear bills (delete_bill_items required).'
+      });
+      return;
+    }
     setBillItems([]);
     setSearchQuery('');
     setError('');
@@ -1767,6 +1807,12 @@ export function CashierBillingAdvanced() {
    */
   const handleApplyCoupon = async () => {
     if (!couponCode.trim()) return;
+    if (!isOwner() && !hasPermission('apply_discounts')) {
+      toast.error('Permission Denied', {
+        description: 'You do not have permission to apply discounts or coupons (apply_discounts required).'
+      });
+      return;
+    }
     try {
       const res = await api.get<any[]>(`/coupons?code=${encodeURIComponent(couponCode.trim())}`);
       if (res && res.length > 0) {

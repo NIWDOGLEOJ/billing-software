@@ -1,9 +1,16 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { useAuth, User, Permission } from '../contexts/auth-context';
+import { useAuth, User, Permission, UserRole } from '../contexts/auth-context';
 import { useTheme } from '../contexts/theme-context';
 import { useShopDetails } from '../lib/shop-details';
 import { api } from '../utils/api';
 import { toast } from 'sonner';
+import {
+  ALL_PERMISSIONS,
+  ROLE_DEFAULT_PERMISSIONS,
+  ROLE_LABELS,
+  getEffectivePermissions,
+} from '../lib/permissions';
+export { ALL_PERMISSIONS };
 
 const MONO = "'IBM Plex Mono', ui-monospace, monospace";
 
@@ -17,18 +24,6 @@ export function inr(n: number | null | undefined, dec = false): string {
     })
   );
 }
-
-export const ALL_PERMISSIONS: { value: Permission; label: string; description: string }[] = [
-  { value: 'access_billing', label: 'Billing system', description: 'Can access the billing interface' },
-  { value: 'edit_product_price', label: 'Edit price', description: 'Can modify product prices during checkout' },
-  { value: 'delete_bill_items', label: 'Delete bill items', description: 'Can remove items from bills' },
-  { value: 'apply_discounts', label: 'Apply discounts', description: 'Can apply discounts to bills' },
-  { value: 'view_analytics', label: 'View analytics', description: 'Can access sales analytics dashboard' },
-  { value: 'access_inventory', label: 'Inventory', description: 'Can manage inventory and catalog' },
-  { value: 'view_transaction_history', label: 'Bill history', description: 'Can view transaction receipts' },
-  { value: 'generate_reports', label: 'Generate reports', description: 'Can create and export reports' },
-  { value: 'access_settings', label: 'Settings', description: 'Can access system configurations' },
-];
 
 const DENOMS = [500, 200, 100, 50, 20, 10, 5, 2, 1];
 
@@ -69,16 +64,49 @@ export function EmployeeManagement() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   // Add / Edit Form State
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<{
+    id: string;
+    name: string;
+    username: string;
+    email: string;
+    phone: string;
+    password: string;
+    role: UserRole;
+    permissions: Permission[];
+  }>({
     id: '',
     name: '',
     username: '',
     email: '',
     phone: '',
     password: '',
-    role: 'employee',
-    permissions: ['access_billing', 'view_transaction_history'] as Permission[]
+    role: 'cashier',
+    permissions: ROLE_DEFAULT_PERMISSIONS.cashier,
   });
+
+  const handleRoleChange = (newRole: UserRole) => {
+    const defaultPerms = ROLE_DEFAULT_PERMISSIONS[newRole] || ROLE_DEFAULT_PERMISSIONS.employee;
+    setFormData(prev => ({
+      ...prev,
+      role: newRole,
+      permissions: defaultPerms,
+    }));
+  };
+
+  const handleResetToRoleDefaults = async () => {
+    if (!selectedEmployee) return;
+    const role = (selectedEmployee.role || 'employee').toLowerCase() as UserRole;
+    const defaultPerms = ROLE_DEFAULT_PERMISSIONS[role] || ROLE_DEFAULT_PERMISSIONS.employee;
+    try {
+      await api.put(`/users/${selectedEmployee.id}`, { permissions: defaultPerms });
+      setEmployees(prev =>
+        prev.map(u => (u.id === selectedEmployee.id ? { ...u, permissions: defaultPerms } : u))
+      );
+      flash(`Reset permissions to ${ROLE_LABELS[role]?.label || role} defaults`);
+    } catch (err: any) {
+      toast.error('Failed to update permissions: ' + err.message);
+    }
+  };
 
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -392,8 +420,8 @@ export function EmployeeManagement() {
     setSelectedId(created.id);
     setAddOpen(false);
     setFormData({
-      id: '', name: '', username: '', email: '', phone: '', password: '', role: 'employee',
-      permissions: ['access_billing', 'view_transaction_history']
+      id: '', name: '', username: '', email: '', phone: '', password: '', role: 'cashier',
+      permissions: ROLE_DEFAULT_PERMISSIONS.cashier
     });
     flash(`${created.name} added to staff`);
   };
@@ -643,8 +671,8 @@ export function EmployeeManagement() {
           <button
             onClick={() => {
               setFormData({
-                id: '', name: '', username: '', email: '', phone: '', password: '', role: 'employee',
-                permissions: ['access_billing', 'view_transaction_history']
+                id: '', name: '', username: '', email: '', phone: '', password: '', role: 'cashier',
+                permissions: ROLE_DEFAULT_PERMISSIONS.cashier
               });
               setAddOpen(true);
             }}
@@ -857,11 +885,20 @@ export function EmployeeManagement() {
 
             {/* Permissions Card */}
             <div className="bg-[var(--panel)] border border-[var(--border)] rounded-[10px] p-4">
-              <div
-                className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--ink3)]"
-                style={{ fontFamily: MONO }}
-              >
-                Permissions
+              <div className="flex items-center justify-between">
+                <div
+                  className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--ink3)]"
+                  style={{ fontFamily: MONO }}
+                >
+                  Permissions · {ROLE_LABELS[selectedEmployee.role as UserRole]?.label || selectedEmployee.role}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleResetToRoleDefaults}
+                  className="text-[11px] font-semibold text-[var(--accent)] hover:underline bg-transparent border-0 cursor-pointer"
+                >
+                  Reset to role defaults
+                </button>
               </div>
               <div className="flex flex-wrap gap-2 mt-3">
                 {ALL_PERMISSIONS.map(pm => {
@@ -870,6 +907,7 @@ export function EmployeeManagement() {
                     <button
                       key={pm.value}
                       onClick={() => handleTogglePermission(pm.value)}
+                      title={pm.description}
                       className={`px-3 py-1.5 rounded-[16px] text-[12px] font-semibold cursor-pointer border transition-colors ${
                         on
                           ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent-hi)]'
@@ -881,8 +919,9 @@ export function EmployeeManagement() {
                   );
                 })}
               </div>
-              <div className="text-[11px] text-[var(--ink3)] mt-3" style={{ fontFamily: MONO }}>
-                {(selectedEmployee.permissions || []).length} of {ALL_PERMISSIONS.length} granted · tap to change
+              <div className="text-[11px] text-[var(--ink3)] mt-3 flex items-center justify-between" style={{ fontFamily: MONO }}>
+                <span>{(selectedEmployee.permissions || []).length} of {ALL_PERMISSIONS.length} granted · tap to toggle</span>
+                <span className="text-[10px] text-[var(--ink4)]">Changes auto-save to cloud & LAN</span>
               </div>
             </div>
 
@@ -1015,12 +1054,16 @@ export function EmployeeManagement() {
                   <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Role</label>
                   <select
                     value={formData.role}
-                    onChange={e => setFormData({ ...formData, role: e.target.value })}
+                    onChange={e => handleRoleChange(e.target.value as UserRole)}
                     className="w-full h-[44px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)] cursor-pointer"
                   >
-                    <option value="employee">Employee</option>
-                    <option value="co-owner">Co-owner</option>
-                    <option value="owner">Owner</option>
+                    <option value="cashier">Cashier (Front counter billing)</option>
+                    <option value="manager">Store Manager (Billing, inventory, staff)</option>
+                    <option value="inventory_manager">Inventory Manager (Stock & catalog)</option>
+                    <option value="accountant">Accountant (Sales, GST, reports)</option>
+                    <option value="employee">General Staff (Basic register)</option>
+                    <option value="co-owner">Co-Owner (All privileges)</option>
+                    <option value="owner">Store Owner (Full privileges)</option>
                   </select>
                 </div>
               </div>
@@ -1127,12 +1170,16 @@ export function EmployeeManagement() {
                 <label className="block text-[12px] font-semibold text-[var(--ink2)] mb-1.5">Role</label>
                 <select
                   value={formData.role}
-                  onChange={e => setFormData({ ...formData, role: e.target.value })}
+                  onChange={e => setFormData({ ...formData, role: e.target.value as UserRole })}
                   className="w-full h-[44px] px-3 text-[14px] bg-[var(--sub)] border border-[var(--border2)] rounded-[7px] text-[var(--ink)] cursor-pointer"
                 >
-                  <option value="employee">Employee</option>
-                  <option value="co-owner">Co-owner</option>
-                  <option value="owner">Owner</option>
+                  <option value="cashier">Cashier (Front counter billing)</option>
+                  <option value="manager">Store Manager (Billing, inventory, staff)</option>
+                  <option value="inventory_manager">Inventory Manager (Stock & catalog)</option>
+                  <option value="accountant">Accountant (Sales, GST, reports)</option>
+                  <option value="employee">General Staff (Basic register)</option>
+                  <option value="co-owner">Co-Owner (All privileges)</option>
+                  <option value="owner">Store Owner (Full privileges)</option>
                 </select>
               </div>
             </div>

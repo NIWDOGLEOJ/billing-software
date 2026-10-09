@@ -86,7 +86,7 @@ export function SectorNav({
 }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, logout, isOnBreak, startBreak, endBreak, activeShift } = useAuth();
+  const { user, logout, isOnBreak, startBreak, endBreak, activeShift, hasPermission, isOwner } = useAuth();
   const { theme, setTheme } = useTheme();
   const shopDetails = useShopDetails();
 
@@ -111,12 +111,28 @@ export function SectorNav({
     [sectorId],
   );
 
+  const accessibleCoreLinks = useMemo(() => {
+    return CORE_LINKS.filter(link => {
+      if (isOwner()) return true;
+      if (link.to === '/') return hasPermission('access_billing');
+      if (link.to === '/analytics') return hasPermission('view_analytics') || hasPermission('access_inventory');
+      if (link.to === '/employees') return hasPermission('manage_employees');
+      if (link.to === '/attendance') return true;
+      if (link.to === '/employee-performance') return hasPermission('manage_employees') || hasPermission('view_analytics');
+      if (link.to === '/config') return hasPermission('access_settings');
+      return true;
+    });
+  }, [hasPermission, isOwner]);
+
   const sectorLinks = useMemo(() => {
     return sector.links.filter(l => {
       if (l.to === '/gst' && !gstLedger) return false;
+      if (isOwner()) return true;
+      if (l.to === '/gst') return hasPermission('view_analytics') || hasPermission('generate_reports');
+      if (l.to === '/khata') return hasPermission('view_transaction_history') || hasPermission('access_billing');
       return true;
     });
-  }, [sector.links, gstLedger]);
+  }, [sector.links, gstLedger, hasPermission, isOwner]);
 
   const isDark = theme === 'dark';
   const dot = `oklch(${isDark ? '0.74 0.13' : '0.58 0.14'} ${sector.hue})`;
@@ -219,7 +235,7 @@ export function SectorNav({
 
         {/* Core links, then a rule, then sector links. */}
         <nav className="flex items-center gap-0.5 px-3 min-w-0 overflow-x-auto">
-          {CORE_LINKS.map(link => {
+          {accessibleCoreLinks.map(link => {
             const active = location.pathname === link.to;
             return (
               <Link

@@ -2,24 +2,15 @@ import { createContext, useContext, useState, useEffect, useCallback, ReactNode 
 import { api, setToken, clearToken } from '../utils/api';
 import { isMobileDevice } from '../lib/device';
 
-export type Permission =
-  | 'access_billing'
-  | 'edit_product_price'
-  | 'delete_bill_items'
-  | 'apply_discounts'
-  | 'view_analytics'
-  | 'access_inventory'
-  | 'view_transaction_history'
-  | 'generate_reports'
-  | 'access_settings'
-  | 'manage_employees';
+import { Permission, UserRole, getEffectivePermissions, hasUserPermission } from '../lib/permissions';
+export type { Permission, UserRole } from '../lib/permissions';
 
 export interface User {
   id: string;
   username: string;
   email: string;
   name: string;
-  role: 'owner' | 'co-owner' | 'employee';
+  role: UserRole;
   permissions: Permission[];
   phone?: string;
   createdAt: string;
@@ -68,7 +59,7 @@ interface AuthContextType {
   activeShift: ShiftRecord | null;
   startShift: (initialCash: number) => Promise<void>;
   endShift: (actualCash: number, actualUpi: number, actualCard: number, notes?: string) => Promise<ShiftRecord>;
-  hasPermission: (permission: Permission) => boolean;
+  hasPermission: (permission: Permission | Permission[]) => boolean;
   isOwner: () => boolean;
   currentSession: LoginSession | null;
   startBreak: () => Promise<void>;
@@ -372,13 +363,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       setToken(res.token);
 
+      const userRole = (res.user.role || 'employee').toLowerCase() as UserRole;
+      const effectivePerms = getEffectivePermissions({
+        role: userRole,
+        permissions: res.user.permissions
+      });
+
       const parsedUser: User = {
         id: res.user.id,
         username: res.user.username,
         email: res.user.email || '',
         name: res.user.name,
-        role: res.user.role,
-        permissions: res.user.permissions || [],
+        role: userRole,
+        permissions: effectivePerms,
         phone: res.user.phone || '',
         createdAt: res.user.created_at || new Date().toISOString(),
         isActive: true
@@ -509,10 +506,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // on every provider render, so analytics re-fetched /bills and /shifts — and
   // employee-management re-fetched the whole staff list — every time any auth
   // state changed anywhere. Keeping their identity stable stops that.
-  const hasPermission = useCallback((permission: Permission): boolean => {
-    if (!user) return false;
-    if (user.role === 'owner' || user.role === 'co-owner') return true;
-    return user.permissions.includes(permission);
+  const hasPermission = useCallback((permission: Permission | Permission[]): boolean => {
+    return hasUserPermission(user, permission);
   }, [user]);
 
   const isOwner = useCallback((): boolean => {

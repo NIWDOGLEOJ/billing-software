@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { db, switchDatabase, getDbPath } from '../db';
-import { AuthRequest, authenticateToken, requireOwner } from '../middleware/auth';
+import { AuthRequest, authenticateToken, requireOwner, requirePermission } from '../middleware/auth';
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
@@ -22,8 +22,8 @@ router.get('/', authenticateToken, (req, res) => {
   }
 });
 
-// PUT /api/settings (requires owner/co-owner)
-router.put('/', authenticateToken, requireOwner, (req: AuthRequest, res: Response) => {
+// PUT /api/settings (requires access_settings permission or owner/co-owner)
+router.put('/', authenticateToken, requirePermission('access_settings'), (req: AuthRequest, res: Response) => {
   const settingsObj = req.body;
   if (!settingsObj || typeof settingsObj !== 'object') {
     return res.status(400).json({ error: 'Settings object is required' });

@@ -1,12 +1,12 @@
 import { Router, Response } from 'express';
 import { db } from '../db';
-import { AuthRequest, authenticateToken } from '../middleware/auth';
+import { AuthRequest, authenticateToken, requirePermission } from '../middleware/auth';
 import { emailManager } from '../services/emailManager';
 
 const router = Router();
 
 // GET /api/bills (query history)
-router.get('/', authenticateToken, (req, res) => {
+router.get('/', authenticateToken, requirePermission(['access_billing', 'view_transaction_history', 'view_analytics', 'generate_reports']), (req, res) => {
   try {
     const bills = db.prepare("SELECT * FROM bills WHERE cashier_id != 'dev_1' ORDER BY date DESC").all();
     // Parse items JSON in each bill
@@ -23,7 +23,7 @@ router.get('/', authenticateToken, (req, res) => {
 });
 
 // POST /api/bills (save completed checkout)
-router.post('/', authenticateToken, (req: AuthRequest, res: Response) => {
+router.post('/', authenticateToken, requirePermission('access_billing'), (req: AuthRequest, res: Response) => {
   const {
     id,
     bill_number,

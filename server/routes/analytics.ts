@@ -1,15 +1,10 @@
 import { Router } from 'express';
 import { db } from '../db';
-import { authenticateToken, requireOwner, AuthRequest } from '../middleware/auth';
+import { authenticateToken, requireOwner, requirePermission, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
-router.get('/summary', authenticateToken, (req: AuthRequest, res) => {
-  // If employee, verify view_analytics permission
-  if (req.user?.role === 'employee' && !req.user.permissions.includes('view_analytics')) {
-    return res.status(403).json({ error: 'Permission required: view_analytics' });
-  }
-
+router.get('/summary', authenticateToken, requirePermission('view_analytics'), (req: AuthRequest, res) => {
   try {
     const bills = db.prepare('SELECT * FROM bills').all() as any[];
     const products = db.prepare('SELECT * FROM products').all() as any[];
@@ -82,12 +77,7 @@ router.get('/summary', authenticateToken, (req: AuthRequest, res) => {
 });
 
 // GET /api/analytics/sales (time series data for charts)
-router.get('/sales', authenticateToken, (req: AuthRequest, res) => {
-  // If employee, verify view_analytics permission
-  if (req.user?.role === 'employee' && !req.user.permissions.includes('view_analytics')) {
-    return res.status(403).json({ error: 'Permission required: view_analytics' });
-  }
-
+router.get('/sales', authenticateToken, requirePermission('view_analytics'), (req: AuthRequest, res) => {
   const { range } = req.query; // 'today' | 'week' | 'month' | 'year'
 
   try {
@@ -151,8 +141,8 @@ router.get('/sales', authenticateToken, (req: AuthRequest, res) => {
   }
 });
 
-// GET /api/analytics/employee-performance (requires owner/co-owner)
-router.get('/employee-performance', authenticateToken, requireOwner, (req, res) => {
+// GET /api/analytics/employee-performance (requires manage_employees or view_analytics)
+router.get('/employee-performance', authenticateToken, requirePermission(['manage_employees', 'view_analytics']), (req, res) => {
   try {
     const bills = db.prepare("SELECT cashier_id, cashier_name, total FROM bills WHERE cashier_id != 'dev_1'").all() as any[];
     const sessions = db.prepare("SELECT user_id, duration FROM login_sessions WHERE user_id != 'dev_1'").all() as any[];
